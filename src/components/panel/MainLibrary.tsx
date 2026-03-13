@@ -44,15 +44,15 @@ import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 
 interface DropdownMenuProps {
-  buttonContent: any;
+  buttonContent: React.ReactNode;
   buttonTitle: string;
-  children: any;
+  children: React.ReactNode;
   contentClassName: string;
 }
 
 interface FilterOptionProps {
   filterCriteria: FilterCriteria;
-  setFilterCriteria(criteria: any): void;
+  setFilterCriteria(criteria: FilterCriteria | ((prev: FilterCriteria) => FilterCriteria)): void;
 }
 
 interface KeyValueLabel {
@@ -85,11 +85,11 @@ interface MainLibraryProps {
   libraryViewMode: LibraryViewMode;
   multiSelectedPaths: Array<string>;
   onClearSelection(): void;
-  onContextMenu(event: any, path: string): void;
+  onContextMenu(event: React.MouseEvent, path: string): void;
   onContinueSession(): void;
-  onEmptyAreaContextMenu(event: any): void;
+  onEmptyAreaContextMenu(event: React.MouseEvent): void;
   onGoHome(): void;
-  onImageClick(path: string, event: any): void;
+  onImageClick(path: string, event: React.MouseEvent): void;
   onImageDoubleClick(path: string): void;
   onLibraryRefresh(): void;
   onOpenFolder(): void;
@@ -134,8 +134,8 @@ interface ThumbnailProps {
   data: string | undefined;
   isActive: boolean;
   isSelected: boolean;
-  onContextMenu(e: any): void;
-  onImageClick(path: string, event: any): void;
+  onContextMenu(e: React.MouseEvent): void;
+  onImageClick(path: string, event: React.MouseEvent): void;
   onImageDoubleClick(path: string): void;
   onLoad(): void;
   path: string;
@@ -168,9 +168,9 @@ interface ThumbnailAspectRatioProps {
 interface ViewOptionsProps {
   filterCriteria: FilterCriteria;
   libraryViewMode: LibraryViewMode;
-  onSelectSize(size: ThumbnailSize): any;
-  onSelectAspectRatio(aspectRatio: ThumbnailAspectRatio): any;
-  setFilterCriteria(criteria: Partial<FilterCriteria>): void;
+  onSelectSize(size: ThumbnailSize): void;
+  onSelectAspectRatio(aspectRatio: ThumbnailAspectRatio): void;
+  setFilterCriteria(criteria: FilterCriteria | ((prev: FilterCriteria) => FilterCriteria)): void;
   setLibraryViewMode(mode: LibraryViewMode): void;
   setSortCriteria(criteria: SortCriteria): void;
   sortCriteria: SortCriteria;
@@ -185,7 +185,9 @@ const THUMBNAIL_SIZE_VALUES: Array<{ id: ThumbnailSize; size: number }> = [
   { id: ThumbnailSize.Large, size: 320 },
 ];
 
-const getRatingFilterOptions = (t: any): Array<KeyValueLabel> => [
+const getRatingFilterOptions = (
+  t: (key: string, options?: Record<string, unknown>) => string,
+): Array<KeyValueLabel> => [
   { value: 0, label: t('library.showAll') },
   { value: 1, label: t('library.ratingAndUp', { count: 1 }) },
   { value: 2, label: t('library.ratingAndUp', { count: 2 }) },
@@ -194,20 +196,20 @@ const getRatingFilterOptions = (t: any): Array<KeyValueLabel> => [
   { value: 5, label: t('library.ratingOnly', { count: 5 }) },
 ];
 
-const getRawStatusOptions = (t: any): Array<KeyValueLabel> => [
+const getRawStatusOptions = (t: (key: string) => string): Array<KeyValueLabel> => [
   { key: RawStatus.All, label: t('library.allTypes') },
   { key: RawStatus.RawOnly, label: t('library.rawOnly') },
   { key: RawStatus.NonRawOnly, label: t('library.nonRawOnly') },
   { key: RawStatus.RawOverNonRaw, label: t('library.preferRaw') },
 ];
 
-const getThumbnailSizeOptions = (t: any): Array<ThumbnailSizeOption> => [
+const getThumbnailSizeOptions = (t: (key: string) => string): Array<ThumbnailSizeOption> => [
   { id: ThumbnailSize.Small, label: t('library.small'), size: 160 },
   { id: ThumbnailSize.Medium, label: t('library.medium'), size: 240 },
   { id: ThumbnailSize.Large, label: t('library.large'), size: 320 },
 ];
 
-const getThumbnailAspectRatioOptions = (t: any): Array<ThumbnailAspectRatioOption> => [
+const getThumbnailAspectRatioOptions = (t: (key: string) => string): Array<ThumbnailAspectRatioOption> => [
   { id: ThumbnailAspectRatio.Cover, label: t('library.fillSquare') },
   { id: ThumbnailAspectRatio.Contain, label: t('library.originalRatio') },
 ];
@@ -256,8 +258,8 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
   }, [isSearchActive]);
 
   useEffect(() => {
-    function handleClickOutside(event: any) {
-      if (containerRef.current && !containerRef.current.contains(event.target) && tags.length === 0 && !text) {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node) && tags.length === 0 && !text) {
         setIsSearchActive(false);
       }
     }
@@ -461,7 +463,7 @@ function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionP
   const [lastClickedColor, setLastClickedColor] = useState<string | null>(null);
   const allColors = useMemo(() => [...COLOR_LABELS, { name: 'none', color: '#9ca3af' }], []);
 
-  const handleColorClick = (colorName: string, event: any) => {
+  const handleColorClick = (colorName: string, event: React.MouseEvent) => {
     const { ctrlKey, metaKey, shiftKey } = event;
     const isCtrlPressed = ctrlKey || metaKey;
     const currentColors = filterCriteria.colors || [];
@@ -503,7 +505,7 @@ function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionP
             <button
               key={color.name}
               data-tooltip={title}
-              onClick={(e: any) => handleColorClick(color.name, e)}
+              onClick={(e: React.MouseEvent) => handleColorClick(color.name, e)}
               className="w-6 h-6 rounded-full focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-surface transition-transform hover:scale-110"
               role="menuitem"
             >
@@ -525,11 +527,11 @@ function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionP
 
 function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName = 'w-56' }: DropdownMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<any>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: any) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -645,11 +647,11 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
   const rawStatusOptions = getRawStatusOptions(t);
 
   const handleRatingFilterChange = (rating: number | undefined) => {
-    setFilterCriteria((prev: Partial<FilterCriteria>) => ({ ...prev, rating }));
+    setFilterCriteria((prev: FilterCriteria) => ({ ...prev, rating: rating ?? 0 }));
   };
 
   const handleRawStatusChange = (rawStatus: RawStatus | undefined) => {
-    setFilterCriteria((prev: Partial<FilterCriteria>) => ({ ...prev, rawStatus }));
+    setFilterCriteria((prev: FilterCriteria) => ({ ...prev, rawStatus: rawStatus ?? RawStatus.All }));
   };
 
   return (
@@ -991,7 +993,7 @@ function Thumbnail({
   return (
     <div
       className={`aspect-square bg-surface rounded-md overflow-hidden cursor-pointer group relative transition-all duration-150 ${ringClass}`}
-      onClick={(e: any) => {
+      onClick={(e: React.MouseEvent) => {
         e.stopPropagation();
         onImageClick(path, e);
       }}
@@ -1085,6 +1087,30 @@ function Thumbnail({
   );
 }
 
+type RowItem =
+  | { type: 'header'; path: string; count: number }
+  | { type: 'images'; images: ImageFile[]; startIndex: number }
+  | { type: 'footer' };
+
+interface RowProps {
+  index?: number;
+  style?: React.CSSProperties;
+  rows: RowItem[];
+  activePath: string | null;
+  multiSelectedPaths: string[];
+  onContextMenu: (event: React.MouseEvent, path: string) => void;
+  onImageClick: (path: string, event: React.MouseEvent) => void;
+  onImageDoubleClick: (path: string) => void;
+  thumbnails: Record<string, string>;
+  thumbnailAspectRatio: ThumbnailAspectRatio;
+  loadedThumbnails: Set<string>;
+  imageRatings: Record<string, number>;
+  rootPath: string | null;
+  itemWidth: number;
+  outerPadding: number;
+  gap: number;
+}
+
 const Row = ({
   index,
   style,
@@ -1102,13 +1128,13 @@ const Row = ({
   itemWidth,
   outerPadding,
   gap,
-}: any) => {
+}: RowProps) => {
   const { t } = useTranslation();
-  const row = rows[index];
+  const row = rows[index!];
   if (row.type === 'footer') return null;
   const shiftedStyle = {
     ...style,
-    transform: (style.transform as string).replace(
+    transform: ((style as React.CSSProperties).transform as string).replace(
       /translateY\(([^)]+)\)/,
       (_: string, y: string) => `translateY(${parseFloat(y) + outerPadding}px)`,
     ),
@@ -1172,7 +1198,7 @@ const Row = ({
             data={thumbnails[imageFile.path]}
             isActive={activePath === imageFile.path}
             isSelected={multiSelectedPaths.includes(imageFile.path)}
-            onContextMenu={(e: any) => onContextMenu(e, imageFile.path)}
+            onContextMenu={(e: React.MouseEvent) => onContextMenu(e, imageFile.path)}
             onImageClick={onImageClick}
             onImageDoubleClick={onImageDoubleClick}
             onLoad={() => loadedThumbnails.add(imageFile.path)}
@@ -1386,14 +1412,14 @@ export default function MainLibrary({
 
   useEffect(() => {
     invoke(Invokes.GetSupportedFileTypes)
-      .then((types: any) => setSupportedTypes(types))
+      .then((types) => setSupportedTypes(types as SupportedTypes))
       .catch((err) => console.error('Failed to load supported file types:', err));
   }, []);
 
   useEffect(() => {
-    const handleWheel = (event: any) => {
+    const handleWheel = (event: WheelEvent) => {
       const container = libraryContainerRef.current;
-      if (!container || !container.contains(event.target)) {
+      if (!container || !container.contains(event.target as Node)) {
         return;
       }
 
@@ -1634,7 +1660,7 @@ export default function MainLibrary({
               const rowHeight = itemWidth + ITEM_GAP;
               const headerHeight = 40;
 
-              const rows: any[] = [];
+              const rows: RowItem[] = [];
 
               if (libraryViewMode === LibraryViewMode.Recursive && groups) {
                 groups.forEach((group) => {

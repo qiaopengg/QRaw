@@ -1,7 +1,7 @@
 import { Theme } from '../components/ui/AppProperties';
 
 export interface ThemeProps {
-  cssVariables: any;
+  cssVariables: Record<string, string>;
   id: Theme;
   name: string;
   splashImage: string;
@@ -11,7 +11,7 @@ export const THEMES: Array<ThemeProps> = [
   {
     id: Theme.Dark,
     name: 'Dark',
-    splashImage: '/2.JPG',
+    splashImage: '/splash-dark.jpg',
     cssVariables: {
       '--color-bg-primary-rgb': '45, 45, 45',
       '--opacity-bg-primary': '0.6',
@@ -30,7 +30,7 @@ export const THEMES: Array<ThemeProps> = [
   {
     id: Theme.Light,
     name: 'Light',
-    splashImage: '/1.JPEG',
+    splashImage: '/splash-light.jpg',
     cssVariables: {
       '--color-bg-primary-rgb': '250, 250, 250',
       '--opacity-bg-primary': '0.8',
