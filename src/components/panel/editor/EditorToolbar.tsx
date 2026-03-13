@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef, useMemo } from 'react';
 import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo, Waves } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { SelectedImage } from '../../ui/AppProperties';
 import { IconAperture, IconCalendar, IconClock, IconFocalLength, IconIso, IconShutter } from './ExifIcons';
 import Text from '../../ui/Text';
@@ -57,6 +58,8 @@ const EditorToolbar = memo(
     const [isHistoryVisible, setIsHistoryVisible] = useState(false);
     const historyContainerRef = useRef<HTMLDivElement>(null);
     const historyButtonRef = useRef<HTMLDivElement>(null);
+
+    const { t } = useTranslation();
 
     const showResolution = selectedImage.width > 0 && selectedImage.height > 0;
     const [displayedResolution, setDisplayedResolution] = useState('');
@@ -154,7 +157,7 @@ const EditorToolbar = memo(
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isHistoryVisible]);
 
-    const prevNamesRef = useRef<string[]>(['Initial State']);
+    const prevNamesRef = useRef<string[]>([t('editorToolbar.initialState')]);
 
     const historyNames = useMemo(() => {
       if (!adjustmentsHistory || adjustmentsHistory.length === 0) return [];
@@ -241,7 +244,7 @@ const EditorToolbar = memo(
 
       for (let i = newNames.length; i < adjustmentsHistory.length; i++) {
         if (i === 0) {
-          newNames[i] = 'Initial State';
+          newNames[i] = t('editorToolbar.initialState');
           continue;
         }
 
@@ -302,7 +305,7 @@ const EditorToolbar = memo(
 
         const uniqueChanged = Array.from(new Set(changed));
 
-        if (uniqueChanged.length === 0) newNames[i] = 'Adjustment';
+        if (uniqueChanged.length === 0) newNames[i] = t('editorToolbar.adjustment');
         else if (uniqueChanged.length > 2) newNames[i] = `${uniqueChanged.slice(0, 2).join(', ')}...`;
         else newNames[i] = uniqueChanged.join(', ');
       }
@@ -337,7 +340,7 @@ const EditorToolbar = memo(
             className="bg-surface text-text-primary p-2 rounded-full hover:bg-card-active transition-colors flex-shrink-0"
             onClick={onBackToLibrary}
             onKeyDown={handleButtonKeyDown}
-            data-tooltip="Back to Library"
+            data-tooltip={t('editorToolbar.backToLibrary')}
           >
             <ArrowLeft size={20} />
           </button>
@@ -452,7 +455,7 @@ const EditorToolbar = memo(
                 )}
               >
                 {exifData.shutter && (
-                  <div className="flex items-center gap-1.5" data-tooltip="Shutter Speed">
+                  <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.shutterSpeed')}>
                     <span className="text-text-secondary">
                       <IconShutter />
                     </span>
@@ -462,7 +465,7 @@ const EditorToolbar = memo(
                   </div>
                 )}
                 {exifData.fNumber && (
-                  <div className="flex items-center gap-1.5" data-tooltip="Aperture">
+                  <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.aperture')}>
                     <span className="text-text-secondary">
                       <IconAperture />
                     </span>
@@ -472,7 +475,7 @@ const EditorToolbar = memo(
                   </div>
                 )}
                 {exifData.iso && (
-                  <div className="flex items-center gap-1.5" data-tooltip="ISO">
+                  <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.iso')}>
                     <span className="text-text-secondary">
                       <IconIso />
                     </span>
@@ -482,7 +485,7 @@ const EditorToolbar = memo(
                   </div>
                 )}
                 {exifData.focal && (
-                  <div className="flex items-center gap-1.5" data-tooltip="Focal Length">
+                  <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.focalLength')}>
                     <span className="text-text-secondary">
                       <IconFocalLength />
                     </span>
@@ -535,7 +538,7 @@ const EditorToolbar = memo(
                 e.preventDefault();
                 setIsHistoryVisible((prev) => !prev);
               }}
-              data-tooltip="Undo (Ctrl+Z) or History (Right-click)"
+              data-tooltip={t('editorToolbar.undoHistory')}
             >
               <Undo size={20} />
             </button>
@@ -548,7 +551,7 @@ const EditorToolbar = memo(
                 e.preventDefault();
                 setIsHistoryVisible((prev) => !prev);
               }}
-              data-tooltip="Redo (Ctrl+Y) or History (Right-click)"
+              data-tooltip={t('editorToolbar.redoHistory')}
             >
               <Redo size={20} />
             </button>
@@ -620,7 +623,7 @@ const EditorToolbar = memo(
             )}
             onClick={onToggleWaveform}
             onKeyDown={handleButtonKeyDown}
-            data-tooltip="Toggle Waveform (W)"
+            data-tooltip={t('editorToolbar.toggleWaveform')}
           >
             <Waves size={20} />
           </button>
@@ -634,7 +637,7 @@ const EditorToolbar = memo(
             )}
             onClick={onToggleShowOriginal}
             onKeyDown={handleButtonKeyDown}
-            data-tooltip={showOriginal ? 'Show Edited (B)' : 'Show Original (B)'}
+            data-tooltip={showOriginal ? t('editorToolbar.showEdited') : t('editorToolbar.showOriginal')}
           >
             {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
           </button>
@@ -642,7 +645,7 @@ const EditorToolbar = memo(
             className="bg-surface text-text-primary p-2 rounded-full hover:bg-card-active transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"
             onClick={onToggleFullScreen}
             onKeyDown={handleButtonKeyDown}
-            data-tooltip="Toggle Fullscreen (F)"
+            data-tooltip={t('editorToolbar.toggleFullscreen')}
           >
             <div className="relative w-5 h-5 flex items-center justify-center">
               <Maximize size={20} />

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { Save, CheckCircle, XCircle, Loader, Ban } from 'lucide-react';
@@ -207,6 +208,7 @@ export default function ExportPanel({
     handleApplyPreset,
     currentSettingsObject,
   } = useExportSettings();
+  const { t } = useTranslation();
 
   const initDone = useRef(false);
   useEffect(() => {
@@ -489,7 +491,7 @@ export default function ExportPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Export</h2>
+        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('export.title')}</h2>
       </div>
       <div className="flex-grow overflow-y-auto p-4 text-text-secondary space-y-6">
         {canExport ? (
@@ -501,7 +503,7 @@ export default function ExportPanel({
               onApplyPreset={handleApplyPreset}
             />
 
-            <Section title="File Settings">
+            <Section title={t('export.fileSettings')}>
               <div className="grid grid-cols-3 gap-2">
                 {FILE_FORMATS.map((format: FileFormat) => (
                   <button
@@ -532,7 +534,7 @@ export default function ExportPanel({
             </Section>
 
             {isBatchMode && (
-              <Section title="File Naming">
+              <Section title={t('export.fileNaming')}>
                 <input
                   className="w-full bg-bg-primary border border-surface rounded-md p-2 text-sm text-text-primary focus:ring-accent focus:border-accent"
                   disabled={isExporting}
@@ -556,8 +558,13 @@ export default function ExportPanel({
               </Section>
             )}
 
-            <Section title="Image Sizing">
-              <Switch label="Resize to Fit" checked={enableResize} onChange={setEnableResize} disabled={isExporting} />
+            <Section title={t('export.imageSizing')}>
+              <Switch
+                label={t('export.resizeToFit')}
+                checked={enableResize}
+                onChange={setEnableResize}
+                disabled={isExporting}
+              />
               {enableResize && (
                 <div className="space-y-4 pl-2 border-l-2 border-surface">
                   <div className="flex items-center gap-2">
@@ -581,31 +588,36 @@ export default function ExportPanel({
                   <Switch
                     checked={dontEnlarge}
                     disabled={isExporting}
-                    label="Don't Enlarge"
+                    label={t('export.dontEnlarge')}
                     onChange={setDontEnlarge}
                   />
                 </div>
               )}
             </Section>
 
-            <Section title="Metadata">
+            <Section title={t('export.metadata')}>
               <Switch
                 checked={keepMetadata}
                 disabled={isExporting}
-                label="Keep Original Metadata"
+                label={t('export.keepOriginalMetadata')}
                 onChange={setKeepMetadata}
               />
               {keepMetadata && (
                 <div className="pl-2 border-l-2 border-surface">
-                  <Switch label="Remove GPS Data" checked={stripGps} onChange={setStripGps} disabled={isExporting} />
+                  <Switch
+                    label={t('export.removeGpsData')}
+                    checked={stripGps}
+                    onChange={setStripGps}
+                    disabled={isExporting}
+                  />
                 </div>
               )}
             </Section>
 
             {isEditorContext && (
-              <Section title="Masks">
+              <Section title={t('export.masks')}>
                 <Switch
-                  label="Export masks as separate files"
+                  label={t('export.exportMasksAsSeparate')}
                   checked={exportMasks}
                   onChange={setExportMasks}
                   disabled={isExporting}
@@ -613,9 +625,9 @@ export default function ExportPanel({
               </Section>
             )}
 
-            <Section title="Watermark">
+            <Section title={t('export.watermark')}>
               <Switch
-                label="Add Watermark"
+                label={t('export.addWatermark')}
                 checked={enableWatermark}
                 onChange={setEnableWatermark}
                 disabled={isExporting}
@@ -683,16 +695,16 @@ export default function ExportPanel({
             </Section>
           </>
         ) : (
-          <p className="text-center text-text-tertiary mt-4">No image selected for export.</p>
+          <p className="text-center text-text-tertiary mt-4">{t('export.noImageSelected')}</p>
         )}
       </div>
 
       <div className="p-4 border-t border-surface flex-shrink-0 space-y-3">
         <div className="text-center text-xs text-text-tertiary h-4">
           {isEstimating ? (
-            <span className="italic">Estimating size...</span>
+            <span className="italic">{t('export.estimatingSize')}</span>
           ) : estimatedSize !== null ? (
-            <span>Estimated file size: ~{formatBytes(estimatedSize)}</span>
+            <span>{t('export.estimatedFileSize', { size: formatBytes(estimatedSize) })}</span>
           ) : null}
         </div>
         <Button
@@ -715,28 +727,31 @@ export default function ExportPanel({
             <>
               <span className="flex items-center group-hover:hidden">
                 <Loader size={18} className="animate-spin mr-2" />
-                Exporting…{progress.total > 1 && ` (${progress.current}/${progress.total})`}
+                {progress.total > 1
+                  ? t('export.exportingProgress', { current: progress.current, total: progress.total })
+                  : t('export.exporting')}
               </span>
               <span className="hidden items-center group-hover:flex">
                 <Ban size={18} className="mr-2" />
-                Cancel Export
+                {t('export.cancelExport')}
               </span>
             </>
           ) : status === Status.Success ? (
             <>
-              <CheckCircle size={18} className="mr-2" /> Export successful!
+              <CheckCircle size={18} className="mr-2" /> {t('export.exportSuccessful')}
             </>
           ) : status === Status.Error ? (
             <>
-              <XCircle size={18} className="mr-2" /> {errorMessage || 'Export failed'}
+              <XCircle size={18} className="mr-2" /> {errorMessage || t('export.exportFailed')}
             </>
           ) : status === Status.Cancelled ? (
             <>
-              <Ban size={18} className="mr-2" /> Export cancelled
+              <Ban size={18} className="mr-2" /> {t('export.exportCancelled')}
             </>
           ) : (
             <>
-              <Save size={18} className="mr-2" /> Export {numImages > 1 ? `${numImages} Images` : 'Image'}
+              <Save size={18} className="mr-2" />{' '}
+              {numImages > 1 ? t('export.exportImages', { count: numImages }) : t('export.exportImage')}
             </>
           )}
         </Button>

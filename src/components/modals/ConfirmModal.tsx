@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Button from '../ui/Button';
 import Text from '../ui/Text';
 import { TextVariants } from '../../types/typography';
@@ -15,8 +16,8 @@ interface ConfirmModalProps {
 }
 
 export default function ConfirmModal({
-  cancelText = 'Cancel',
-  confirmText = 'Confirm',
+  cancelText,
+  confirmText,
   confirmVariant = 'primary',
   isOpen,
   message,
@@ -24,6 +25,9 @@ export default function ConfirmModal({
   onConfirm,
   title,
 }: ConfirmModalProps) {
+  const { t } = useTranslation();
+  const resolvedCancelText = cancelText ?? t('common.cancel');
+  const resolvedConfirmText = confirmText ?? t('common.confirm');
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
 
@@ -104,7 +108,7 @@ export default function ConfirmModal({
             variant="ghost"
             tabIndex={0}
           >
-            {cancelText}
+            {resolvedCancelText}
           </Button>
           <Button
             onClick={handleConfirm}
@@ -112,7 +116,7 @@ export default function ConfirmModal({
             autoFocus={true}
             className="focus:outline-none focus:ring-0 focus:ring-offset-0"
           >
-            {confirmText}
+            {resolvedConfirmText}
           </Button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { Check, RotateCcw, Grid3X3, Eye, EyeOff, Info, LineChart, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -114,6 +115,7 @@ const CustomGrid = ({ denseVisible, ruleOfThirdsVisible }: { denseVisible: boole
 );
 
 export default function TransformModal({ isOpen, onClose, onApply, currentAdjustments }: TransformModalProps) {
+  const { t } = useTranslation();
   const [params, setParams] = useState<TransformParams>(DEFAULT_PARAMS);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState(false);
@@ -326,10 +328,10 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
   const renderControls = () => (
     <div className="w-80 flex-shrink-0 bg-bg-secondary flex flex-col border-l border-surface h-full z-10">
       <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <Text variant={TextVariants.title}>Transform</Text>
+        <Text variant={TextVariants.title}>{t('transform.title')}</Text>
         <button
           onClick={handleReset}
-          data-tooltip="Reset Transform"
+          data-tooltip={t('transform.resetTransform')}
           className="p-2 rounded-full hover:bg-surface transition-colors"
         >
           <RotateCcw size={18} />
@@ -339,11 +341,11 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
       <div className="flex-grow overflow-y-auto p-4 flex flex-col gap-8" onPointerDownCapture={handleInteractionStart}>
         <div>
           <Text variant={TextVariants.heading} className="mb-2">
-            Distortion
+            {t('transform.distortion')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="Amount"
+              label={t('transform.amount')}
               value={params.distortion}
               min={-100}
               max={100}
@@ -355,11 +357,11 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
 
         <div>
           <Text variant={TextVariants.heading} className="mb-2">
-            Perspective
+            {t('transform.perspective')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="Vertical"
+              label={t('transform.vertical')}
               value={params.vertical}
               min={-100}
               max={100}
@@ -368,7 +370,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
               onChange={(e) => handleChange('vertical', Number(e.target.value))}
             />
             <Slider
-              label="Horizontal"
+              label={t('transform.horizontal')}
               value={params.horizontal}
               min={-100}
               max={100}
@@ -381,11 +383,11 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
 
         <div>
           <Text variant={TextVariants.heading} className="mb-2">
-            Transform
+            {t('transform.title')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="Rotate"
+              label={t('transform.rotate')}
               value={params.rotate}
               min={-45}
               max={45}
@@ -394,7 +396,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
               onChange={(e) => handleChange('rotate', Number(e.target.value))}
             />
             <Slider
-              label="Aspect"
+              label={t('transform.aspect')}
               value={params.aspect}
               min={-100}
               max={100}
@@ -403,7 +405,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
               onChange={(e) => handleChange('aspect', Number(e.target.value))}
             />
             <Slider
-              label="Scale"
+              label={t('transform.scale')}
               value={params.scale}
               min={50}
               max={150}
@@ -416,11 +418,11 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
 
         <div>
           <Text variant={TextVariants.heading} className="mb-2">
-            Offset
+            {t('transform.offset')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="X Axis"
+              label={t('transform.xAxis')}
               value={params.x_offset}
               min={-100}
               max={100}
@@ -429,7 +431,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
               onChange={(e) => handleChange('x_offset', Number(e.target.value))}
             />
             <Slider
-              label="Y Axis"
+              label={t('transform.yAxis')}
               value={params.y_offset}
               min={-100}
               max={100}
@@ -448,9 +450,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
               className="p-3 bg-surface rounded-md border border-surface flex items-center gap-3"
             >
               <Info size={16} className="flex-shrink-0" />
-              <p className="leading-relaxed">
-                Transforming updates base geometry. Existing masks may shift, and AI masks must be regenerated.
-              </p>
+              <p className="leading-relaxed">{t('transform.maskWarning')}</p>
             </Text>
           )}
         </div>
@@ -509,7 +509,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
                       color={TextColors.button}
                       className="absolute top-4 left-4 bg-accent px-2 py-1 rounded shadow-lg z-20"
                     >
-                      Original
+                      {t('transform.original')}
                     </Text>
                   )}
                 </div>
@@ -527,7 +527,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
                 'p-2 rounded-full transition-colors',
                 showGrid ? 'bg-white/20 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white',
               )}
-              data-tooltip="Toggle Grid"
+              data-tooltip={t('transform.toggleGrid')}
             >
               <Grid3X3 size={18} />
             </button>
@@ -537,7 +537,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
                 'p-2 rounded-full transition-colors',
                 showLines ? 'bg-white/20 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white',
               )}
-              data-tooltip="Toggle Helper Lines"
+              data-tooltip={t('transform.toggleHelperLines')}
             >
               <LineChart size={18} />
             </button>
@@ -547,7 +547,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
             <button
               onClick={() => setZoom((z) => Math.max(0.1, z - 0.25))}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Zoom Out"
+              data-tooltip={t('transform.zoomOut')}
             >
               <ZoomOut size={18} />
             </button>
@@ -559,7 +559,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
             <button
               onClick={() => setZoom((z) => Math.min(8, z + 0.25))}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Zoom In"
+              data-tooltip={t('transform.zoomIn')}
             >
               <ZoomIn size={18} />
             </button>
@@ -567,7 +567,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
             <button
               onClick={handleResetZoom}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Reset Zoom"
+              data-tooltip={t('transform.resetZoom')}
             >
               <Maximize size={16} />
             </button>
@@ -582,7 +582,7 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
                 'p-2 rounded-full transition-colors select-none',
                 isCompareActive ? 'bg-accent text-button-text' : 'text-white/60 hover:bg-white/10 hover:text-white',
               )}
-              data-tooltip="Hold to Compare"
+              data-tooltip={t('transform.holdToCompare')}
             >
               {isCompareActive ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
@@ -618,11 +618,11 @@ export default function TransformModal({ isOpen, onClose, onApply, currentAdjust
                 onClick={onClose}
                 className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <Button onClick={handleApply} disabled={isApplying || !previewUrl}>
                 <Check className="mr-2" size={16} />
-                Apply
+                {t('transform.apply')}
               </Button>
             </div>
           </motion.div>

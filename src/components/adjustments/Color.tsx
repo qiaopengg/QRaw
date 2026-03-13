@@ -7,6 +7,7 @@ import { Adjustments, ColorGrading } from '../../utils/adjustments';
 import { AppSettings } from '../ui/AppProperties';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
+import { useTranslation } from 'react-i18next';
 
 interface ColorProps {
   color: string;
@@ -114,6 +115,7 @@ const ColorSwatch = ({ color, name, isActive, onClick }: ColorSwatchProps) => {
 };
 
 const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: ColorPanelProps) => {
+  const { t } = useTranslation();
   const colorGrading = adjustments.colorGrading || INITIAL_ADJUSTMENTS.colorGrading;
 
   const handleChange = (grading: ColorGrading, newValue: HueSatLum) => {
@@ -142,7 +144,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
         <div className="w-[calc(50%-0.5rem)]">
           <ColorWheel
             defaultValue={INITIAL_ADJUSTMENTS.colorGrading.midtones}
-            label="Midtones"
+            label={t('adjustments.midtones')}
             onChange={(val: HueSatLum) => handleChange(ColorGrading.Midtones, val)}
             value={colorGrading.midtones}
             onDragStateChange={onDragStateChange}
@@ -153,7 +155,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
         <div className="w-full">
           <ColorWheel
             defaultValue={INITIAL_ADJUSTMENTS.colorGrading.shadows}
-            label="Shadows"
+            label={t('adjustments.shadows')}
             onChange={(val: HueSatLum) => handleChange(ColorGrading.Shadows, val)}
             value={colorGrading.shadows}
             onDragStateChange={onDragStateChange}
@@ -162,7 +164,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
         <div className="w-full">
           <ColorWheel
             defaultValue={INITIAL_ADJUSTMENTS.colorGrading.highlights}
-            label="Highlights"
+            label={t('adjustments.highlights')}
             onChange={(val: HueSatLum) => handleChange(ColorGrading.Highlights, val)}
             value={colorGrading.highlights}
             onDragStateChange={onDragStateChange}
@@ -172,7 +174,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
       <div>
         <Slider
           defaultValue={50}
-          label="Blending"
+          label={t('adjustments.blending')}
           max={100}
           min={0}
           onChange={(e: any) => handleGlobalChange(ColorGrading.Blending, e.target.value)}
@@ -182,7 +184,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
         />
         <Slider
           defaultValue={0}
-          label="Balance"
+          label={t('adjustments.balance')}
           max={100}
           min={-100}
           onChange={(e: any) => handleGlobalChange(ColorGrading.Balance, e.target.value)}
@@ -196,6 +198,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
 };
 
 const ColorCalibrationPanel = ({ adjustments, setAdjustments, onDragStateChange }: ColorPanelProps) => {
+  const { t } = useTranslation();
   const [activePrimary, setActivePrimary] = useState('red');
   const colorCalibration = adjustments.colorCalibration || INITIAL_ADJUSTMENTS.colorCalibration;
 
@@ -234,14 +237,14 @@ const ColorCalibrationPanel = ({ adjustments, setAdjustments, onDragStateChange 
   return (
     <div className="p-2 bg-bg-tertiary rounded-md mt-4">
       <Text variant={TextVariants.heading} className="mb-2">
-        Color Calibration
+        {t('adjustments.colorCalibration')}
       </Text>
       <div>
         <Text color={TextColors.primary} weight={TextWeights.medium} className="mb-1">
-          Shadows
+          {t('adjustments.shadows')}
         </Text>
         <Slider
-          label="Tint"
+          label={t('adjustments.tint')}
           min={-100}
           max={100}
           step={1}
@@ -267,7 +270,7 @@ const ColorCalibrationPanel = ({ adjustments, setAdjustments, onDragStateChange 
           ))}
         </div>
         <Slider
-          label="Hue"
+          label={t('adjustments.hue')}
           min={-100}
           max={100}
           step={1}
@@ -277,7 +280,7 @@ const ColorCalibrationPanel = ({ adjustments, setAdjustments, onDragStateChange 
           onDragStateChange={onDragStateChange}
         />
         <Slider
-          label="Saturation"
+          label={t('adjustments.saturation')}
           min={-100}
           max={100}
           step={1}
@@ -300,6 +303,7 @@ export default function ColorPanel({
   toggleWbPicker,
   onDragStateChange,
 }: ColorPanelProps) {
+  const { t } = useTranslation();
   const [activeColor, setActiveColor] = useState('reds');
   const adjustmentVisibility = appSettings?.adjustmentVisibility || {};
 
@@ -326,21 +330,21 @@ export default function ColorPanel({
     <div className="space-y-4">
       <div className="p-2 bg-bg-tertiary rounded-md">
         <div className="flex justify-between items-center mb-2">
-          <Text variant={TextVariants.heading}>White Balance</Text>
+          <Text variant={TextVariants.heading}>{t('adjustments.whiteBalance')}</Text>
           {!isForMask && toggleWbPicker && (
             <button
               onClick={toggleWbPicker}
               className={`p-1.5 rounded-md transition-colors ${
                 isWbPickerActive ? 'bg-accent text-button-text' : 'hover:bg-bg-secondary text-text-secondary'
               }`}
-              data-tooltip="White Balance Picker"
+              data-tooltip={t('adjustments.wbPicker')}
             >
               <Pipette size={16} />
             </button>
           )}
         </div>
         <Slider
-          label="Temperature"
+          label={t('adjustments.temperature')}
           max={100}
           min={-100}
           onChange={(e: any) => handleGlobalChange(ColorAdjustment.Temperature, e.target.value)}
@@ -349,7 +353,7 @@ export default function ColorPanel({
           onDragStateChange={onDragStateChange}
         />
         <Slider
-          label="Tint"
+          label={t('adjustments.tint')}
           max={100}
           min={-100}
           onChange={(e: any) => handleGlobalChange(ColorAdjustment.Tint, e.target.value)}
@@ -361,10 +365,10 @@ export default function ColorPanel({
 
       <div className="p-2 bg-bg-tertiary rounded-md">
         <Text variant={TextVariants.heading} className="mb-2">
-          Presence
+          {t('adjustments.presence')}
         </Text>
         <Slider
-          label="Vibrance"
+          label={t('adjustments.vibrance')}
           max={100}
           min={-100}
           onChange={(e: any) => handleGlobalChange(ColorAdjustment.Vibrance, e.target.value)}
@@ -373,7 +377,7 @@ export default function ColorPanel({
           onDragStateChange={onDragStateChange}
         />
         <Slider
-          label="Saturation"
+          label={t('adjustments.saturation')}
           max={100}
           min={-100}
           onChange={(e: any) => handleGlobalChange(ColorAdjustment.Saturation, e.target.value)}
@@ -385,7 +389,7 @@ export default function ColorPanel({
 
       <div className="p-2 bg-bg-tertiary rounded-md">
         <Text variant={TextVariants.heading} className="mb-3">
-          Color Grading
+          {t('adjustments.colorGrading')}
         </Text>
         <ColorGradingPanel
           adjustments={adjustments}
@@ -397,7 +401,7 @@ export default function ColorPanel({
 
       <div className="p-2 bg-bg-tertiary rounded-md">
         <Text variant={TextVariants.heading} className="mb-3">
-          Color Mixer
+          {t('adjustments.colorMixer')}
         </Text>
         <div className="flex justify-between mb-4 px-1">
           {HSL_COLORS.map(({ name, color }) => (
@@ -411,7 +415,7 @@ export default function ColorPanel({
           ))}
         </div>
         <Slider
-          label="Hue"
+          label={t('adjustments.hue')}
           max={100}
           min={-100}
           onChange={(e: any) => handleHslChange(ColorAdjustment.Hue, e.target.value)}
@@ -420,7 +424,7 @@ export default function ColorPanel({
           onDragStateChange={onDragStateChange}
         />
         <Slider
-          label="Saturation"
+          label={t('adjustments.saturation')}
           max={100}
           min={-100}
           onChange={(e: any) => handleHslChange(ColorAdjustment.Saturation, e.target.value)}
@@ -429,7 +433,7 @@ export default function ColorPanel({
           onDragStateChange={onDragStateChange}
         />
         <Slider
-          label="Luminance"
+          label={t('adjustments.luminance')}
           max={100}
           min={-100}
           onChange={(e: any) => handleHslChange(ColorAdjustment.Luminance, e.target.value)}

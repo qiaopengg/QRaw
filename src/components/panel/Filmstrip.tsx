@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo, forwardRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { Image as ImageIcon, Star } from 'lucide-react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -322,7 +322,7 @@ const FilmstripList = ({
       return w + ITEM_GAP;
     },
     // sizeMapVersion ensures a new function reference when sizes change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
     [data.thumbnailAspectRatio, itemHeight, sizeMapVersion],
   );
 
@@ -510,6 +510,7 @@ interface FilmStripProps {
   selectedImage?: SelectedImage;
   thumbnails: Record<string, string> | undefined;
   thumbnailAspectRatio: ThumbnailAspectRatio;
+  totalImages?: number;
 }
 
 export default function Filmstrip({

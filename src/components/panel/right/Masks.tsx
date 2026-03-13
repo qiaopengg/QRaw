@@ -9,7 +9,6 @@ import {
   Sparkles,
   TriangleRight,
   User,
-  Sun,
 } from 'lucide-react';
 
 export enum Mask {
@@ -43,7 +42,7 @@ export interface MaskType {
   icon: any;
   id?: string;
   name: string;
-  type: Mask;
+  type: Mask | null;
 }
 
 export interface SubMask {
@@ -69,181 +68,169 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Radial]: Circle,
 };
 
-export const MASK_PANEL_CREATION_TYPES: Array<MaskType> = [
+export const getMaskPanelCreationTypes = (t: any): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,
-    name: 'Subject',
+    name: t('masking.subject'),
     type: Mask.AiSubject,
   },
   {
     disabled: false,
     icon: Cloud,
-    name: 'Sky',
+    name: t('masking.sky'),
     type: Mask.AiSky,
   },
   {
     disabled: false,
     icon: User,
-    name: 'Foreground',
+    name: t('masking.foreground'),
     type: Mask.AiForeground,
   },
   {
     disabled: false,
     icon: TriangleRight,
-    name: 'Linear',
+    name: t('masking.linear'),
     type: Mask.Linear,
   },
   {
     disabled: false,
     icon: Circle,
-    name: 'Radial',
+    name: t('masking.radial'),
     type: Mask.Radial,
   },
   {
     disabled: false,
     icon: Layers,
     id: 'others',
-    name: 'Others',
+    name: t('masking.others'),
     type: null,
   },
 ];
 
-export const AI_PANEL_CREATION_TYPES: Array<MaskType> = [
+export const getAiPanelCreationTypes = (t: any): Array<MaskType> => [
   {
     disabled: false,
     icon: Eraser,
-    name: 'Quick Erase',
+    name: t('masking.quickErase'),
     type: Mask.QuickEraser,
   },
   {
     disabled: false,
     icon: Sparkles,
-    name: 'Subject',
+    name: t('masking.subject'),
     type: Mask.AiSubject,
   },
   {
     disabled: false,
     icon: User,
-    name: 'Foreground',
+    name: t('masking.foreground'),
     type: Mask.AiForeground,
   },
   {
     disabled: false,
     icon: Brush,
-    name: 'Brush',
+    name: t('masking.brushType'),
     type: Mask.Brush,
   },
   {
     disabled: false,
     icon: TriangleRight,
-    name: 'Linear',
+    name: t('masking.linear'),
     type: Mask.Linear,
   },
   {
     disabled: false,
     icon: Circle,
-    name: 'Radial',
+    name: t('masking.radial'),
     type: Mask.Radial,
   },
 ];
 
-export const SUB_MASK_COMPONENT_TYPES: Array<MaskType> = [
+export const getSubMaskComponentTypes = (t: any): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,
-    name: 'Subject',
+    name: t('masking.subject'),
     type: Mask.AiSubject,
   },
   {
     disabled: false,
     icon: Cloud,
-    name: 'Sky',
+    name: t('masking.sky'),
     type: Mask.AiSky,
   },
   {
     disabled: false,
     icon: User,
-    name: 'Foreground',
+    name: t('masking.foreground'),
     type: Mask.AiForeground,
   },
   {
     disabled: false,
     icon: TriangleRight,
-    name: 'Linear',
+    name: t('masking.linear'),
     type: Mask.Linear,
   },
   {
     disabled: false,
     icon: Circle,
-    name: 'Radial',
+    name: t('masking.radial'),
     type: Mask.Radial,
   },
   {
     disabled: false,
     icon: Layers,
     id: 'others',
-    name: 'Others',
+    name: t('masking.others'),
     type: null,
   },
 ];
 
-export const OTHERS_MASK_TYPES: Array<MaskType> = [
-  {
-    disabled: false,
-    icon: Droplet,
-    name: 'Color',
-    type: Mask.Color,
-  },
-  {
-    disabled: false,
-    icon: Sun,
-    name: 'Luminance',
-    type: Mask.Luminance,
-  },
+export const getOthersMaskTypes = (t: any): Array<MaskType> => [
   {
     disabled: false,
     icon: Brush,
-    name: 'Brush',
+    name: t('masking.brushType'),
     type: Mask.Brush,
   },
   {
     disabled: false,
     icon: RectangleHorizontal,
-    name: 'Whole Image',
+    name: t('masking.wholeImage'),
     type: Mask.All,
   },
 ];
 
-export const AI_SUB_MASK_COMPONENT_TYPES: Array<MaskType> = [
+export const getAiSubMaskComponentTypes = (t: any): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,
-    name: 'Subject',
+    name: t('masking.subject'),
     type: Mask.AiSubject,
   },
   {
     disabled: false,
     icon: User,
-    name: 'Foreground',
+    name: t('masking.foreground'),
     type: Mask.AiForeground,
   },
   {
     disabled: false,
     icon: Brush,
-    name: 'Brush',
+    name: t('masking.brushType'),
     type: Mask.Brush,
   },
   {
     disabled: false,
     icon: TriangleRight,
-    name: 'Linear',
+    name: t('masking.linear'),
     type: Mask.Linear,
   },
   {
     disabled: false,
     icon: Circle,
-    name: 'Radial',
+    name: t('masking.radial'),
     type: Mask.Radial,
   },
 ];

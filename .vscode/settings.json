@@ -1,7 +1,10 @@
 {
+  "rust-analyzer.server.path": "/Users/qiaopeng/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer",
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
-  }
+  },
+  "typescript.autoClosingTags": false,
+  "i18n-ally.localesPaths": ["src/i18n", "src/i18n/locales"]
 }

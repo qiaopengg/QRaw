@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { Crop, PercentCrop } from 'react-image-crop';
 import { Loader2 } from 'lucide-react';
@@ -60,7 +61,10 @@ interface EditorProps {
   waveform: WaveformData | null;
   onDisplaySizeChange?(size: any): void;
   onInitialFitScale?(scale: number): void;
+  onZoomChange?(zoomValue: number, fitToWindow?: boolean): void;
   originalSize?: ImageDimensions;
+  baseRenderSize?: ImageDimensions;
+  isLoadingFullRes?: boolean;
   isWbPickerActive?: boolean;
   onWbPicked?: () => void;
   overlayMode?: OverlayMode;
@@ -127,6 +131,7 @@ export default function Editor({
   liveRotation,
   isInstantTransition,
 }: EditorProps) {
+  const { t } = useTranslation();
   const [crop, setCrop] = useState<Crop | null>(null);
   const prevCropParams = useRef<any>(null);
   const [isMaskHovered, setIsMaskHovered] = useState(false);
@@ -387,7 +392,6 @@ export default function Editor({
         maskDef,
         scale: renderSize.scale,
         width: Math.round(renderSize.width),
-        jsAdjustments: adjustments,
       });
       if (dataUrl) {
         setMaskOverlayUrl(dataUrl);
@@ -402,7 +406,7 @@ export default function Editor({
         requestAnimationFrame(processOverlayQueue);
       }
     }
-  }, [adjustments]);
+  }, [adjustments.crop]);
 
   const handleLiveMaskPreview = useCallback(
     (maskDef: any) => {
@@ -422,20 +426,19 @@ export default function Editor({
   );
 
   const debouncedGenerateMaskOverlay = useCallback(
-    debounce(async (maskDef, renderSize, currentAdjustments) => {
+    debounce(async (maskDef, renderSize) => {
       if (!maskDef || !maskDef.visible || renderSize.width === 0) {
         setMaskOverlayUrl(null);
         return;
       }
       try {
-        const cropOffset = [currentAdjustments.crop?.x || 0, currentAdjustments.crop?.y || 0];
+        const cropOffset = [adjustments.crop?.x || 0, adjustments.crop?.y || 0];
         const dataUrl: string = await invoke(Invokes.GenerateMaskOverlay, {
           cropOffset,
           height: Math.round(renderSize.height),
           maskDef,
           scale: renderSize.scale,
           width: Math.round(renderSize.width),
-          jsAdjustments: currentAdjustments,
         });
         if (dataUrl) {
           setMaskOverlayUrl(dataUrl);
@@ -447,7 +450,7 @@ export default function Editor({
         setMaskOverlayUrl(null);
       }
     }, 100),
-    [],
+    [adjustments.crop],
   );
 
   useEffect(() => {
@@ -466,14 +469,15 @@ export default function Editor({
       }
     }
 
-    debouncedGenerateMaskOverlay(maskDefForOverlay, imageRenderSize, adjustments);
+    debouncedGenerateMaskOverlay(maskDefForOverlay, imageRenderSize);
 
     return () => debouncedGenerateMaskOverlay.cancel();
   }, [
     activeRightPanel,
     activeMaskContainerId,
     activeAiPatchContainerId,
-    adjustments,
+    adjustments.masks,
+    adjustments.aiPatches,
     imageRenderSize,
     debouncedGenerateMaskOverlay,
   ]);
@@ -716,7 +720,7 @@ export default function Editor({
   if (!selectedImage) {
     return (
       <div className="flex-1 bg-bg-secondary rounded-lg flex items-center justify-center text-text-secondary">
-        <p>Select an image from the library to begin editing.</p>
+        <p>{t('editor.selectImageToEdit')}</p>
       </div>
     );
   }
@@ -743,15 +747,11 @@ export default function Editor({
     (isMasking &&
       (activeSubMask?.type === Mask.Brush ||
         activeSubMask?.type === Mask.AiSubject ||
-        activeSubMask?.type === Mask.Color ||
-        activeSubMask?.type === Mask.Luminance ||
         activeSubMask?.parameters?.isInitialDraw)) ||
     (isAiEditing &&
       (activeSubMask?.type === Mask.Brush ||
         activeSubMask?.type === Mask.AiSubject ||
         activeSubMask?.type === Mask.QuickEraser ||
-        activeSubMask?.type === Mask.Color ||
-        activeSubMask?.type === Mask.Luminance ||
         activeSubMask?.parameters?.isInitialDraw));
 
   const waveFormData: WaveformData = waveform || { blue: [], green: [], height: 0, luma: [], red: [], width: 0 };

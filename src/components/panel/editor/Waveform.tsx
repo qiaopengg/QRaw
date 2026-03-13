@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Draggable from 'react-draggable';
 import { X, Waves } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { WaveformData } from '../../ui/AppProperties';
 import { DisplayMode } from '../../../utils/adjustments';
 import Text from '../../ui/Text';
@@ -117,6 +118,7 @@ const RgbWaveformDisplay = ({ redData, greenData, blueData, width, height, maxVa
 export default function Waveform({ waveformData, onClose }: WaveformProps) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>(DisplayMode.Rgb);
   const nodeRef = useRef<any>(null);
+  const { t } = useTranslation();
 
   const { red, green, blue, luma, width, height } = waveformData || {};
 
@@ -148,7 +150,7 @@ export default function Waveform({ waveformData, onClose }: WaveformProps) {
           <div className="handle flex items-center justify-between p-3 cursor-move">
             <div className="flex items-center gap-2">
               <Waves size={16} />
-              <Text variant={TextVariants.heading}>Waveform</Text>
+              <Text variant={TextVariants.heading}>{t('waveform.waveform')}</Text>
             </div>
             <button
               className="p-1 rounded-lg text-text-secondary hover:bg-bg-primary hover:text-text-primary transition-colors"
@@ -214,7 +216,7 @@ export default function Waveform({ waveformData, onClose }: WaveformProps) {
                     displayMode === DisplayMode.Luma ? 'bg-accent text-button-text' : inactiveButtonClass
                   }`}
                 >
-                  Luma
+                  {t('waveform.luma')}
                 </button>
                 <button
                   onClick={() => setDisplayMode(DisplayMode.Rgb)}
@@ -222,7 +224,7 @@ export default function Waveform({ waveformData, onClose }: WaveformProps) {
                     displayMode === DisplayMode.Rgb ? 'bg-accent text-button-text' : inactiveButtonClass
                   }`}
                 >
-                  RGB
+                  {t('waveform.rgb')}
                 </button>
                 <button
                   onClick={() => setDisplayMode(DisplayMode.Red)}

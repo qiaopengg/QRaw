@@ -1,4 +1,5 @@
 import { RotateCcw, Copy, ClipboardPaste, Aperture } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import BasicAdjustments from '../../adjustments/Basic';
 import CurveGraph from '../../adjustments/Curves';
 import ColorPanel from '../../adjustments/Color';
@@ -53,6 +54,7 @@ export default function Controls({
   toggleWbPicker,
   onDragStateChange,
 }: ControlsProps) {
+  const { t } = useTranslation();
   const { showContextMenu } = useContextMenu();
 
   const handleToggleVisibility = (sectionName: string) => {
@@ -135,21 +137,21 @@ export default function Controls({
 
     const isPasteAllowed = copiedSectionAdjustments && copiedSectionAdjustments.section === sectionName;
     const pasteLabel = copiedSectionAdjustments
-      ? `Paste ${
-          copiedSectionAdjustments.section.charAt(0).toUpperCase() + copiedSectionAdjustments.section.slice(1)
-        } Settings`
-      : 'Paste Settings';
+      ? t('adjustments.pasteSettings', {
+          section: copiedSectionAdjustments.section.charAt(0).toUpperCase() + copiedSectionAdjustments.section.slice(1),
+        })
+      : t('adjustments.pasteSettings', { section: '' });
 
     const options: Array<ControlsPanelOption> = [
       {
-        label: `Copy ${sectionName.charAt(0).toUpperCase() + sectionName.slice(1)} Settings`,
+        label: t('adjustments.copySettings', { section: sectionName.charAt(0).toUpperCase() + sectionName.slice(1) }),
         icon: Copy,
         onClick: handleCopy,
       },
       { label: pasteLabel, icon: ClipboardPaste, onClick: handlePaste, disabled: !isPasteAllowed },
       { type: OPTION_SEPARATOR },
       {
-        label: `Reset ${sectionName.charAt(0).toUpperCase() + sectionName.slice(1)} Settings`,
+        label: t('adjustments.resetSection', { section: sectionName.charAt(0).toUpperCase() + sectionName.slice(1) }),
         icon: RotateCcw,
         onClick: handleReset,
       },
@@ -161,13 +163,13 @@ export default function Controls({
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Adjustments</h2>
+        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('adjustments.panelTitle')}</h2>
         <div className="flex items-center gap-1">
           <button
             className="p-2 rounded-full hover:bg-surface disabled:cursor-not-allowed transition-colors"
             disabled={!selectedImage?.isReady}
             onClick={handleAutoAdjustments}
-            data-tooltip="Auto Adjust Image"
+            data-tooltip={t('adjustments.autoAdjust')}
           >
             <Aperture size={18} />
           </button>
@@ -175,7 +177,7 @@ export default function Controls({
             className="p-2 rounded-full hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             disabled={!selectedImage}
             onClick={handleResetAdjustments}
-            data-tooltip="Reset Adjustments"
+            data-tooltip={t('adjustments.resetAll')}
           >
             <RotateCcw size={18} />
           </button>
@@ -191,7 +193,9 @@ export default function Controls({
             effects: EffectsPanel,
           }[sectionName];
 
-          const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1);
+          const title = t(`adjustments.${sectionName}`, {
+            defaultValue: sectionName.charAt(0).toUpperCase() + sectionName.slice(1),
+          });
           const sectionVisibility = adjustments.sectionVisibility || INITIAL_ADJUSTMENTS.sectionVisibility;
 
           return (

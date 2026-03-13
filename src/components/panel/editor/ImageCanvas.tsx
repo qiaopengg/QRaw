@@ -646,26 +646,6 @@ const MaskOverlay = memo(
         </Group>
       );
     }
-
-    if (subMask.type === Mask.Color || subMask.type === Mask.Luminance) {
-      const { targetX, targetY } = p;
-      if (targetX !== undefined && targetX >= 0 && targetY !== undefined && targetY >= 0) {
-        return (
-          <Circle
-            x={(targetX - cropX) * scale}
-            y={(targetY - cropY) * scale}
-            radius={5}
-            stroke={isSelected ? '#0ea5e9' : 'white'}
-            strokeWidth={2}
-            listening={false}
-            shadowColor="black"
-            shadowBlur={2}
-            shadowOpacity={0.8}
-          />
-        );
-      }
-      return null;
-    }
     return null;
   },
 );
@@ -715,7 +695,7 @@ const ImageCanvas = memo(
     const [isCropViewVisible, setIsCropViewVisible] = useState(false);
     const cropImageRef = useRef<HTMLImageElement>(null);
     const [displayedMaskUrl, setDisplayedMaskUrl] = useState<string | null>(null);
-    const [originalLoaded, setOriginalLoaded] = useState<false>(false);
+    const [originalLoaded, setOriginalLoaded] = useState<boolean>(false);
     const [localInitialDrawParams, setLocalInitialDrawParams] = useState<any>(null);
     const isDrawing = useRef(false);
     const drawingStageRef = useRef<any>(null);
@@ -753,10 +733,8 @@ const ImageCanvas = memo(
           setDisplayState((prev) => ({ base: prev.base, fade: newSrc }));
           setIsFadingIn(false);
 
-          let frame1: number;
           let frame2: number;
-
-          frame1 = requestAnimationFrame(() => {
+          const frame1: number = requestAnimationFrame(() => {
             frame2 = requestAnimationFrame(() => {
               setIsFadingIn(true);
             });
@@ -823,11 +801,9 @@ const ImageCanvas = memo(
     const isAiSubjectActive =
       (isMasking || isAiEditing) &&
       (activeSubMask?.type === Mask.AiSubject || activeSubMask?.type === Mask.QuickEraser);
-    const isParametricActive =
-      (isMasking || isAiEditing) && (activeSubMask?.type === Mask.Color || activeSubMask?.type === Mask.Luminance);
     const isInitialDrawing = (isMasking || isAiEditing) && activeSubMask?.parameters?.isInitialDraw === true;
 
-    const isToolActive = isBrushActive || isAiSubjectActive || isInitialDrawing || isParametricActive;
+    const isToolActive = isBrushActive || isAiSubjectActive || isInitialDrawing;
 
     useEffect(() => {
       if (maskOverlayUrl && (isMasking || isAiEditing)) {
@@ -968,33 +944,6 @@ const ImageCanvas = memo(
           return;
         }
 
-        if (isParametricActive && activeSubMask) {
-          const pos = e.target.getStage().getPointerPosition();
-          if (!pos) return;
-
-          const { scale } = imageRenderSize;
-          const crop = adjustments.crop;
-          const isPercent = crop?.unit === '%';
-          const cropX = crop ? (isPercent ? (crop.x / 100) * effectiveImageDimensions.width : crop.x) : 0;
-          const cropY = crop ? (isPercent ? (crop.y / 100) * effectiveImageDimensions.height : crop.y) : 0;
-
-          const x = pos.x / scale + cropX;
-          const y = pos.y / scale + cropY;
-
-          let newParams = { ...activeSubMask.parameters };
-          newParams.targetX = x;
-          newParams.targetY = y;
-          newParams.rotation = adjustments.rotation || 0;
-          newParams.flipHorizontal = adjustments.flipHorizontal || false;
-          newParams.flipVertical = adjustments.flipVertical || false;
-          newParams.orientationSteps = adjustments.orientationSteps || 0;
-          delete newParams.isInitialDraw;
-
-          const activeId = isMasking ? activeMaskId : activeAiSubMaskId;
-          updateSubMask(activeId, { parameters: newParams });
-          return;
-        }
-
         if (isInitialDrawing && activeSubMask) {
           isDrawing.current = true;
           drawingStageRef.current = e.target.getStage();
@@ -1130,14 +1079,13 @@ const ImageCanvas = memo(
         isInitialDrawing,
         isBrushActive,
         isAiSubjectActive,
-        isParametricActive,
         brushSettings,
         onSelectMask,
         onSelectAiSubMask,
         isMasking,
         isAiEditing,
         imageRenderSize,
-        adjustments,
+        adjustments.crop,
         activeMaskId,
         activeAiSubMaskId,
         activeSubMask,
@@ -1200,7 +1148,7 @@ const ImageCanvas = memo(
             return;
           }
 
-          let updatedParams = { ...localInitialDrawParams };
+          const updatedParams = { ...localInitialDrawParams };
 
           if (activeSubMask.type === Mask.Radial) {
             updatedParams.radiusX = Math.max(1, Math.abs(x - dragStartPointer.current.x));
@@ -1632,12 +1580,11 @@ const ImageCanvas = memo(
 
     const effectiveCursor = useMemo(() => {
       if (isWbPickerActive) return 'crosshair';
-      if (isParametricActive) return 'crosshair';
       if (isInitialDrawing) return 'crosshair';
       if (isBrushActive) return 'none';
       if (isAiSubjectActive) return 'crosshair';
       return cursorStyle;
-    }, [isWbPickerActive, isInitialDrawing, isBrushActive, isAiSubjectActive, isParametricActive, cursorStyle]);
+    }, [isWbPickerActive, isInitialDrawing, isBrushActive, isAiSubjectActive, cursorStyle]);
 
     const handlePreviewUpdate = useCallback(
       (id: string, subMaskPreview: Partial<SubMask>) => {

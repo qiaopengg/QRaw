@@ -123,6 +123,7 @@ export enum ThumbnailAspectRatio {
 export interface AppSettings {
   adaptiveEditorTheme?: Theme;
   aiConnectorAddress?: string;
+  copyPasteSettings?: any;
   decorations?: any;
   editorPreviewResolution?: number;
   enableZoomHifi?: boolean;
@@ -133,11 +134,13 @@ export interface AppSettings {
   enableAiTagging?: boolean;
   enableExifReading?: boolean;
   filterCriteria?: FilterCriteria;
+  fontFamily?: string;
   lastFolderState?: any;
   pinnedFolders?: any;
   lastRootPath: string | null;
   libraryViewMode?: LibraryViewMode;
   sortCriteria?: SortCriteria;
+  taggingShortcuts?: string[];
   theme: Theme;
   thumbnailSize?: ThumbnailSize;
   thumbnailAspectRatio?: ThumbnailAspectRatio;
@@ -214,6 +217,7 @@ export interface Preset {
 export interface Progress {
   completed?: number;
   current?: number;
+  stage?: string;
   total: number;
 }
 

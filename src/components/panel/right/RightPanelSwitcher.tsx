@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { SlidersHorizontal, Info, Scaling, BrushCleaning, Bookmark, Save, Layers } from 'lucide-react';
 import { Panel } from '../../ui/AppProperties';
@@ -14,17 +15,17 @@ interface RightPanelSwitcherProps {
   isInstantTransition: boolean;
 }
 
-const panelGroups: Array<Array<PanelOptions>> = [
-  [{ id: Panel.Metadata, icon: Info, title: 'Info' }],
+const PANEL_GROUPS: Array<Array<Omit<PanelOptions, 'title'> & { titleKey: string }>> = [
+  [{ id: Panel.Metadata, icon: Info, titleKey: 'panels.info' }],
   [
-    { id: Panel.Adjustments, icon: SlidersHorizontal, title: 'Adjust' },
-    { id: Panel.Crop, icon: Scaling, title: 'Crop' },
-    { id: Panel.Masks, icon: Layers, title: 'Masks' },
-    { id: Panel.Ai, icon: BrushCleaning, title: 'Inpaint' },
+    { id: Panel.Adjustments, icon: SlidersHorizontal, titleKey: 'panels.adjust' },
+    { id: Panel.Crop, icon: Scaling, titleKey: 'panels.crop' },
+    { id: Panel.Masks, icon: Layers, titleKey: 'panels.masks' },
+    { id: Panel.Ai, icon: BrushCleaning, titleKey: 'panels.inpaint' },
   ],
   [
-    { id: Panel.Presets, icon: Bookmark, title: 'Presets' },
-    { id: Panel.Export, icon: Save, title: 'Export' },
+    { id: Panel.Presets, icon: Bookmark, titleKey: 'panels.presets' },
+    { id: Panel.Export, icon: Save, titleKey: 'panels.export' },
   ],
 ];
 
@@ -33,12 +34,13 @@ export default function RightPanelSwitcher({
   onPanelSelect,
   isInstantTransition,
 }: RightPanelSwitcherProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col p-1 gap-1 h-full">
-      {panelGroups.map((group, groupIndex) => (
+      {PANEL_GROUPS.map((group, groupIndex) => (
         <div key={groupIndex} className="flex flex-col gap-1">
           {groupIndex > 0 && <div className="w-6 h-px bg-surface self-center" />}
-          {group.map(({ id, icon: Icon, title }) => (
+          {group.map(({ id, icon: Icon, titleKey }) => (
             <button
               className={`relative p-2 rounded-md transition-colors duration-200 ${
                 activePanel === id
@@ -47,7 +49,7 @@ export default function RightPanelSwitcher({
               }`}
               key={id}
               onClick={() => onPanelSelect(id)}
-              data-tooltip={title}
+              data-tooltip={t(titleKey)}
             >
               {activePanel === id && (
                 <motion.div

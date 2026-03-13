@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { ADJUSTMENT_SECTIONS, COPYABLE_ADJUSTMENT_KEYS, CopyPasteSettings, PasteMode } from '../../utils/adjustments';
@@ -114,6 +115,7 @@ const PasteModeSwitch = ({ selectedMode, onModeChange, isVisible }: PasteModeSwi
 };
 
 export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settings }: CopyPasteSettingsModalProps) {
+  const { t } = useTranslation();
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
   const [localSettings, setLocalSettings] = useState<CopyPasteSettings>(settings || DEFAULT_SETTINGS);
@@ -189,12 +191,12 @@ export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settin
         onClick={(e) => e.stopPropagation()}
       >
         <Text variant={TextVariants.title} className="mb-4">
-          Copy & Paste Settings
+          {t('modals.copyPasteSettings')}
         </Text>
         <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-6">
           <div>
             <Text variant={TextVariants.heading} className="block mb-2">
-              Paste Mode
+              {t('modals.pasteMode')}
             </Text>
             <PasteModeSwitch
               selectedMode={localSettings.mode}
@@ -202,15 +204,15 @@ export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settin
               isVisible={show}
             />
             <Text variant={TextVariants.small} className="mt-2">
-              <b>Merge:</b> Adds your copied changes, leaving other settings untouched.
+              <b>{t('modals.merge')}:</b> {t('modals.mergeDescription')}
               <br />
-              <b>Replace:</b> Overwrites all selected settings, resetting the rest to their defaults.
+              <b>{t('modals.replace')}:</b> {t('modals.replaceDescription')}
             </Text>
           </div>
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <Text variant={TextVariants.heading}>Included Adjustments</Text>
+              <Text variant={TextVariants.heading}>{t('modals.includedAdjustments')}</Text>
               <div className="flex gap-2">
                 <Button
                   className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
@@ -257,9 +259,9 @@ export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settin
             className="px-4 py-2 rounded-md text-text-secondary bg-surface hover:bg-surface transition-colors"
             onClick={onClose}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
-          <Button onClick={handleSave}>Save</Button>
+          <Button onClick={handleSave}>{t('common.save')}</Button>
         </div>
       </div>
     </div>

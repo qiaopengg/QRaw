@@ -6,8 +6,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import debounce from 'lodash.debounce';
-import throttle from 'lodash.throttle';
-import { ClerkProvider } from "@clerk/react";
+import { ClerkProvider } from '@clerk/clerk-react';
 import { ToastContainer, toast, Slide } from 'react-toastify';
 import clsx from 'clsx';
 import {
@@ -118,6 +117,7 @@ import {
 } from './components/ui/AppProperties';
 import { ChannelConfig } from './components/adjustments/Curves';
 import HdrModal from './components/modals/HdrModal';
+import { useTranslation } from 'react-i18next';
 
 const CLERK_PUBLISHABLE_KEY = 'pk_test_YnJpZWYtc2Vhc25haWwtMTIuY2xlcmsuYWNjb3VudHMuZGV2JA'; // local dev key
 
@@ -228,6 +228,7 @@ const getParentDir = (filePath: string): string => {
 
 function App() {
   const [rootPath, setRootPath] = useState<string | null>(null);
+  const { t } = useTranslation();
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [activeView, setActiveView] = useState('library');
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
@@ -297,11 +298,11 @@ function App() {
   const [activeAiSubMaskId, setActiveAiSubMaskId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [displaySize, setDisplaySize] = useState<ImageDimensions>({ width: 0, height: 0 });
-  const [previewSize, setPreviewSize] = useState<ImageDimensions>({ width: 0, height: 0 });
+  const [_previewSize, setPreviewSize] = useState<ImageDimensions>({ width: 0, height: 0 });
   const [baseRenderSize, setBaseRenderSize] = useState<ImageDimensions>({ width: 0, height: 0 });
   const baseRenderSizeRef = useRef<any>(null);
   const [originalSize, setOriginalSize] = useState<ImageDimensions>({ width: 0, height: 0 });
-  const [isLoadingFullRes, setIsLoadingFullRes] = useState(false);
+  const [isLoadingFullRes, _setIsLoadingFullRes] = useState(false);
   const [isRotationActive, setIsRotationActive] = useState(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('thirds');
   const [overlayRotation, setOverlayRotation] = useState(0);
@@ -338,7 +339,7 @@ function App() {
     [],
   );
 
-  const [initialFitScale, setInitialFitScale] = useState<number | null>(null);
+  const [_initialFitScale, setInitialFitScale] = useState<number | null>(null);
   const [renderedRightPanel, setRenderedRightPanel] = useState<Panel | null>(activeRightPanel);
   const [collapsibleSectionsState, setCollapsibleSectionsState] = useState<CollapsibleSectionsState>({
     basic: true,
@@ -572,7 +573,7 @@ function App() {
     adjustments?.orientationSteps,
   ]);
 
-  const visualAdjustmentsKey = useMemo(() => {
+  const _visualAdjustmentsKey = useMemo(() => {
     if (!adjustments) return '';
     const { rating: _rating, sectionVisibility: _sectionVisibility, ...visualAdjustments } = adjustments;
     return JSON.stringify(visualAdjustments);
@@ -876,7 +877,7 @@ function App() {
         lensTcaEnabled: adjustments.lensTcaEnabled,
         lensVignetteEnabled: adjustments.lensVignetteEnabled,
       };
-      const newParameters = await invoke(Invokes.GenerateAiSubjectMask, {
+      const newParameters = (await invoke(Invokes.GenerateAiSubjectMask, {
         jsAdjustments: transformAdjustments,
         endPoint: [endPoint.x, endPoint.y],
         flipHorizontal: adjustments.flipHorizontal,
@@ -885,7 +886,7 @@ function App() {
         path: selectedImage.path,
         rotation: adjustments.rotation,
         startPoint: [startPoint.x, startPoint.y],
-      });
+      })) as Record<string, any>;
 
       const subMask = adjustments.aiPatches
         ?.flatMap((p: AiPatch) => p.subMasks)
@@ -928,13 +929,13 @@ function App() {
         lensTcaEnabled: adjustments.lensTcaEnabled,
         lensVignetteEnabled: adjustments.lensVignetteEnabled,
       };
-      const newParameters = await invoke(Invokes.GenerateAiForegroundMask, {
+      const newParameters = (await invoke(Invokes.GenerateAiForegroundMask, {
         jsAdjustments: transformAdjustments,
         flipHorizontal: adjustments.flipHorizontal,
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
         rotation: adjustments.rotation,
-      });
+      })) as Record<string, any>;
 
       const subMask = adjustments.aiPatches
         ?.flatMap((p: AiPatch) => p.subMasks)
@@ -977,13 +978,13 @@ function App() {
         lensTcaEnabled: adjustments.lensTcaEnabled,
         lensVignetteEnabled: adjustments.lensVignetteEnabled,
       };
-      const newParameters = await invoke(Invokes.GenerateAiSkyMask, {
+      const newParameters = (await invoke(Invokes.GenerateAiSkyMask, {
         jsAdjustments: transformAdjustments,
         flipHorizontal: adjustments.flipHorizontal,
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
         rotation: adjustments.rotation,
-      });
+      })) as Record<string, any>;
 
       const subMask = adjustments.aiPatches
         ?.flatMap((p: AiPatch) => p.subMasks)
@@ -1516,7 +1517,7 @@ function App() {
         if (settings?.pinnedFolders && settings.pinnedFolders.length > 0) {
           try {
             const trees = await invoke(Invokes.GetPinnedFolderTrees, { paths: settings.pinnedFolders });
-            setPinnedFolderTrees(trees);
+            setPinnedFolderTrees(trees as any[]);
           } catch (err) {
             console.error('Failed to load pinned folder trees:', err);
           }
@@ -1687,7 +1688,7 @@ function App() {
     if (currentPins.length > 0) {
       try {
         const trees = await invoke(Invokes.GetPinnedFolderTrees, { paths: currentPins });
-        setPinnedFolderTrees(trees);
+        setPinnedFolderTrees(trees as any[]);
       } catch (err) {
         console.error('Failed to refresh pinned folder trees:', err);
       }
@@ -1702,8 +1703,8 @@ function App() {
       const currentPins = appSettings.pinnedFolders || [];
       const isPinned = currentPins.includes(path);
       const newPins = isPinned
-        ? currentPins.filter((p) => p !== path)
-        : [...currentPins, path].sort((a, b) => a.localeCompare(b));
+        ? currentPins.filter((p: any) => p !== path)
+        : [...currentPins, path].sort((a: any, b: any) => a.localeCompare(b));
 
       if (!isPinned && path === currentFolderPath) {
         handleActiveTreeSectionChange('pinned');
@@ -1713,7 +1714,7 @@ function App() {
 
       try {
         const trees = await invoke(Invokes.GetPinnedFolderTrees, { paths: newPins });
-        setPinnedFolderTrees(trees);
+        setPinnedFolderTrees(trees as any[]);
       } catch (err) {
         console.error('Failed to refresh pinned folders:', err);
       }
@@ -1740,7 +1741,7 @@ function App() {
         setActiveView('library');
 
         if (isNewRoot) {
-          setExpandedFolders(new Set([path]));
+          setExpandedFolders(new Set(path ? [path] : []));
         } else if (path) {
           setExpandedFolders((prev) => {
             const newSet = new Set(prev);
@@ -1844,7 +1845,7 @@ function App() {
         });
       } catch (err) {
         console.error('Failed to load folder contents:', err);
-        setError('Failed to load images from the selected folder.');
+        setError(t('app.failedToLoadImages'));
         setIsTreeLoading(false);
       } finally {
         setIsViewLoading(false);
@@ -1911,7 +1912,7 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to refresh image list:', err);
-      setError('Failed to refresh image list.');
+      setError(t('app.failedToRefreshImageList'));
     }
   }, [currentFolderPath, sortCriteria.key, appSettings?.enableExifReading, libraryViewMode]);
 
@@ -2109,20 +2110,20 @@ function App() {
       !pathsToDelete[0].includes('?vc=') &&
       imageList.some((image) => image.path.startsWith(`${pathsToDelete[0]}?vc=`));
 
-    let modalTitle = 'Confirm Delete';
+    let modalTitle = t('app.confirmDelete');
     let modalMessage = '';
-    let confirmText = 'Delete';
+    let confirmText = t('common.delete');
 
     if (selectionHasVirtualCopies) {
-      modalTitle = 'Delete Image and All Virtual Copies?';
-      modalMessage = `Are you sure you want to permanently delete this image and all of its virtual copies? This action cannot be undone.`;
-      confirmText = 'Delete All';
+      modalTitle = t('app.deleteImageAndCopies');
+      modalMessage = t('app.deleteImageAndCopiesMessage');
+      confirmText = t('app.deleteAll');
     } else if (isSingle) {
-      modalMessage = `Are you sure you want to permanently delete this image? This action cannot be undone. Right-click for more options (e.g., deleting associated files).`;
-      confirmText = 'Delete Selected Only';
+      modalMessage = t('app.deleteSingleMessage');
+      confirmText = t('app.deleteSelectedOnly');
     } else {
-      modalMessage = `Are you sure you want to permanently delete these ${pathsToDelete.length} images? This action cannot be undone. Right-click for more options (e.g., deleting associated files).`;
-      confirmText = 'Delete Selected Only';
+      modalMessage = t('app.deleteMultipleMessage', { count: pathsToDelete.length });
+      confirmText = t('app.deleteSelectedOnly');
     }
 
     setConfirmModalState({
@@ -2515,7 +2516,6 @@ function App() {
     return () => {
       if (dragIdleTimer.current) clearTimeout(dragIdleTimer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     adjustments,
     selectedImage?.path,
@@ -2659,7 +2659,7 @@ function App() {
         } catch (e) {
           if (isEffectActive) {
             console.error('Failed to generate original preview:', e);
-            setError('Failed to show original image.');
+            setError(t('app.failedToShowOriginal'));
             setShowOriginal(false);
           }
         }
@@ -2968,7 +2968,7 @@ function App() {
           ...prev,
           error: null,
           finalImageBase64: base64,
-          progressMessage: 'Panorama Ready',
+          progressMessage: t('app.panoramaReady'),
         }));
       }
     });
@@ -2979,7 +2979,7 @@ function App() {
           ...prev,
           error: String(event.payload),
           finalImageBase64: null,
-          progressMessage: 'An error occurred.',
+          progressMessage: t('app.anErrorOccurred'),
         }));
       }
     });
@@ -3014,7 +3014,7 @@ function App() {
           ...prev,
           error: null,
           finalImageBase64: base64,
-          progressMessage: 'Hdr Ready',
+          progressMessage: t('app.hdrReady'),
         }));
       }
     });
@@ -3025,7 +3025,7 @@ function App() {
           ...prev,
           error: String(event.payload),
           finalImageBase64: null,
-          progressMessage: 'An error occurred.',
+          progressMessage: t('app.anErrorOccurred'),
         }));
       }
     });
@@ -3045,9 +3045,10 @@ function App() {
       if (isEffectActive) {
         setCullingModalState({
           isOpen: true,
-          progress: { current: 0, total: event.payload, stage: 'Initializing...' },
+          progress: { current: 0, total: event.payload, stage: t('culling.starting') },
           suggestions: null,
           error: null,
+          pathsToCull: [],
         });
       }
     });
@@ -3127,7 +3128,7 @@ function App() {
         ...prev,
         isProcessing: true,
         error: null,
-        progressMessage: 'Starting engine...',
+        progressMessage: t('app.startingEngine'),
       }));
 
       try {
@@ -3179,7 +3180,7 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to open directory dialog:', err);
-      setError('Failed to open folder selection dialog.');
+      setError(t('app.failedToOpenFolderDialog'));
     }
   };
 
@@ -3209,7 +3210,7 @@ function App() {
       setRootPath(root);
 
       if (folderState?.expandedFolders) {
-        const newExpandedFolders = new Set(folderState.expandedFolders);
+        const newExpandedFolders = new Set<string>(folderState.expandedFolders);
         newExpandedFolders.add(root);
         setExpandedFolders(newExpandedFolders);
       } else {
@@ -3246,7 +3247,7 @@ function App() {
     };
     restore().catch((err) => {
       console.error('Failed to restore session, folder might be missing:', err);
-      setError('Failed to restore session. The last used folder may have been moved or deleted.');
+      setError(t('app.failedToRestoreSession'));
       if (appSettings) {
         handleSettingsChange({ ...appSettings, lastRootPath: null, lastFolderState: null });
       }
@@ -3607,7 +3608,7 @@ function App() {
         const selected = await open({
           filters: [
             {
-              name: 'All Supported Images',
+              name: t('app.allSupportedImages'),
               extensions: allImageExtensions,
             },
             {
@@ -3615,11 +3616,11 @@ function App() {
               extensions: processedRaw,
             },
             {
-              name: 'Standard Images (JPEG, PNG, etc.)',
+              name: t('app.standardImages'),
               extensions: processedNonRaw,
             },
             {
-              name: 'All Files',
+              name: t('app.allFiles'),
               extensions: ['*'],
             },
           ],
@@ -3658,7 +3659,7 @@ function App() {
 
     const options: Array<Option> = [
       {
-        label: 'Export Image',
+        label: t('app.exportImage'),
         icon: Save,
         onClick: () => {
           setRenderedRightPanel(Panel.Export);
@@ -3666,33 +3667,33 @@ function App() {
         },
       },
       { type: OPTION_SEPARATOR },
-      { label: 'Undo', icon: Undo, onClick: undo, disabled: !canUndo },
-      { label: 'Redo', icon: Redo, onClick: redo, disabled: !canRedo },
+      { label: t('app.undo'), icon: Undo, onClick: undo, disabled: !canUndo },
+      { label: t('app.redo'), icon: Redo, onClick: redo, disabled: !canRedo },
       { type: OPTION_SEPARATOR },
-      { label: 'Copy Adjustments', icon: Copy, onClick: handleCopyAdjustments },
+      { label: t('app.copyAdjustments'), icon: Copy, onClick: handleCopyAdjustments },
       {
-        label: 'Paste Adjustments',
+        label: t('app.pasteAdjustments'),
         icon: ClipboardPaste,
         onClick: handlePasteAdjustments,
         disabled: copiedAdjustments === null,
       },
       {
-        label: 'Productivity',
+        label: t('app.productivity'),
         icon: Gauge,
         submenu: [
           {
-            label: 'Auto Adjust Image',
+            label: t('app.autoAdjustImage'),
             icon: Aperture,
             onClick: handleAutoAdjustments,
             disabled: !selectedImage?.isReady,
           },
           {
             icon: CopyPlus,
-            label: 'Create Virtual Copy',
+            label: t('app.createVirtualCopy'),
             onClick: () => handleCreateVirtualCopy(selectedImage.path),
           },
           {
-            label: 'Denoise',
+            label: t('app.denoise'),
             icon: Grip,
             onClick: () => {
               setDenoiseModalState({
@@ -3706,7 +3707,7 @@ function App() {
             },
           },
           {
-            label: 'Convert Negative',
+            label: t('app.convertNegative'),
             icon: Film,
             onClick: () => {
               if (selectedImage) {
@@ -3720,25 +3721,25 @@ function App() {
           {
             disabled: true,
             icon: SquaresUnite,
-            label: 'Stitch Panorama',
+            label: t('app.stitchPanorama'),
           },
           {
             disabled: true,
             icon: Images,
-            label: 'Merge to HDR',
+            label: t('app.mergeToHdr'),
           },
           {
             icon: LayoutTemplate,
-            label: 'Frame Image',
+            label: t('app.frameImage'),
             onClick: () => {
               setCollageModalState({
                 isOpen: true,
-                sourceImages: [selectedImage],
+                sourceImages: [selectedImage as any as ImageFile],
               });
             },
           },
           {
-            label: 'Cull Image',
+            label: t('app.cullImage'),
             icon: Users,
             disabled: true,
           },
@@ -3746,18 +3747,18 @@ function App() {
       },
       { type: OPTION_SEPARATOR },
       {
-        label: 'Rating',
+        label: t('app.rating'),
         icon: Star,
         submenu: [0, 1, 2, 3, 4, 5].map((rating: number) => ({
-          label: rating === 0 ? 'No Rating' : `${rating} Star${rating !== 1 ? 's' : ''}`,
+          label: rating === 0 ? t('app.noRating') : `${rating} Star${rating !== 1 ? 's' : ''}`,
           onClick: () => handleRate(rating),
         })),
       },
       {
-        label: 'Color Label',
+        label: t('app.colorLabel'),
         icon: Palette,
         submenu: [
-          { label: 'No Label', onClick: () => handleSetColorLabel(null) },
+          { label: t('app.noLabel'), onClick: () => handleSetColorLabel(null) },
           ...COLOR_LABELS.map((label: Color) => ({
             label: label.name.charAt(0).toUpperCase() + label.name.slice(1),
             color: label.color,
@@ -3766,7 +3767,7 @@ function App() {
         ],
       },
       {
-        label: 'Tagging',
+        label: t('app.tagging'),
         icon: Tag,
         submenu: [
           {
@@ -3782,7 +3783,7 @@ function App() {
       },
       { type: OPTION_SEPARATOR },
       {
-        label: 'Reset Adjustments',
+        label: t('app.resetAdjustments'),
         icon: RotateCcw,
         onClick: () => {
           debouncedSetHistory.cancel();
@@ -3825,8 +3826,8 @@ function App() {
     const selectionCount = finalSelection.length;
     const isSingleSelection = selectionCount === 1;
     const isEditingThisImage = selectedImage?.path === path;
-    const deleteLabel = isSingleSelection ? 'Delete Image' : `Delete ${selectionCount} Images`;
-    const exportLabel = isSingleSelection ? 'Export Image' : `Export ${selectionCount} Images`;
+    const deleteLabel = isSingleSelection ? t('app.deleteImage') : t('app.deleteImages', { count: selectionCount });
+    const exportLabel = isSingleSelection ? t('app.exportImage') : t('app.exportImages', { count: selectionCount });
 
     const selectionHasVirtualCopies =
       isSingleSelection &&
@@ -3843,9 +3844,9 @@ function App() {
     let deleteSubmenu;
     if (selectionHasVirtualCopies) {
       deleteSubmenu = [
-        { label: 'Cancel', icon: X, onClick: () => {} },
+        { label: t('common.cancel'), icon: X, onClick: () => {} },
         {
-          label: 'Confirm Delete + Virtual Copies',
+          label: t('app.confirmDeleteVirtualCopies'),
           icon: Check,
           isDestructive: true,
           onClick: () => executeDelete(finalSelection, { includeAssociated: false }),
@@ -3853,15 +3854,15 @@ function App() {
       ];
     } else if (hasAssociatedFiles) {
       deleteSubmenu = [
-        { label: 'Cancel', icon: X, onClick: () => {} },
+        { label: t('common.cancel'), icon: X, onClick: () => {} },
         {
-          label: 'Delete Selected Only',
+          label: t('app.deleteSelectedOnly'),
           icon: Check,
           isDestructive: true,
           onClick: () => executeDelete(finalSelection, { includeAssociated: false }),
         },
         {
-          label: 'Delete + Associated',
+          label: t('app.deleteAndAssociated'),
           icon: Check,
           isDestructive: true,
           onClick: () => executeDelete(finalSelection, { includeAssociated: true }),
@@ -3869,9 +3870,9 @@ function App() {
       ];
     } else {
       deleteSubmenu = [
-        { label: 'Cancel', icon: X, onClick: () => {} },
+        { label: t('common.cancel'), icon: X, onClick: () => {} },
         {
-          label: 'Confirm',
+          label: t('common.confirm'),
           icon: Check,
           isDestructive: true,
           onClick: () => executeDelete(finalSelection, { includeAssociated: false }),
@@ -3886,16 +3887,20 @@ function App() {
       submenu: deleteSubmenu,
     };
 
-    const pasteLabel = isSingleSelection ? 'Paste Adjustments' : `Paste Adjustments to ${selectionCount} Images`;
-    const resetLabel = isSingleSelection ? 'Reset Adjustments' : `Reset Adjustments on ${selectionCount} Images`;
-    const copyLabel = isSingleSelection ? 'Copy Image' : `Copy ${selectionCount} Images`;
-    const autoAdjustLabel = isSingleSelection ? 'Auto Adjust Image' : `Auto Adjust Images`;
-    const renameLabel = isSingleSelection ? 'Rename Image' : `Rename ${selectionCount} Images`;
-    const cullLabel = isSingleSelection ? 'Cull Image' : `Cull Images`;
-    const collageLabel = isSingleSelection ? 'Frame Image' : 'Create Collage';
-    const stitchLabel = 'Stitch Panorama';
-    const conversionLabel = 'Convert Negative';
-    const mergeLabel = `Merge to HDR`;
+    const pasteLabel = isSingleSelection
+      ? t('app.pasteAdjustments')
+      : t('app.pasteAdjustmentsTo', { count: selectionCount });
+    const resetLabel = isSingleSelection
+      ? t('app.resetAdjustments')
+      : t('app.resetAdjustmentsOn', { count: selectionCount });
+    const copyLabel = isSingleSelection ? t('app.copyImage') : t('app.copyImages', { count: selectionCount });
+    const autoAdjustLabel = isSingleSelection ? t('app.autoAdjustImage') : t('app.autoAdjustImages');
+    const renameLabel = isSingleSelection ? t('app.renameImage') : t('app.renameImages', { count: selectionCount });
+    const cullLabel = isSingleSelection ? t('app.cullImage') : t('app.cullImages');
+    const collageLabel = isSingleSelection ? t('app.frameImage') : t('app.createCollage');
+    const stitchLabel = t('app.stitchPanorama');
+    const conversionLabel = t('app.convertNegative');
+    const mergeLabel = t('app.mergeToHdr');
 
     const handleCreateVirtualCopy = async (sourcePath: string) => {
       try {
@@ -3956,7 +3961,7 @@ function App() {
             {
               disabled: !isSingleSelection,
               icon: Edit,
-              label: 'Edit Image',
+              label: t('app.editImage'),
               onClick: () => handleImageSelect(finalSelection[0]),
             },
             {
@@ -3977,7 +3982,7 @@ function App() {
       {
         disabled: !isSingleSelection,
         icon: Copy,
-        label: 'Copy Adjustments',
+        label: t('app.copyAdjustments'),
         onClick: async () => {
           try {
             const metadata: any = await invoke(Invokes.LoadMetadata, { path: finalSelection[0] });
@@ -4006,7 +4011,7 @@ function App() {
         onClick: handlePasteAdjustments,
       },
       {
-        label: 'Productivity',
+        label: t('app.productivity'),
         icon: Gauge,
         submenu: [
           {
@@ -4017,11 +4022,11 @@ function App() {
           {
             disabled: !isSingleSelection,
             icon: CopyPlus,
-            label: 'Create Virtual Copy',
+            label: t('app.createVirtualCopy'),
             onClick: () => handleCreateVirtualCopy(finalSelection[0]),
           },
           {
-            label: 'Denoise',
+            label: t('app.denoise'),
             icon: Grip,
             disabled: !isSingleSelection,
             onClick: () => {
@@ -4055,7 +4060,7 @@ function App() {
                 error: null,
                 finalImageBase64: null,
                 isOpen: true,
-                progressMessage: 'Starting panorama process...',
+                progressMessage: t('app.startingPanorama'),
                 stitchingSourcePaths: finalSelection,
               });
               invoke(Invokes.StitchPanorama, { paths: finalSelection }).catch((err) => {
@@ -4063,7 +4068,7 @@ function App() {
                   ...prev,
                   error: String(err),
                   isOpen: true,
-                  progressMessage: 'Failed to start.',
+                  progressMessage: t('app.failedToStart'),
                 }));
               });
             },
@@ -4077,7 +4082,7 @@ function App() {
                 error: null,
                 finalImageBase64: null,
                 isOpen: true,
-                progressMessage: 'Starting hdr process...',
+                progressMessage: t('app.startingHdr'),
                 stitchingSourcePaths: finalSelection,
               });
               invoke(Invokes.MergeHdr, { paths: finalSelection }).catch((err) => {
@@ -4085,7 +4090,7 @@ function App() {
                   ...prev,
                   error: String(err),
                   isOpen: true,
-                  progressMessage: 'Failed to start.',
+                  progressMessage: t('app.failedToStart'),
                 }));
               });
             },
@@ -4129,7 +4134,7 @@ function App() {
       {
         disabled: !isSingleSelection,
         icon: CopyPlus,
-        label: 'Duplicate Image',
+        label: t('app.duplicateImage'),
         onClick: async () => {
           try {
             await invoke(Invokes.DuplicateFile, { path: finalSelection[0] });
@@ -4144,17 +4149,17 @@ function App() {
       { type: OPTION_SEPARATOR },
       {
         icon: Star,
-        label: 'Rating',
+        label: t('app.rating'),
         submenu: [0, 1, 2, 3, 4, 5].map((rating: number) => ({
-          label: rating === 0 ? 'No Rating' : `${rating} Star${rating !== 1 ? 's' : ''}`,
+          label: rating === 0 ? t('app.noRating') : `${rating} Star${rating !== 1 ? 's' : ''}`,
           onClick: () => handleRate(rating, finalSelection),
         })),
       },
       {
-        label: 'Color Label',
+        label: t('app.colorLabel'),
         icon: Palette,
         submenu: [
-          { label: 'No Label', onClick: () => handleSetColorLabel(null, finalSelection) },
+          { label: t('app.noLabel'), onClick: () => handleSetColorLabel(null, finalSelection) },
           ...COLOR_LABELS.map((label: Color) => ({
             label: label.name.charAt(0).toUpperCase() + label.name.slice(1),
             color: label.color,
@@ -4163,7 +4168,7 @@ function App() {
         ],
       },
       {
-        label: 'Tagging',
+        label: t('app.tagging'),
         icon: Tag,
         submenu: [
           {
@@ -4181,7 +4186,7 @@ function App() {
       {
         disabled: !isSingleSelection,
         icon: Folder,
-        label: 'Show in File Explorer',
+        label: t('app.showInFileExplorer'),
         onClick: () => {
           invoke(Invokes.ShowInFinder, { path: finalSelection[0] }).catch((err) =>
             setError(`Could not show file in explorer: ${err}`),
@@ -4232,7 +4237,9 @@ function App() {
 
         const currentPins = appSettings?.pinnedFolders || [];
         if (currentPins.includes(oldPath)) {
-          const newPins = currentPins.map((p) => (p === oldPath ? newPath : p)).sort((a, b) => a.localeCompare(b));
+          const newPins = currentPins
+            .map((p: any) => (p === oldPath ? newPath : p))
+            .sort((a: any, b: any) => a.localeCompare(b));
           newAppSettings.pinnedFolders = newPins;
           settingsChanged = true;
         }
@@ -4257,18 +4264,18 @@ function App() {
     }
     const isRoot = targetPath === rootPath;
     const numCopied = copiedFilePaths.length;
-    const copyPastedLabel = numCopied === 1 ? 'Copy image here' : `Copy ${numCopied} images here`;
-    const movePastedLabel = numCopied === 1 ? 'Move image here' : `Move ${numCopied} images here`;
+    const copyPastedLabel = numCopied === 1 ? t('app.copyImageHere') : t('app.copyImagesHere', { count: numCopied });
+    const movePastedLabel = numCopied === 1 ? t('app.moveImageHere') : t('app.moveImagesHere', { count: numCopied });
 
     const pinOption = isCurrentlyPinned
       ? {
           icon: PinOff,
-          label: 'Unpin Folder',
+          label: t('app.unpinFolder'),
           onClick: () => handleTogglePinFolder(targetPath),
         }
       : {
           icon: Pin,
-          label: 'Pin Folder',
+          label: t('app.pinFolder'),
           onClick: () => handleTogglePinFolder(targetPath),
         };
 
@@ -4277,7 +4284,7 @@ function App() {
       { type: OPTION_SEPARATOR },
       {
         icon: FolderPlus,
-        label: 'New Folder',
+        label: t('app.newFolder'),
         onClick: () => {
           setFolderActionTarget(targetPath);
           setIsCreateFolderModalOpen(true);
@@ -4286,7 +4293,7 @@ function App() {
       {
         disabled: isRoot,
         icon: FileEdit,
-        label: 'Rename Folder',
+        label: t('app.renameFolder'),
         onClick: () => {
           setFolderActionTarget(targetPath);
           setIsRenameFolderModalOpen(true);
@@ -4296,7 +4303,7 @@ function App() {
       {
         disabled: copiedFilePaths.length === 0,
         icon: ClipboardPaste,
-        label: 'Paste',
+        label: t('app.paste'),
         submenu: [
           {
             label: copyPastedLabel,
@@ -4325,11 +4332,11 @@ function App() {
           },
         ],
       },
-      { icon: FolderInput, label: 'Import Images', onClick: () => handleImportClick(targetPath) },
+      { icon: FolderInput, label: t('app.importImages'), onClick: () => handleImportClick(targetPath) },
       { type: OPTION_SEPARATOR },
       {
         icon: Folder,
-        label: 'Show in File Explorer',
+        label: t('app.showInFileExplorer'),
         onClick: () =>
           invoke(Invokes.ShowInFinder, { path: targetPath }).catch((err) => setError(`Could not show folder: ${err}`)),
       },
@@ -4339,11 +4346,11 @@ function App() {
               disabled: isRoot,
               icon: Trash2,
               isDestructive: true,
-              label: 'Delete Folder',
+              label: t('app.deleteFolder'),
               submenu: [
-                { label: 'Cancel', icon: X, onClick: () => {} },
+                { label: t('common.cancel'), icon: X, onClick: () => {} },
                 {
-                  label: 'Confirm',
+                  label: t('common.confirm'),
                   icon: Check,
                   isDestructive: true,
                   onClick: async () => {
@@ -4368,12 +4375,12 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     const numCopied = copiedFilePaths.length;
-    const copyPastedLabel = numCopied === 1 ? 'Copy image here' : `Copy ${numCopied} images here`;
-    const movePastedLabel = numCopied === 1 ? 'Move image here' : `Move ${numCopied} images here`;
+    const copyPastedLabel = numCopied === 1 ? t('app.copyImageHere') : t('app.copyImagesHere', { count: numCopied });
+    const movePastedLabel = numCopied === 1 ? t('app.moveImageHere') : t('app.moveImagesHere', { count: numCopied });
 
     const options = [
       {
-        label: 'Paste',
+        label: t('app.paste'),
         icon: ClipboardPaste,
         disabled: copiedFilePaths.length === 0,
         submenu: [
@@ -4406,7 +4413,7 @@ function App() {
       },
       {
         icon: FolderInput,
-        label: 'Import Images',
+        label: t('app.importImages'),
         onClick: () => handleImportClick(currentFolderPath as string),
         disabled: !currentFolderPath,
       },

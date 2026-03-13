@@ -3,12 +3,13 @@ import { GLOBAL_KEYS } from './AppProperties';
 
 interface SliderProps {
   defaultValue?: number;
+  disabled?: boolean;
   label: any;
   max: number;
   min: number;
   onChange(event: any): void;
   onDragStateChange?(state: boolean): void;
-  step: number;
+  step?: number;
   value: number;
   trackClassName?: string;
 }
@@ -22,7 +23,7 @@ const Slider = ({
   min,
   onChange,
   onDragStateChange = () => {},
-  step,
+  step = 1,
   value,
   trackClassName,
 }: SliderProps) => {
@@ -298,7 +299,7 @@ const Slider = ({
           onMouseDown={handleDragStart}
           onMouseUp={handleDragEnd}
           onTouchEnd={handleDragEnd}
-          onTouchStart={handleDragStart}
+          onTouchStart={handleDragStart as any}
           step={String(step)}
           type="range"
           value={displayValue}

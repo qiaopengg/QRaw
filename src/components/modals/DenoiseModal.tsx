@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle, XCircle, Loader2, Save, Grip, RefreshCw, ZoomIn, ZoomOut, Move } from 'lucide-react';
 import Button from '../ui/Button';
 import Slider from '../ui/Slider';
@@ -19,6 +20,7 @@ interface DenoiseModalProps {
 }
 
 const ImageCompare = ({ original, denoised }: { original: string; denoised: string }) => {
+  const { t } = useTranslation();
   const [sliderPosition, setSliderPosition] = useState(50);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -108,7 +110,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-md overflow-hidden border border-surface">
       <div className="h-9 bg-bg-primary border-b border-surface flex items-center justify-between px-3">
         <Text as="div" variant={TextVariants.small} className="flex items-center gap-2">
-          <Move size={14} /> <span>Pan & Zoom enabled</span>
+          <Move size={14} /> <span>{t('denoise.panZoomEnabled')}</span>
         </Text>
         <Text as="div" variant={TextVariants.small} className="flex items-center gap-2">
           <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))} className="hover:text-text-primary">
@@ -126,7 +128,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
             }}
             className="ml-2 text-accent hover:underline"
           >
-            Reset
+            {t('common.reset')}
           </button>
         </Text>
       </div>
@@ -182,7 +184,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
           weight={TextWeights.medium}
           className="absolute top-3 left-3 bg-black/70 px-2 py-1 rounded pointer-events-none z-0"
         >
-          Original
+          {t('denoise.original')}
         </Text>
         <Text
           as="div"
@@ -191,7 +193,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
           weight={TextWeights.medium}
           className="absolute top-3 right-3 bg-accent/90 px-2 py-1 rounded pointer-events-none z-0"
         >
-          Denoised
+          {t('denoise.denoised')}
         </Text>
       </div>
     </div>
@@ -215,6 +217,7 @@ export default function DenoiseModal({
   const [intensity, setIntensity] = useState<number>(15);
   const [isSaving, setIsSaving] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   const mouseDownTarget = useRef<EventTarget | null>(null);
 
@@ -281,7 +284,7 @@ export default function DenoiseModal({
         <div className="flex flex-col items-center justify-center py-10 h-[400px]">
           <XCircle className="w-16 h-16 text-red-500 mb-4" />
           <Text variant={TextVariants.title} className="mb-2 text-center">
-            Processing Failed
+            {t('denoise.processingFailed')}
           </Text>
           <Text className="text-center p-2 rounded-md max-w-md">{String(error)}</Text>
         </div>
@@ -300,7 +303,7 @@ export default function DenoiseModal({
               className="flex items-center justify-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2"
             >
               <CheckCircle className="w-5 h-5" />
-              <span>Image Saved Successfully!</span>
+              <span>{t('denoise.imageSaved')}</span>
             </Text>
           )}
         </div>
@@ -312,10 +315,10 @@ export default function DenoiseModal({
         <div className="flex flex-col items-center justify-center py-12 h-[400px]">
           <Loader2 className="w-16 h-16 text-accent animate-spin mb-4" />
           <Text variant={TextVariants.title} className="mb-2 text-center">
-            Denoising Image
+            {t('denoise.denoising')}
           </Text>
           <Text className="text-center h-6 font-mono w-64 flex justify-center items-center">
-            {progressMessage || 'Initializing...'}
+            {progressMessage || t('denoise.initializing')}
           </Text>
         </div>
       );
@@ -325,11 +328,9 @@ export default function DenoiseModal({
       <div className="flex flex-col items-center justify-center h-[400px] text-text-secondary">
         <Grip className="w-16 h-16 mb-4" />
         <Text variant={TextVariants.title} className="mb-2 text-center">
-          Denoise Image
+          {t('denoise.title')}
         </Text>
-        <Text className="text-center max-w-sm">
-          Adjust the intensity slider below and click Start to preview the results.
-        </Text>
+        <Text className="text-center max-w-sm">{t('denoise.description')}</Text>
       </div>
     );
   };
@@ -338,7 +339,7 @@ export default function DenoiseModal({
     if (error) {
       return (
         <Button onClick={handleClose} className="w-full">
-          Close
+          {t('common.close')}
         </Button>
       );
     }
@@ -350,9 +351,9 @@ export default function DenoiseModal({
             onClick={handleClose}
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors"
           >
-            Close
+            {t('common.close')}
           </button>
-          <Button onClick={handleOpen}>Open in Editor</Button>
+          <Button onClick={handleOpen}>{t('denoise.openInEditor')}</Button>
         </>
       );
     }
@@ -362,16 +363,16 @@ export default function DenoiseModal({
     return (
       <div className="w-full flex items-center gap-4">
         <div className={`flex-1 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-            <Slider
-                label="Strength"
-                value={intensity}
-                min={0}
-                max={100}
-                step={1}
-                defaultValue={15}
-                onChange={(e) => setIntensity(Number(e.target.value))}
-                trackClassName="bg-bg-secondary"
-            />
+          <Slider
+            label={t('denoise.strength')}
+            value={intensity}
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={15}
+            onChange={(e) => setIntensity(Number(e.target.value))}
+            trackClassName="bg-bg-secondary"
+          />
         </div>
 
         <div className="h-8 w-px bg-surface mx-2" />
@@ -381,7 +382,7 @@ export default function DenoiseModal({
             onClick={handleClose}
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors text-sm"
           >
-            {previewBase64 ? 'Close' : 'Cancel'}
+            {previewBase64 ? t('common.close') : t('common.cancel')}
           </button>
 
           <Button onClick={handleRunDenoise} disabled={isProcessing} variant={previewBase64 ? 'secondary' : 'primary'}>
@@ -392,13 +393,13 @@ export default function DenoiseModal({
             ) : (
               <Grip className="mr-2" size={16} />
             )}
-            {previewBase64 ? 'Retry' : 'Start'}
+            {previewBase64 ? t('common.retry') : t('common.start')}
           </Button>
 
           {previewBase64 && (
             <Button onClick={handleSave} disabled={isSaving || isProcessing}>
               {isSaving ? <Loader2 className="animate-spin mr-2" size={16} /> : <Save className="mr-2" size={16} />}
-              Save Image
+              {t('denoise.saveImage')}
             </Button>
           )}
         </div>

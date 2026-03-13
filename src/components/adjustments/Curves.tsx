@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertOctagon, RotateCcw, Copy, ClipboardPaste } from 'lucide-react';
 import clsx from 'clsx';
@@ -159,6 +160,7 @@ export default function CurveGraph({
   onDragStateChange,
 }: CurveGraphProps) {
   const { showContextMenu } = useContextMenu();
+  const { t } = useTranslation();
   const [activeChannel, setActiveChannel] = useState<ActiveChannel>(ActiveChannel.Luma);
   const [draggingPointIndex, setDraggingPointIndex] = useState<number | null>(null);
   const [localPoints, setLocalPoints] = useState<Array<Coord> | null>(null);
@@ -296,7 +298,7 @@ export default function CurveGraph({
         variant={TextVariants.small}
         className="w-full aspect-square bg-surface-secondary p-1 rounded-md flex items-center justify-center"
       >
-        Curve data not available.
+        {t('curves.dataNotAvailable')}
       </Text>
     );
   }
@@ -448,21 +450,23 @@ export default function CurveGraph({
       },
     );
 
+    const channelName = activeChannel.charAt(0).toUpperCase() + activeChannel.slice(1);
+
     const options = [
       {
-        label: `Copy ${activeChannel.charAt(0).toUpperCase() + activeChannel.slice(1)} Curve`,
+        label: t('curves.copyCurve', { channel: channelName }),
         icon: Copy,
         onClick: handleCopy,
       },
       {
-        label: 'Paste Curve',
+        label: t('curves.pasteCurve'),
         icon: ClipboardPaste,
         onClick: handlePaste,
         disabled: !curveClipboard,
       },
       { type: OPTION_SEPARATOR },
       {
-        label: `Reset ${activeChannel.charAt(0).toUpperCase() + activeChannel.slice(1)} Curve`,
+        label: t('curves.resetCurve', { channel: channelName }),
         icon: RotateCcw,
         onClick: handleReset,
       },
@@ -470,7 +474,7 @@ export default function CurveGraph({
 
     if (areOtherChannelsDirty) {
       options.push({
-        label: 'Reset All Curves',
+        label: t('curves.resetAllCurves'),
         icon: RotateCcw,
         onClick: handleResetAll,
       });
@@ -519,7 +523,7 @@ export default function CurveGraph({
             })}
             key="clipping"
             onClick={handleToggleClipping}
-            data-tooltip="Toggle Clipping Warnings"
+            data-tooltip={t('curves.toggleClipping')}
           >
             <AlertOctagon size={14} />
           </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Star, Copy, ClipboardPaste, RotateCcw, ChevronUp, ChevronDown, Check, Save, Settings } from 'lucide-react';
 import clsx from 'clsx';
 import Filmstrip from './Filmstrip';
@@ -49,6 +50,7 @@ interface StarRatingProps {
 }
 
 const StarRating = ({ rating, onRate, disabled }: StarRatingProps) => {
+  const { t } = useTranslation();
   return (
     <div className={clsx('flex items-center gap-1', disabled && 'cursor-not-allowed')}>
       {[...Array(5)].map((_, index: number) => {
@@ -59,7 +61,7 @@ const StarRating = ({ rating, onRate, disabled }: StarRatingProps) => {
             disabled={disabled}
             key={starValue}
             onClick={() => !disabled && onRate(starValue === rating ? 0 : starValue)}
-            data-tooltip={disabled ? 'Select an image to rate' : `Rate ${starValue} star${starValue > 1 ? 's' : ''}`}
+            data-tooltip={disabled ? t('bottomBar.selectImageToRate') : t('bottomBar.rateStar', { count: starValue })}
           >
             <Star
               size={18}

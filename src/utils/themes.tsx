@@ -11,7 +11,7 @@ export const THEMES: Array<ThemeProps> = [
   {
     id: Theme.Dark,
     name: 'Dark',
-    splashImage: '/splash-dark.jpg',
+    splashImage: '/2.JPG',
     cssVariables: {
       '--color-bg-primary-rgb': '45, 45, 45',
       '--opacity-bg-primary': '0.6',
@@ -30,7 +30,7 @@ export const THEMES: Array<ThemeProps> = [
   {
     id: Theme.Light,
     name: 'Light',
-    splashImage: '/splash-light.jpg',
+    splashImage: '/1.JPEG',
     cssVariables: {
       '--color-bg-primary-rgb': '250, 250, 250',
       '--opacity-bg-primary': '0.8',

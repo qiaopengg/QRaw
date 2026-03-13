@@ -42,7 +42,6 @@ function SubMenu({ cancelCloseSubmenu, closeSubmenu, hideContextMenu, options, p
 
   const customOption = options.length === 1 && options[0].customComponent ? options[0] : null;
   const CustomComponent = customOption?.customComponent;
-  const isInteractiveSubmenu = Boolean(customOption);
 
   useLayoutEffect(() => {
     if (parentRef?.current && menuRef?.current) {
@@ -122,11 +121,7 @@ function SubMenu({ cancelCloseSubmenu, closeSubmenu, hideContextMenu, options, p
         initial={{ opacity: 0, scale: 0.95 }}
         onContextMenu={(e: any) => e.preventDefault()}
         onMouseEnter={cancelCloseSubmenu}
-        onMouseLeave={() => {
-          if (!isInteractiveSubmenu) {
-            closeSubmenu(parentPath);
-          }
-        }}
+        onMouseLeave={() => closeSubmenu(parentPath)}
         ref={menuRef}
         style={style}
         transition={{ duration: 0.1, ease: 'easeOut' }}
@@ -154,7 +149,6 @@ function MenuItem({ option, path, hideContextMenu }: MenuItemProps) {
   const { activeSubmenu, openSubmenu, closeSubmenu, cancelCloseSubmenu } = useContextMenu();
   const itemRef = useRef(null);
   const hoverTimeoutRef = useRef<any>(null);
-  const hasInteractiveSubmenu = Boolean(option.submenu?.length === 1 && option.submenu[0].customComponent);
 
   const isSubmenuOpen =
     option.submenu &&
@@ -184,7 +178,7 @@ function MenuItem({ option, path, hideContextMenu }: MenuItemProps) {
       clearTimeout(hoverTimeoutRef.current);
     }
 
-    if (option.submenu && !option.disabled && !hasInteractiveSubmenu) {
+    if (option.submenu && !option.disabled) {
       closeSubmenu(path);
     }
   };
@@ -207,9 +201,6 @@ function MenuItem({ option, path, hideContextMenu }: MenuItemProps) {
           if (!option.disabled && !option.submenu && option.onClick) {
             option.onClick();
             hideContextMenu();
-          }
-          if (!option.disabled && option.submenu && hasInteractiveSubmenu) {
-            openSubmenu(path);
           }
         }}
         ref={itemRef}

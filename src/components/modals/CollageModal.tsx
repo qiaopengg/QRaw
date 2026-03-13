@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -62,6 +63,7 @@ const INITIAL_SPACING = 10;
 const INITIAL_BORDER_RADIUS = 8;
 
 export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: CollageModalProps) {
+  const { t } = useTranslation();
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
 
@@ -145,7 +147,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
             path: imageFile.path,
             jsAdjustments: adjustments,
           });
-          const blob = new Blob([imageData], { type: 'image/jpeg' });
+          const blob = new Blob([imageData as BlobPart], { type: 'image/jpeg' });
           const url = URL.createObjectURL(blob);
 
           return new Promise<LoadedImage>((resolve, reject) => {
@@ -599,11 +601,11 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
         <div>
           <Text variant={TextVariants.heading} className="mb-2 flex items-center justify-between">
             <span className="flex items-center gap-2">
-              <LayoutTemplate size={16} /> Layout
+              <LayoutTemplate size={16} /> {t('collage.layout')}
             </span>
             <button
               onClick={handleShuffleImages}
-              data-tooltip="Shuffle Images"
+              data-tooltip={t('collage.shuffleImages')}
               className="p-1.5 rounded-md hover:bg-surface"
             >
               <Shuffle size={16} />
@@ -633,7 +635,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
       <div>
         <Text variant={TextVariants.heading} className="mb-2 flex items-center justify-between">
           <span className="flex items-center gap-2">
-            <Crop size={16} /> Aspect Ratio
+            <Crop size={16} /> {t('collage.aspectRatio')}
           </span>
           <button
             className="p-1.5 rounded-md hover:bg-surface disabled:text-text-tertiary disabled:cursor-not-allowed"
@@ -672,17 +674,17 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
                   : 'bg-surface hover:bg-card-active',
               )}
             >
-              Original
+              {t('crop.original')}
             </button>
           )}
         </div>
 
-        <Switch label="Keep Original Aspect Ratio" checked={keepOriginalRatio} onChange={setKeepOriginalRatio} />
+        <Switch label={t('collage.keepOriginalRatio')} checked={keepOriginalRatio} onChange={setKeepOriginalRatio} />
       </div>
 
       <div className="space-y-2">
         <Slider
-          label="Spacing"
+          label={t('collage.spacing')}
           min={0}
           max={50}
           step={1}
@@ -691,7 +693,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
           onChange={(e) => setSpacing(Number(e.target.value))}
         />
         <Slider
-          label="Border Radius"
+          label={t('collage.borderRadius')}
           min={0}
           max={50}
           step={1}
@@ -703,7 +705,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
 
       <div>
         <Text variant={TextVariants.heading} className="mb-2 flex items-center gap-2">
-          <Palette size={16} /> Background
+          <Palette size={16} /> {t('collage.backgroundColor')}
         </Text>
         <div className="flex items-center gap-2 bg-surface p-2 rounded-md">
           <input
@@ -723,7 +725,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
 
       <div>
         <Text variant={TextVariants.heading} className="mb-2 flex items-center gap-2">
-          <Proportions size={16} /> Export Size (px)
+          <Proportions size={16} /> {t('collage.exportSize')}
         </Text>
         <div className="flex items-center gap-2">
           <input
@@ -752,7 +754,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
         <div className="flex flex-col items-center justify-center h-full text-center">
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <Text variant={TextVariants.heading} className="mb-2">
-            Collage Saved!
+            {t('collage.collageSaved')}
           </Text>
         </div>
       );
@@ -762,7 +764,7 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
         <div className="flex flex-col items-center justify-center h-full text-center">
           <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <Text variant={TextVariants.heading} className="mb-2">
-            An Error Occurred
+            {t('collage.errorOccurred')}
           </Text>
           <Text className="max-w-xs">{error}</Text>
         </div>
@@ -900,12 +902,12 @@ export default function CollageModal({ isOpen, onClose, onSave, sourceImages }: 
                 onClick={onClose}
                 className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
               >
-                {savedPath || error ? (savedPath ? 'Done' : 'Close') : 'Cancel'}
+                {savedPath || error ? (savedPath ? t('common.done') : t('common.close')) : t('common.cancel')}
               </button>
               {!savedPath && !error && (
                 <Button onClick={handleSave} disabled={isSaving || isLoading || !activeLayout}>
                   {isSaving ? <Loader2 className="animate-spin mr-2" /> : <Save size={16} className="mr-2" />}
-                  {isSaving ? 'Saving...' : 'Save Collage'}
+                  {isSaving ? t('collage.saving') : t('collage.saveCollage')}
                 </Button>
               )}
             </div>

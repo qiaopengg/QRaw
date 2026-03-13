@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { RotateCcw, ZoomIn, ZoomOut, Maximize, Save, Loader2, Eye, EyeOff, Info } from 'lucide-react';
@@ -39,6 +40,7 @@ export default function NegativeConversionModal({
   targetPaths,
   onSave,
 }: NegativeConversionModalProps) {
+  const { t } = useTranslation();
   const [params, setParams] = useState<NegativeParams>(DEFAULT_PARAMS);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -198,14 +200,14 @@ export default function NegativeConversionModal({
   const renderControls = () => (
     <div className="w-80 flex-shrink-0 bg-bg-secondary flex flex-col border-l border-surface h-full z-10">
       <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <Text variant={TextVariants.title}>Negative Conversion</Text>
+        <Text variant={TextVariants.title}>{t('negativeConversion.title')}</Text>
         <button
           onClick={() => {
             setParams(DEFAULT_PARAMS);
             updatePreview(DEFAULT_PARAMS);
           }}
           disabled={isSaving}
-          data-tooltip="Reset"
+          data-tooltip={t('common.reset')}
           className="p-2 rounded-full hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <RotateCcw size={18} />
@@ -217,11 +219,11 @@ export default function NegativeConversionModal({
           className={clsx('transition-opacity duration-200', isSaving && 'opacity-50 pointer-events-none grayscale')}
         >
           <Text variant={TextVariants.heading} className="mb-2">
-            Color Timing
+            {t('negativeConversion.colorTiming')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="Red (Cyan)"
+              label={t('negativeConversion.redCyan')}
               value={params.red_weight}
               min={0.5}
               max={2.0}
@@ -230,7 +232,7 @@ export default function NegativeConversionModal({
               onChange={(e) => handleParamChange('red_weight', Number(e.target.value))}
             />
             <Slider
-              label="Green (Magenta)"
+              label={t('negativeConversion.greenMagenta')}
               value={params.green_weight}
               min={0.5}
               max={2.0}
@@ -239,7 +241,7 @@ export default function NegativeConversionModal({
               onChange={(e) => handleParamChange('green_weight', Number(e.target.value))}
             />
             <Slider
-              label="Blue (Yellow)"
+              label={t('negativeConversion.blueYellow')}
               value={params.blue_weight}
               min={0.5}
               max={2.0}
@@ -254,11 +256,11 @@ export default function NegativeConversionModal({
           className={clsx('transition-opacity duration-200', isSaving && 'opacity-50 pointer-events-none grayscale')}
         >
           <Text variant={TextVariants.heading} className="mb-2">
-            Print Grade
+            {t('negativeConversion.printGrade')}
           </Text>
           <div className="space-y-3">
             <Slider
-              label="Exposure"
+              label={t('negativeConversion.exposure')}
               value={params.exposure}
               min={-2.0}
               max={2.0}
@@ -267,7 +269,7 @@ export default function NegativeConversionModal({
               onChange={(e) => handleParamChange('exposure', Number(e.target.value))}
             />
             <Slider
-              label="Contrast (Grade)"
+              label={t('negativeConversion.contrastGrade')}
               value={params.contrast}
               min={0.5}
               max={2.5}
@@ -352,7 +354,7 @@ export default function NegativeConversionModal({
                       color={TextColors.button}
                       className="absolute top-4 left-4 bg-accent px-2 py-1 rounded shadow-lg z-20"
                     >
-                      Original Negative
+                      {t('negativeConversion.originalNegative')}
                     </Text>
                   )}
                 </div>
@@ -367,7 +369,7 @@ export default function NegativeConversionModal({
             <button
               onClick={() => setZoom((z) => Math.max(0.1, z - 0.25))}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Zoom Out"
+              data-tooltip={t('transform.zoomOut')}
             >
               <ZoomOut size={18} />
             </button>
@@ -377,7 +379,7 @@ export default function NegativeConversionModal({
             <button
               onClick={() => setZoom((z) => Math.min(8, z + 0.25))}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Zoom In"
+              data-tooltip={t('transform.zoomIn')}
             >
               <ZoomIn size={18} />
             </button>
@@ -387,7 +389,7 @@ export default function NegativeConversionModal({
                 setPan({ x: 0, y: 0 });
               }}
               className="p-2 text-white/60 hover:bg-white/10 hover:text-white rounded-full transition-colors"
-              data-tooltip="Reset View"
+              data-tooltip={t('transform.resetZoom')}
             >
               <Maximize size={16} />
             </button>
@@ -400,7 +402,7 @@ export default function NegativeConversionModal({
                 'p-2 rounded-full transition-colors select-none',
                 isCompareActive ? 'bg-accent text-button-text' : 'text-white/60 hover:bg-white/10 hover:text-white',
               )}
-              data-tooltip="Hold to View Original"
+              data-tooltip={t('transform.holdToCompare')}
             >
               {isCompareActive ? <Eye size={18} /> : <EyeOff size={18} />}
             </button>
@@ -439,18 +441,22 @@ export default function NegativeConversionModal({
                 onClick={onClose}
                 className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <Button onClick={handleSave} disabled={isSaving || isLoading || !previewUrl}>
                 {isSaving ? (
                   <>
                     <Loader2 className="animate-spin mr-2" size={16} />
-                    {progress && progress.total > 1 ? `Converting ${progress.current}/${progress.total}` : 'Converting'}
+                    {progress && progress.total > 1
+                      ? t('negativeConversion.convertingProgress', { current: progress.current, total: progress.total })
+                      : t('negativeConversion.converting')}
                   </>
                 ) : (
                   <>
                     <Save className="mr-2" size={16} />
-                    {targetPaths.length > 1 ? `Convert & Save All (${targetPaths.length})` : 'Convert & Save'}
+                    {targetPaths.length > 1
+                      ? t('negativeConversion.convertSaveAll', { count: targetPaths.length })
+                      : t('negativeConversion.convertSave')}
                   </>
                 )}
               </Button>

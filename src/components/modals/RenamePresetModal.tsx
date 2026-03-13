@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Text from '../ui/Text';
 import { TextVariants } from '../../types/typography';
 
@@ -10,6 +11,7 @@ interface RenamePresetProps {
 }
 
 export default function RenamePresetModal({ isOpen, onClose, onSave, currentName }: RenamePresetProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
@@ -73,14 +75,14 @@ export default function RenamePresetModal({ isOpen, onClose, onSave, currentName
         onClick={(e: any) => e.stopPropagation()}
       >
         <Text variant={TextVariants.title} className="mb-4">
-          Rename Preset
+          {t('modals.renamePreset')}
         </Text>
         <input
           autoFocus
           className="w-full bg-bg-primary text-text-primary border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           onChange={(e: any) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter new preset name..."
+          placeholder={t('modals.enterNewPresetName')}
           type="text"
           value={name}
         />
@@ -89,14 +91,14 @@ export default function RenamePresetModal({ isOpen, onClose, onSave, currentName
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
             onClick={onClose}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="px-4 py-2 rounded-md bg-accent shadow-shiny text-button-text font-semibold hover:bg-accent-hover disabled:bg-gray-500 disabled:text-white disabled:cursor-not-allowed transition-colors"
             disabled={!name.trim() || name.trim() === currentName}
             onClick={handleSave}
           >
-            Save
+            {t('common.save')}
           </button>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { getVersion } from '@tauri-apps/api/app';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-shell';
 import {
   AlertTriangle,
   Check,
@@ -121,7 +120,7 @@ interface SearchInputProps {
 
 interface SortOptionsProps {
   sortCriteria: SortCriteria;
-  setSortCriteria(criteria: SortCriteria): void;
+  setSortCriteria(criteria: SortCriteria | ((prev: SortCriteria) => SortCriteria)): void;
   sortOptions: Array<Omit<SortCriteria, 'order'> & { label?: string; disabled?: boolean }>;
 }
 
@@ -141,7 +140,7 @@ interface ThumbnailProps {
   onLoad(): void;
   path: string;
   rating: number;
-  tags: Array<string>;
+  tags: Array<string> | null;
   aspectRatio: ThumbnailAspectRatio;
 }
 
@@ -180,31 +179,37 @@ interface ViewOptionsProps {
   thumbnailAspectRatio: ThumbnailAspectRatio;
 }
 
-const ratingFilterOptions: Array<KeyValueLabel> = [
-  { value: 0, label: 'Show All' },
-  { value: 1, label: '1 & up' },
-  { value: 2, label: '2 & up' },
-  { value: 3, label: '3 & up' },
-  { value: 4, label: '4 & up' },
-  { value: 5, label: '5 only' },
+const THUMBNAIL_SIZE_VALUES: Array<{ id: ThumbnailSize; size: number }> = [
+  { id: ThumbnailSize.Small, size: 160 },
+  { id: ThumbnailSize.Medium, size: 240 },
+  { id: ThumbnailSize.Large, size: 320 },
 ];
 
-const rawStatusOptions: Array<KeyValueLabel> = [
-  { key: RawStatus.All, label: 'All Types' },
-  { key: RawStatus.RawOnly, label: 'RAW Only' },
-  { key: RawStatus.NonRawOnly, label: 'Non-RAW Only' },
-  { key: RawStatus.RawOverNonRaw, label: 'Prefer RAW' },
+const getRatingFilterOptions = (t: any): Array<KeyValueLabel> => [
+  { value: 0, label: t('library.showAll') },
+  { value: 1, label: t('library.ratingAndUp', { count: 1 }) },
+  { value: 2, label: t('library.ratingAndUp', { count: 2 }) },
+  { value: 3, label: t('library.ratingAndUp', { count: 3 }) },
+  { value: 4, label: t('library.ratingAndUp', { count: 4 }) },
+  { value: 5, label: t('library.ratingOnly', { count: 5 }) },
 ];
 
-const thumbnailSizeOptions: Array<ThumbnailSizeOption> = [
-  { id: ThumbnailSize.Small, label: 'Small', size: 160 },
-  { id: ThumbnailSize.Medium, label: 'Medium', size: 240 },
-  { id: ThumbnailSize.Large, label: 'Large', size: 320 },
+const getRawStatusOptions = (t: any): Array<KeyValueLabel> => [
+  { key: RawStatus.All, label: t('library.allTypes') },
+  { key: RawStatus.RawOnly, label: t('library.rawOnly') },
+  { key: RawStatus.NonRawOnly, label: t('library.nonRawOnly') },
+  { key: RawStatus.RawOverNonRaw, label: t('library.preferRaw') },
 ];
 
-const thumbnailAspectRatioOptions: Array<ThumbnailAspectRatioOption> = [
-  { id: ThumbnailAspectRatio.Cover, label: 'Fill Square' },
-  { id: ThumbnailAspectRatio.Contain, label: 'Original Ratio' },
+const getThumbnailSizeOptions = (t: any): Array<ThumbnailSizeOption> => [
+  { id: ThumbnailSize.Small, label: t('library.small'), size: 160 },
+  { id: ThumbnailSize.Medium, label: t('library.medium'), size: 240 },
+  { id: ThumbnailSize.Large, label: t('library.large'), size: 320 },
+];
+
+const getThumbnailAspectRatioOptions = (t: any): Array<ThumbnailAspectRatioOption> => [
+  { id: ThumbnailAspectRatio.Cover, label: t('library.fillSquare') },
+  { id: ThumbnailAspectRatio.Contain, label: t('library.originalRatio') },
 ];
 
 const groupImagesByFolder = (images: ImageFile[], rootPath: string | null) => {
@@ -235,6 +240,7 @@ const groupImagesByFolder = (images: ImageFile[], rootPath: string | null) => {
 };
 
 function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCriteria }: SearchInputProps) {
+  const { t } = useTranslation();
   const [isSearchActive, setIsSearchActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -318,12 +324,12 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
   const isActive = isSearchActive || tags.length > 0 || !!text;
   const placeholderText =
     isIndexing && indexingProgress.total > 0
-      ? `Indexing... (${indexingProgress.current}/${indexingProgress.total})`
+      ? t('library.indexingProgress', { current: indexingProgress.current, total: indexingProgress.total })
       : isIndexing
-        ? 'Indexing Images...'
+        ? t('library.indexingImages')
         : tags.length > 0
-          ? 'Add another tag...'
-          : 'Search by tag or filename...';
+          ? t('library.addAnotherTag')
+          : t('library.searchPlaceholder');
 
   const INACTIVE_WIDTH = 48;
   const PADDING_AND_ICONS_WIDTH = 105;
@@ -350,7 +356,7 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
           }
           inputRef.current?.focus();
         }}
-        data-tooltip="Search"
+        data-tooltip={t('library.search')}
       >
         <Search className="w-4 h-4" />
       </button>
@@ -414,7 +420,7 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
               className="flex-shrink-0 bg-bg-primary px-2 py-1 rounded-md whitespace-nowrap"
             >
               <Text variant={TextVariants.small}>
-                Separate tags with <kbd className="font-sans font-semibold">,</kbd>
+                {t('library.separateTagsWith')} <kbd className="font-sans font-semibold">,</kbd>
               </Text>
             </motion.div>
           )}
@@ -424,7 +430,7 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
           <button
             onClick={toggleMode}
             className="p-1.5 rounded-md hover:bg-bg-primary w-10 flex-shrink-0"
-            data-tooltip={`Match ${mode === 'AND' ? 'ALL' : 'ANY'} tags`}
+            data-tooltip={`${t('library.match')} ${mode === 'AND' ? t('library.matchAll') : t('library.matchAny')} ${t('library.tags')}`}
           >
             <Text variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.semibold}>
               {mode}
@@ -435,7 +441,7 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
           <button
             onClick={clearSearch}
             className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-primary flex-shrink-0"
-            data-tooltip="Clear search"
+            data-tooltip={t('folderTree.clearSearch')}
           >
             <X className="h-5 w-5" />
           </button>
@@ -451,6 +457,7 @@ function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCr
 }
 
 function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps) {
+  const { t } = useTranslation();
   const [lastClickedColor, setLastClickedColor] = useState<string | null>(null);
   const allColors = useMemo(() => [...COLOR_LABELS, { name: 'none', color: '#9ca3af' }], []);
 
@@ -485,12 +492,13 @@ function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionP
   return (
     <div>
       <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-        Filter by Color Label
+        {t('library.filterByColorLabel')}
       </Text>
       <div className="flex flex-wrap gap-3 px-3 py-2">
         {allColors.map((color: Color) => {
           const isSelected = (filterCriteria.colors || []).includes(color.name);
-          const title = color.name === 'none' ? 'No Label' : color.name.charAt(0).toUpperCase() + color.name.slice(1);
+          const title =
+            color.name === 'none' ? t('library.noLabel') : color.name.charAt(0).toUpperCase() + color.name.slice(1);
           return (
             <button
               key={color.name}
@@ -564,10 +572,12 @@ function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName =
 }
 
 function ThumbnailSizeOptions({ selectedSize, onSelectSize }: ThumbnailSizeProps) {
+  const { t } = useTranslation();
+  const thumbnailSizeOptions = getThumbnailSizeOptions(t);
   return (
     <>
       <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-        Thumbnail Size
+        {t('library.thumbnailSize')}
       </Text>
       {thumbnailSizeOptions.map((option: ThumbnailSizeOption) => {
         const isSelected = selectedSize === option.id;
@@ -596,10 +606,12 @@ function ThumbnailSizeOptions({ selectedSize, onSelectSize }: ThumbnailSizeProps
 }
 
 function ThumbnailAspectRatioOptions({ selectedAspectRatio, onSelectAspectRatio }: ThumbnailAspectRatioProps) {
+  const { t } = useTranslation();
+  const thumbnailAspectRatioOptions = getThumbnailAspectRatioOptions(t);
   return (
     <>
       <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-        Thumbnail Fit
+        {t('library.thumbnailFit')}
       </Text>
       {thumbnailAspectRatioOptions.map((option: ThumbnailAspectRatioOption) => {
         const isSelected = selectedAspectRatio === option.id;
@@ -628,6 +640,10 @@ function ThumbnailAspectRatioOptions({ selectedAspectRatio, onSelectAspectRatio 
 }
 
 function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps) {
+  const { t } = useTranslation();
+  const ratingFilterOptions = getRatingFilterOptions(t);
+  const rawStatusOptions = getRawStatusOptions(t);
+
   const handleRatingFilterChange = (rating: number | undefined) => {
     setFilterCriteria((prev: Partial<FilterCriteria>) => ({ ...prev, rating }));
   };
@@ -641,7 +657,7 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
       <div className="space-y-4">
         <div>
           <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-            Filter by Rating
+            {t('library.filterByRating')}
           </Text>
           {ratingFilterOptions.map((option: KeyValueLabel) => {
             const isSelected = filterCriteria.rating === option.value;
@@ -672,7 +688,7 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
 
         <div>
           <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-            Filter by File Type
+            {t('library.filterByFileType')}
           </Text>
           {rawStatusOptions.map((option: KeyValueLabel) => {
             const isSelected = (filterCriteria.rawStatus || RawStatus.All) === option.key;
@@ -705,6 +721,8 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
 }
 
 function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptionsProps) {
+  const { t } = useTranslation();
+
   const handleKeyChange = (key: string) => {
     setSortCriteria((prev: SortCriteria) => ({ ...prev, key }));
   };
@@ -720,11 +738,11 @@ function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptions
     <>
       <div className="px-3 py-2 relative flex items-center">
         <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="uppercase">
-          Sort by
+          {t('library.sortBy')}
         </Text>
         <button
           onClick={handleOrderToggle}
-          data-tooltip={`Sort ${sortCriteria.order === SortDirection.Ascending ? 'Descending' : 'Ascending'}`}
+          data-tooltip={`${t('library.sort')} ${sortCriteria.order === SortDirection.Ascending ? t('library.descending') : t('library.ascending')}`}
           className="absolute top-1/2 right-3 -translate-y-1/2 p-1 bg-transparent border-none text-text-secondary hover:text-text-primary focus:outline-none focus:ring-1 focus:ring-accent rounded"
         >
           {sortCriteria.order === SortDirection.Ascending ? (
@@ -769,7 +787,7 @@ function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptions
             onClick={() => !option.disabled && handleKeyChange(option.key)}
             role="menuitem"
             disabled={option.disabled}
-            data-tooltip={option.disabled ? 'Enable EXIF Reading in Settings to use this option.' : undefined}
+            data-tooltip={option.disabled ? t('library.enableExifTooltip') : undefined}
           >
             <Text
               variant={TextVariants.label}
@@ -787,10 +805,11 @@ function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptions
 }
 
 function ViewModeOptions({ mode, setMode }: { mode: LibraryViewMode; setMode: (m: LibraryViewMode) => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
-        Display Mode
+        {t('library.displayMode')}
       </Text>
       <button
         className={`w-full text-left px-3 py-2 rounded-md flex items-center justify-between transition-colors duration-150 ${
@@ -804,7 +823,7 @@ function ViewModeOptions({ mode, setMode }: { mode: LibraryViewMode; setMode: (m
           color={TextColors.primary}
           weight={mode === LibraryViewMode.Flat ? TextWeights.semibold : TextWeights.normal}
         >
-          Current Folder
+          {t('library.currentFolder')}
         </Text>
         {mode === LibraryViewMode.Flat && <Check size={16} />}
       </button>
@@ -820,7 +839,7 @@ function ViewModeOptions({ mode, setMode }: { mode: LibraryViewMode; setMode: (m
           color={TextColors.primary}
           weight={mode === LibraryViewMode.Recursive ? TextWeights.semibold : TextWeights.normal}
         >
-          Recursive
+          {t('library.recursive')}
         </Text>
         {mode === LibraryViewMode.Recursive && <Check size={16} />}
       </button>
@@ -841,6 +860,7 @@ function ViewOptionsDropdown({
   thumbnailSize,
   thumbnailAspectRatio,
 }: ViewOptionsProps) {
+  const { t } = useTranslation();
   const isFilterActive =
     filterCriteria.rating > 0 ||
     (filterCriteria.rawStatus && filterCriteria.rawStatus !== RawStatus.All) ||
@@ -854,7 +874,7 @@ function ViewOptionsDropdown({
           {isFilterActive && <div className="absolute -top-1 -right-1 bg-accent rounded-full w-3 h-3" />}
         </>
       }
-      buttonTitle="View Options"
+      buttonTitle={t('library.viewOptions')}
       contentClassName="w-[720px]"
     >
       <div className="flex">
@@ -894,6 +914,7 @@ function Thumbnail({
   tags,
   aspectRatio: thumbnailAspectRatio,
 }: ThumbnailProps) {
+  const { t } = useTranslation();
   const [showPlaceholder, setShowPlaceholder] = useState(false);
   const [layers, setLayers] = useState<ImageLayer[]>([]);
   const latestThumbDataRef = useRef<string | undefined>(undefined);
@@ -1054,7 +1075,7 @@ function Thumbnail({
             color={TextColors.white}
             weight={TextWeights.bold}
             className="flex-shrink-0 bg-bg-primary/50 text-[10px] px-1.5 py-0.5 rounded-full backdrop-blur-sm"
-            data-tooltip="Virtual Copy"
+            data-tooltip={t('library.virtualCopy')}
           >
             VC
           </Text>
@@ -1082,6 +1103,7 @@ const Row = ({
   outerPadding,
   gap,
 }: any) => {
+  const { t } = useTranslation();
   const row = rows[index];
   if (row.type === 'footer') return null;
   const shiftedStyle = {
@@ -1100,7 +1122,7 @@ const Row = ({
         displayPath = displayPath.substring(1);
       }
     }
-    if (!displayPath) displayPath = 'Current Folder';
+    if (!displayPath) displayPath = t('library.currentFolder');
 
     return (
       <div
@@ -1120,7 +1142,7 @@ const Row = ({
             {displayPath}
           </Text>
           <Text variant={TextVariants.small} className="opacity-60 ml-auto">
-            {row.count} images
+            {t('library.imagesCount', { count: row.count })}
           </Text>
         </div>
       </div>
@@ -1208,13 +1230,11 @@ export default function MainLibrary({
   thumbnailSize,
   onNavigateToCommunity,
 }: MainLibraryProps) {
+  const { t } = useTranslation();
   const [showSettings, setShowSettings] = useState(false);
-  const [appVersion, setAppVersion] = useState('');
   const [, setSupportedTypes] = useState<SupportedTypes | null>(null);
   const libraryContainerRef = useRef<HTMLDivElement>(null);
   const [listHandle, setListHandle] = useListCallbackRef();
-  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
-  const [latestVersion, setLatestVersion] = useState('');
   const [isLoaderVisible, setIsLoaderVisible] = useState(false);
   const loadedThumbnailsRef = useRef(new Set<string>());
 
@@ -1240,16 +1260,16 @@ export default function MainLibrary({
   const sortOptions = useMemo(() => {
     const exifEnabled = appSettings?.enableExifReading ?? false;
     return [
-      { key: 'name', label: 'File Name' },
-      { key: 'date', label: 'Date Modified' },
-      { key: 'rating', label: 'Rating' },
-      { key: 'date_taken', label: 'Date Taken', disabled: !exifEnabled },
-      { key: 'focal_length', label: 'Focal Length', disabled: !exifEnabled },
-      { key: 'iso', label: 'ISO', disabled: !exifEnabled },
-      { key: 'shutter_speed', label: 'Shutter Speed', disabled: !exifEnabled },
-      { key: 'aperture', label: 'Aperture', disabled: !exifEnabled },
+      { key: 'name', label: t('library.fileName') },
+      { key: 'date', label: t('library.dateModified') },
+      { key: 'rating', label: t('library.rating') },
+      { key: 'date_taken', label: t('library.dateTaken'), disabled: !exifEnabled },
+      { key: 'focal_length', label: t('library.focalLength'), disabled: !exifEnabled },
+      { key: 'iso', label: t('library.iso'), disabled: !exifEnabled },
+      { key: 'shutter_speed', label: t('library.shutterSpeed'), disabled: !exifEnabled },
+      { key: 'aperture', label: t('library.aperture'), disabled: !exifEnabled },
     ];
-  }, [appSettings?.enableExifReading]);
+  }, [appSettings?.enableExifReading, t]);
 
   useEffect(() => {
     if (!activePath || !libraryContainerRef.current || multiSelectedPaths.length > 1) return;
@@ -1258,7 +1278,7 @@ export default function MainLibrary({
     const width = container.clientWidth;
     const OUTER_PADDING = 12;
     const ITEM_GAP = 12;
-    const minThumbWidth = thumbnailSizeOptions.find((o) => o.id === thumbnailSize)?.size || 240;
+    const minThumbWidth = THUMBNAIL_SIZE_VALUES.find((o) => o.id === thumbnailSize)?.size || 240;
     const availableWidth = width - OUTER_PADDING * 2;
     const columnCount = Math.max(1, Math.floor((availableWidth + ITEM_GAP) / (minThumbWidth + ITEM_GAP)));
     const itemWidth = (availableWidth - ITEM_GAP * (columnCount - 1)) / columnCount;
@@ -1365,48 +1385,6 @@ export default function MainLibrary({
   }, [isThumbnailsLoading, isLoading]);
 
   useEffect(() => {
-    const compareVersions = (v1: string, v2: string) => {
-      const parts1 = v1.split('.').map(Number);
-      const parts2 = v2.split('.').map(Number);
-      const len = Math.max(parts1.length, parts2.length);
-      for (let i = 0; i < len; i++) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 < p2) return -1;
-        if (p1 > p2) return 1;
-      }
-      return 0;
-    };
-
-    const checkVersion = async () => {
-      try {
-        const currentVersion = await getVersion();
-        setAppVersion(currentVersion);
-
-        const response = await fetch('https://api.github.com/repos/CyberTimon/RapidRAW/releases/latest');
-        if (!response.ok) {
-          console.error('Failed to fetch latest release info from GitHub.');
-          return;
-        }
-        const data = await response.json();
-        const latestTag = data.tag_name;
-        if (!latestTag) return;
-
-        const latestVersionStr = latestTag.startsWith('v') ? latestTag.substring(1) : latestTag;
-        setLatestVersion(latestVersionStr);
-
-        if (compareVersions(currentVersion, latestVersionStr) < 0) {
-          setIsUpdateAvailable(true);
-        }
-      } catch (error) {
-        console.error('Error checking for updates:', error);
-      }
-    };
-
-    checkVersion();
-  }, []);
-
-  useEffect(() => {
     invoke(Invokes.GetSupportedFileTypes)
       .then((types: any) => setSupportedTypes(types))
       .catch((err) => console.error('Failed to load supported file types:', err));
@@ -1421,17 +1399,17 @@ export default function MainLibrary({
 
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
-        const currentIndex = thumbnailSizeOptions.findIndex((o: ThumbnailSizeOption) => o.id === thumbnailSize);
+        const currentIndex = THUMBNAIL_SIZE_VALUES.findIndex((o) => o.id === thumbnailSize);
         if (currentIndex === -1) {
           return;
         }
 
         const nextIndex =
           event.deltaY < 0
-            ? Math.min(currentIndex + 1, thumbnailSizeOptions.length - 1)
+            ? Math.min(currentIndex + 1, THUMBNAIL_SIZE_VALUES.length - 1)
             : Math.max(currentIndex - 1, 0);
         if (nextIndex !== currentIndex) {
-          onThumbnailSizeChange(thumbnailSizeOptions[nextIndex].id);
+          onThumbnailSizeChange(THUMBNAIL_SIZE_VALUES[nextIndex].id);
         }
       }
     };
@@ -1480,7 +1458,7 @@ export default function MainLibrary({
           ) : (
             <>
               <div className="my-auto text-left">
-                <Text variant={TextVariants.displayLarge}>RapidRAW</Text>
+                <Text variant={TextVariants.displayLarge}>QRaw</Text>
                 <Text
                   variant={TextVariants.heading}
                   color={TextColors.secondary}
@@ -1489,105 +1467,65 @@ export default function MainLibrary({
                 >
                   {hasLastPath ? (
                     <>
-                      Welcome back!
+                      {t('library.welcomeBack')}
                       <br />
-                      Continue where you left off or start a new session.
+                      {t('library.continueOrNew')}
                     </>
                   ) : (
-                    'A blazingly fast, GPU-accelerated RAW image editor. Open a folder to begin.'
+                    t('library.welcomeDescription')
                   )}
                 </Text>
-                <div className="flex flex-col w-full max-w-xs gap-4">
+                <div className="flex flex-col w-full max-w-xs gap-3">
                   {hasLastPath && (
                     <Button
-                      className="rounded-md h-11 w-full flex justify-start items-center"
+                      className="rounded-lg h-11 w-full flex justify-center items-center gap-2 font-medium"
                       onClick={onContinueSession}
                       size="lg"
                     >
-                      <RefreshCw size={20} className="mr-2" /> Continue Session
+                      <RefreshCw size={18} /> {t('library.continueSession')}
                     </Button>
                   )}
                   <div className="flex items-center gap-2">
                     <Button
-                      className={`rounded-md flex-grow flex justify-start items-center h-11 ${
+                      className={`rounded-lg flex-grow flex justify-center items-center gap-2 h-11 font-medium ${
                         hasLastPath ? 'bg-surface text-text-primary shadow-none' : ''
                       }`}
                       onClick={onOpenFolder}
                       size="lg"
                     >
-                      <Folder size={20} className="mr-2" />
-                      {hasLastPath ? 'Change Folder' : 'Open Folder'}
+                      <Folder size={18} />
+                      {hasLastPath ? t('library.changeFolder') : t('library.openFolder')}
                     </Button>
                     <Button
-                      className="px-3 bg-surface text-text-primary shadow-none h-11"
+                      className="w-11 h-11 flex items-center justify-center bg-surface text-text-primary shadow-none rounded-lg hover:bg-card-active transition-colors"
                       onClick={() => setShowSettings(true)}
-                      size="lg"
-                      data-tooltip="Go to Settings"
+                      size="icon"
+                      data-tooltip={t('settings.title')}
                       variant="ghost"
                     >
-                      <Settings size={20} />
+                      <Settings size={18} />
                     </Button>
                   </div>
                 </div>
               </div>
-              <Text variant={TextVariants.small} as="div" className="absolute bottom-8 left-8 lg:left-16 space-y-1">
+              <Text
+                variant={TextVariants.small}
+                as="div"
+                className="absolute bottom-8 left-8 lg:left-16 space-y-1 text-text-secondary"
+              >
                 <p>
-                  Images by{' '}
                   <a
                     href="https://instagram.com/timonkaech.photography"
                     className="hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Timon Käch
+                    @Q
                   </a>
+                  <span className="ml-[3px]">作品</span>
+                  <span className="ml-[10px]">{t('library.imagesBy')} </span>
                 </p>
-                {appVersion && (
-                  <div className="flex items-center space-x-2">
-                    <p>
-                      <span
-                        className={`group transition-all duration-300 ease-in-out rounded-md py-1 ${
-                          isUpdateAvailable ? 'cursor-pointer border border-yellow-500 px-2 hover:bg-yellow-500/20' : ''
-                        }`}
-                        onClick={() => {
-                          if (isUpdateAvailable) {
-                            open('https://github.com/CyberTimon/RapidRAW/releases/latest');
-                          }
-                        }}
-                        data-tooltip={
-                          isUpdateAvailable
-                            ? `Click to download version ${latestVersion}`
-                            : `You are on the latest version`
-                        }
-                      >
-                        <span className={isUpdateAvailable ? 'group-hover:hidden' : ''}>Version {appVersion}</span>
-                        {isUpdateAvailable && (
-                          <span className="hidden group-hover:inline text-yellow-400">New version available!</span>
-                        )}
-                      </span>
-                    </p>
-                    <span>-</span>
-                    <p>
-                      <a
-                        href="https://ko-fi.com/cybertimon"
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Donate on Ko-Fi
-                      </a>
-                      <span className="mx-1">or</span>
-                      <a
-                        href="https://github.com/CyberTimon/RapidRAW"
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Contribute on GitHub
-                      </a>
-                    </p>
-                  </div>
-                )}
+                <p>{t('library.version', { version: '1.0.0' })}</p>
               </Text>
             </>
           )}
@@ -1603,7 +1541,7 @@ export default function MainLibrary({
     >
       <header className="p-4 flex-shrink-0 flex justify-between items-center border-b border-border-color gap-4">
         <div className="min-w-0">
-          <Text variant={TextVariants.headline}>Library</Text>
+          <Text variant={TextVariants.headline}>{t('library.title')}</Text>
           <div className="flex items-center gap-2">
             {currentFolderPath ? (
               <Text className="truncate">{currentFolderPath}</Text>
@@ -1624,20 +1562,20 @@ export default function MainLibrary({
             <Text as="div" color={TextColors.accent} className="flex items-center gap-2 animate-pulse">
               <FolderInput size={16} />
               <span>
-                Importing... ({importState.progress?.current}/{importState.progress?.total})
+                {t('library.importing', { current: importState.progress?.current, total: importState.progress?.total })}
               </span>
             </Text>
           )}
           {importState.status === Status.Success && (
             <Text as="div" color={TextColors.success} className="flex items-center gap-2">
               <Check size={16} />
-              <span>Import Complete!</span>
+              <span>{t('library.importComplete')}</span>
             </Text>
           )}
           {importState.status === Status.Error && (
             <Text as="div" color={TextColors.error} className="flex items-center gap-2">
               <AlertTriangle size={16} />
-              <span>Import Failed!</span>
+              <span>{t('library.importFailed')}</span>
             </Text>
           )}
           <SearchInput
@@ -1660,25 +1598,25 @@ export default function MainLibrary({
             thumbnailAspectRatio={thumbnailAspectRatio}
           />
           <Button
-            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onNavigateToCommunity}
-            data-tooltip="Community Presets"
+            data-tooltip={t('library.communityPresets')}
           >
-            <Users className="w-8 h-8" />
+            <Users size={18} />
           </Button>
           <Button
-            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onOpenFolder}
-            data-tooltip="Open another folder"
+            data-tooltip={t('library.openAnotherFolder')}
           >
-            <Folder className="w-8 h-8" />
+            <Folder size={18} />
           </Button>
           <Button
-            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onGoHome}
-            data-tooltip="Go to Home"
+            data-tooltip={t('common.goToHome')}
           >
-            <Home className="w-8 h-8" />
+            <Home size={18} />
           </Button>
         </div>
       </header>
@@ -1688,7 +1626,7 @@ export default function MainLibrary({
             {({ height, width }) => {
               const OUTER_PADDING = 12;
               const ITEM_GAP = 12;
-              const minThumbWidth = thumbnailSizeOptions.find((o) => o.id === thumbnailSize)?.size || 240;
+              const minThumbWidth = THUMBNAIL_SIZE_VALUES.find((o) => o.id === thumbnailSize)?.size || 240;
 
               const availableWidth = width - OUTER_PADDING * 2;
               const columnCount = Math.max(1, Math.floor((availableWidth + ITEM_GAP) / (minThumbWidth + ITEM_GAP)));
@@ -1765,16 +1703,19 @@ export default function MainLibrary({
           <Loader2 className="h-12 w-12 text-secondary animate-spin mb-4" />
           <Text variant={TextVariants.heading} color={TextColors.secondary}>
             {aiModelDownloadStatus
-              ? `Downloading ${aiModelDownloadStatus}...`
+              ? t('library.downloadingModel', { model: aiModelDownloadStatus })
               : isIndexing && indexingProgress.total > 0
-                ? `Indexing images... (${indexingProgress.current}/${indexingProgress.total})`
+                ? t('library.indexingProgress', { current: indexingProgress.current, total: indexingProgress.total })
                 : importState.status === Status.Importing &&
                     importState?.progress?.total &&
                     importState.progress.total > 0
-                  ? `Importing images... (${importState.progress?.current}/${importState.progress?.total})`
-                  : 'Processing images...'}
+                  ? t('library.importingProgress', {
+                      current: importState.progress?.current,
+                      total: importState.progress?.total,
+                    })
+                  : t('library.processingImages')}
           </Text>
-          <Text className="mt-2">This may take a moment.</Text>
+          <Text className="mt-2">{t('library.thisMayTakeAMoment')}</Text>
         </div>
       ) : searchCriteria.tags.length > 0 || searchCriteria.text ? (
         <div
@@ -1783,17 +1724,17 @@ export default function MainLibrary({
         >
           <Search className="h-12 w-12 text-secondary mb-4" />
           <Text variant={TextVariants.heading} color={TextColors.secondary}>
-            No Results Found
+            {t('library.noResultsFound')}
           </Text>
           <Text className="mt-2 max-w-sm">
-            Could not find an image based on filename or tags.
-            {!appSettings?.enableAiTagging && ' For a more comprehensive search, enable automatic tagging in Settings.'}
+            {t('library.noResultsDescription')}
+            {!appSettings?.enableAiTagging && ' ' + t('library.enableTaggingHint')}
           </Text>
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center" onContextMenu={onEmptyAreaContextMenu}>
           <SlidersHorizontal className="h-12 w-12 mb-4 text-text-secondary" />
-          <Text>No images found that match your filter.</Text>
+          <Text>{t('library.noImagesMatchFilter')}</Text>
         </div>
       )}
     </div>
