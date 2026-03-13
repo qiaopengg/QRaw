@@ -85,6 +85,7 @@ export enum Invokes {
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
   ChatAdjust = 'chat_adjust',
+  AnalyzeStyleTransfer = 'analyze_style_transfer',
   UpdateWindowEffect = 'update_window_effect',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',

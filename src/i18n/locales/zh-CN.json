@@ -844,7 +844,11 @@
     "step2Desc": "在终端中运行以下命令：",
     "step2Note": "qwen3.5:9b 是目前最强的免费开源中文模型（Apache 2.0）",
     "step3Title": "完成后点击重新检测",
-    "modelInfo": "可用模型参考："
+    "modelInfo": "可用模型参考：",
+    "importReference": "导入参考图（风格迁移）",
+    "styleTransferRequest": "📷 已导入参考图，正在分析调色风格...",
+    "noImageOpen": "请先打开一张图片再使用风格迁移",
+    "imageFiles": "图片文件"
   },
   "editorToolbar": {
     "backToLibrary": "返回图库",

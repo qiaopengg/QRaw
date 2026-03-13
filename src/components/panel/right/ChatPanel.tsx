@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { Send, Loader2, Bot, User, RotateCcw, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { Send, Loader2, Bot, User, RotateCcw, ChevronDown, ExternalLink, RefreshCw, ImagePlus } from 'lucide-react';
 import { Invokes } from '../../ui/AppProperties';
 import { Adjustments } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
@@ -50,6 +51,7 @@ interface ChatPanelProps {
   llmEndpoint?: string;
   llmApiKey?: string;
   llmModel?: string;
+  currentImagePath?: string | null;
 }
 
 type OllamaStatus = 'checking' | 'online' | 'offline';
@@ -87,7 +89,14 @@ async function checkOllamaStatus(endpoint: string): Promise<boolean> {
   }
 }
 
-export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, llmApiKey, llmModel }: ChatPanelProps) {
+export default function ChatPanel({
+  adjustments,
+  setAdjustments,
+  llmEndpoint,
+  llmApiKey,
+  llmModel,
+  currentImagePath,
+}: ChatPanelProps) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -221,6 +230,64 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
     setMessages([]);
     setError(null);
   };
+
+  // 风格迁移：导入参考图并分析
+  const handleStyleTransfer = useCallback(async () => {
+    if (isLoading) return;
+    if (!currentImagePath) {
+      setError(t('chat.noImageOpen'));
+      return;
+    }
+
+    try {
+      const selected = await openFileDialog({
+        multiple: false,
+        filters: [{ name: t('chat.imageFiles'), extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp'] }],
+      });
+      if (!selected) return;
+
+      const refPath = typeof selected === 'string' ? selected : selected;
+      if (!refPath) return;
+
+      setError(null);
+      setIsLoading(true);
+
+      // 添加用户消息
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: t('chat.styleTransferRequest'),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      const simpleAdj = getSimpleAdjustments(adjustments);
+      const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
+        referencePath: refPath,
+        currentImagePath: currentImagePath,
+        currentAdjustments: simpleAdj,
+      });
+
+      // 自动应用结果
+      const updates: Partial<Adjustments> = {};
+      result.adjustments.forEach((s) => {
+        (updates as Record<string, number>)[s.key] = s.value;
+      });
+      if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+
+      const assistantMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: result.understanding,
+        adjustments: result.adjustments,
+        appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, currentImagePath, adjustments, setAdjustments, t]);
 
   // 离线引导页
   if (ollamaStatus === 'offline') {
@@ -408,9 +475,17 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3 min-h-0">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-2 py-8">
+          <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <Bot size={28} className="text-text-secondary opacity-50" />
             <p className="text-xs text-text-secondary opacity-70 max-w-[180px]">{t('chat.placeholder')}</p>
+            <button
+              onClick={handleStyleTransfer}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 text-[11px] transition-colors disabled:opacity-40"
+            >
+              <ImagePlus size={12} />
+              {t('chat.importReference')}
+            </button>
           </div>
         )}
 
@@ -481,6 +556,14 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
       {/* 输入区域 */}
       <div className="px-3 py-2 border-t border-surface">
         <div className="flex gap-1.5 items-end">
+          <button
+            onClick={handleStyleTransfer}
+            disabled={isLoading}
+            className="flex-shrink-0 w-8 h-8 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+            title={t('chat.importReference')}
+          >
+            <ImagePlus size={13} className="text-purple-400" />
+          </button>
           <textarea
             ref={textareaRef}
             value={input}

@@ -930,6 +930,10 @@
     "step2Desc": "Run this command in your terminal:",
     "step2Note": "qwen3.5:9b is the strongest free open-source Chinese model (Apache 2.0)",
     "step3Title": "Click check again when done",
-    "modelInfo": "Available models:"
+    "modelInfo": "Available models:",
+    "importReference": "Import reference image (Style Transfer)",
+    "styleTransferRequest": "📷 Reference image imported, analyzing color style...",
+    "noImageOpen": "Please open an image first before using style transfer",
+    "imageFiles": "Image files"
   }
 }

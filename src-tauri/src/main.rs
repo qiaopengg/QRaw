@@ -7,6 +7,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 mod ai_processing;
 mod ai_connector;
 mod llm_chat;
+mod style_transfer;
 mod culling;
 mod denoising;
 mod exif_processing;
@@ -4054,6 +4055,7 @@ fn main() {
             negative_conversion::preview_negative_conversion,
             negative_conversion::convert_negatives,
             llm_chat::chat_adjust,
+            style_transfer::analyze_style_transfer,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

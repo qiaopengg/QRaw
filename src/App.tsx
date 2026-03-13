@@ -4932,6 +4932,7 @@ function App() {
                             llmEndpoint={appSettings?.llmEndpoint}
                             llmApiKey={appSettings?.llmApiKey}
                             llmModel={appSettings?.llmModel}
+                            currentImagePath={selectedImage?.path ?? null}
                           />
                         )}
                       </motion.div>
