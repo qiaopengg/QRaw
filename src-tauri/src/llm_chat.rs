@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tauri::Emitter;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChatMessage {
@@ -8,7 +9,7 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdjustmentSuggestion {
     pub key: String,
     pub value: f64,
@@ -18,10 +19,21 @@ pub struct AdjustmentSuggestion {
     pub reason: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChatAdjustResponse {
     pub understanding: String,
     pub adjustments: Vec<AdjustmentSuggestion>,
+}
+
+/// 流式推送的事件载荷
+#[derive(Serialize, Clone, Debug)]
+pub struct StreamChunkPayload {
+    /// "thinking" | "content" | "done" | "error"
+    pub chunk_type: String,
+    /// 当前 token 文本（thinking/content 时有值）
+    pub text: String,
+    /// 最终解析结果（done 时有值）
+    pub result: Option<ChatAdjustResponse>,
 }
 
 fn build_system_prompt(current_adjustments: &Value) -> String {
@@ -59,7 +71,7 @@ fn build_system_prompt(current_adjustments: &Value) -> String {
 
 ## 摄影语义映射规则
 - "太暗/欠曝" → exposure +0.5~1.5, shadows +20~40
-- "太亮/过曝" → exposure -0.5~1.5, highlights -20~40
+- "太亮/过曝" → exposure -0.5~-1.5, highlights -20~-40
 - "阳光明媚/明亮" → exposure +0.5~1.0, highlights +10~20, temperature +10~20
 - "青春活力/鲜艳" → saturation +20~40, vibrance +20~30, clarity +10~20
 - "复古/胶片" → saturation -10~-20, temperature +10~20, contrast +10~20, vignetteAmount -20~-30
@@ -96,22 +108,27 @@ fn build_system_prompt(current_adjustments: &Value) -> String {
   ]
 }}
 
-只返回需要调整的参数（与当前值不同的），最多返回8个最重要的参数。"#,
+只返回需要调整的参数（与当前值不同的），最多返回8个最重要的参数。
+
+## 安全约束（必须遵守）
+- exposure 绝对值不得超过 2.5（即 -2.5 ~ 2.5）
+- 其他参数绝对值不得超过 80（即 -80 ~ 80）
+- 用户说"太亮/太暗/太过了"时，只做小幅调整（exposure ±0.3~0.8，其他参数 ±10~30）
+- 绝对禁止把 exposure 设为 3.0 以上或 -3.0 以下
+- 如果用户的描述模糊，宁可保守调整也不要激进"#,
         adj_str = adj_str
     )
 }
 
 
 /// 剥离 Qwen3 模型的 <think>...</think> 思考标签
-fn strip_thinking_tags(text: &str) -> String {
+pub fn strip_thinking_tags(text: &str) -> String {
     let mut result = text.to_string();
-    // 循环移除所有 <think>...</think> 块（包括嵌套情况）
     while let Some(start) = result.find("<think>") {
         if let Some(end) = result.find("</think>") {
             let end_pos = end + "</think>".len();
             result = format!("{}{}", &result[..start], &result[end_pos..]);
         } else {
-            // 有 <think> 但没有 </think>，截断到 <think> 之前
             result = result[..start].to_string();
             break;
         }
@@ -120,16 +137,13 @@ fn strip_thinking_tags(text: &str) -> String {
 }
 
 /// 从文本中提取第一个完整的 JSON 对象
-fn extract_json(text: &str) -> Result<String, String> {
-    // 先剥离思考标签
+pub fn extract_json(text: &str) -> Result<String, String> {
     let cleaned = strip_thinking_tags(text);
 
-    // 先尝试直接解析
     if serde_json::from_str::<Value>(&cleaned).is_ok() {
         return Ok(cleaned);
     }
 
-    // 尝试从 markdown 代码块中提取
     if let Some(start) = cleaned.find("```json") {
         let after_marker = &cleaned[start + 7..];
         if let Some(end) = after_marker.find("```") {
@@ -139,7 +153,6 @@ fn extract_json(text: &str) -> Result<String, String> {
             }
         }
     }
-    // 通用代码块
     if let Some(start) = cleaned.find("```\n") {
         let after_marker = &cleaned[start + 4..];
         if let Some(end) = after_marker.find("```") {
@@ -150,7 +163,6 @@ fn extract_json(text: &str) -> Result<String, String> {
         }
     }
 
-    // 找到第一个 { 和最后一个 }
     if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
         if start < end {
             let candidate = &cleaned[start..=end];
@@ -166,6 +178,7 @@ fn extract_json(text: &str) -> Result<String, String> {
     ))
 }
 
+/// 流式 chat_adjust：通过 Tauri event 逐 token 推送，前端实时显示思考过程
 #[tauri::command]
 pub async fn chat_adjust(
     message: String,
@@ -174,22 +187,21 @@ pub async fn chat_adjust(
     llm_endpoint: String,
     llm_api_key: Option<String>,
     llm_model: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<ChatAdjustResponse, String> {
     let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|e| e.to_string())?;
 
     let model = llm_model.unwrap_or_else(|| "qwen3.5:9b".to_string());
     let system_prompt = build_system_prompt(&current_adjustments);
 
-    // 构建消息列表
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
         "content": system_prompt
     })];
 
-    // 加入历史（最多保留最近8条）
     let recent_history: Vec<&ChatMessage> = history
         .iter()
         .rev()
@@ -213,26 +225,22 @@ pub async fn chat_adjust(
     let endpoint = llm_endpoint.trim_end_matches('/').to_string();
     let url = format!("{}/v1/chat/completions", endpoint);
 
+    // 流式请求
     let request_body = json!({
         "model": model,
         "messages": messages,
         "temperature": 0.3,
-        "stream": false,
-        "response_format": {"type": "json_object"}
+        "stream": true
     });
 
     let mut req = client.post(&url).json(&request_body);
-
     if let Some(key) = &llm_api_key {
         if !key.is_empty() {
             req = req.bearer_auth(key);
         }
     }
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+    let response = req.send().await.map_err(|e| format!("请求失败: {}", e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -240,20 +248,95 @@ pub async fn chat_adjust(
         return Err(format!("LLM 返回错误 {}: {}", status, body));
     }
 
-    let resp_json: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    // 逐行读取 SSE 流
+    let mut full_content = String::new();
+    let mut in_thinking = false;
+    let mut thinking_buffer = String::new();
 
-    let content = resp_json["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or("响应格式错误：缺少 content 字段")?;
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
 
-    // 尝试从内容中提取 JSON（处理思考标签、代码块等）
-    let json_str = extract_json(content)?;
+    let mut line_buffer = String::new();
 
-    let parsed: ChatAdjustResponse = serde_json::from_str(&json_str)
-        .map_err(|e| format!("解析 JSON 失败: {}，原始内容: {}", e, content))?;
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("流读取错误: {}", e))?;
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        line_buffer.push_str(&chunk_str);
+
+        // SSE 格式：每行 "data: {...}\n\n"
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line = line_buffer[..newline_pos].trim().to_string();
+            line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+            if line.is_empty() || line == "data: [DONE]" {
+                continue;
+            }
+
+            if let Some(json_str) = line.strip_prefix("data: ") {
+                if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                        if delta_content.is_empty() {
+                            continue;
+                        }
+
+                        full_content.push_str(delta_content);
+
+                        // 检测 <think> 标签状态
+                        if delta_content.contains("<think>") {
+                            in_thinking = true;
+                        }
+
+                        if in_thinking {
+                            thinking_buffer.push_str(delta_content);
+                            // 清理标签后推送思考内容
+                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            if !clean.is_empty() {
+                                let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
+                                    chunk_type: "thinking".to_string(),
+                                    text: clean,
+                                    result: None,
+                                });
+                            }
+                        }
+
+                        if delta_content.contains("</think>") {
+                            in_thinking = false;
+                            thinking_buffer.clear();
+                            // 思考结束，推送过渡提示
+                            let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
+                                chunk_type: "thinking".to_string(),
+                                text: "\n正在生成调整参数...\n".to_string(),
+                                result: None,
+                            });
+                        }
+
+                        // 非思考内容是 JSON 格式，不推送给前端显示
+                        // 前端会在 done 事件中获取解析后的自然语言 understanding
+                    }
+                }
+            }
+        }
+    }
+
+    // 流结束，解析完整内容
+    let json_str = extract_json(&full_content)?;
+    let mut parsed: ChatAdjustResponse = serde_json::from_str(&json_str)
+        .map_err(|e| format!("解析 JSON 失败: {}，原始内容: {}", e, &full_content[..full_content.len().min(500)]))?;
+
+    // 安全钳位：防止 LLM 返回极端值导致白图/黑图
+    for adj in &mut parsed.adjustments {
+        match adj.key.as_str() {
+            "exposure" => adj.value = adj.value.max(-2.5).min(2.5),
+            _ => adj.value = adj.value.max(-80.0).min(80.0),
+        }
+    }
+
+    // 推送完成事件
+    let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
+        chunk_type: "done".to_string(),
+        text: String::new(),
+        result: Some(parsed.clone()),
+    });
 
     Ok(parsed)
 }

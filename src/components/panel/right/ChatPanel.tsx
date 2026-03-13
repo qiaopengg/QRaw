@@ -1,8 +1,21 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-import { Send, Loader2, Bot, User, RotateCcw, ChevronDown, ExternalLink, RefreshCw, ImagePlus } from 'lucide-react';
+import {
+  Send,
+  Loader2,
+  Bot,
+  User,
+  RotateCcw,
+  ChevronDown,
+  ExternalLink,
+  RefreshCw,
+  ImagePlus,
+  Brain,
+  ChevronRight,
+} from 'lucide-react';
 import { Invokes } from '../../ui/AppProperties';
 import { Adjustments } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
@@ -36,8 +49,15 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  thinkingContent?: string;
   adjustments?: AdjustmentSuggestion[];
   appliedValues?: Record<string, number>;
+}
+
+interface StreamChunkPayload {
+  chunk_type: 'thinking' | 'content' | 'done' | 'error';
+  text: string;
+  result?: ChatAdjustResponse | null;
 }
 
 interface LlmChatMessage {
@@ -87,6 +107,42 @@ async function checkOllamaStatus(endpoint: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// 思考过程折叠块（类似 ChatGPT）
+function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(true);
+
+  // 流式结束后自动折叠
+  useEffect(() => {
+    if (!isStreaming) {
+      const timer = setTimeout(() => setExpanded(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming]);
+
+  return (
+    <div className="w-full rounded-lg border border-surface overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-secondary hover:bg-surface/50 transition-colors"
+      >
+        <Brain size={11} className={isStreaming ? 'animate-pulse text-purple-400' : 'text-text-secondary'} />
+        <span>{isStreaming ? t('chat.thinking') : t('chat.thoughtComplete')}</span>
+        <ChevronRight
+          size={10}
+          className={`ml-auto transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+        />
+      </button>
+      {expanded && (
+        <div className="px-2 pb-1.5 text-[10px] text-text-secondary/70 leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">
+          {content}
+          {isStreaming && <span className="inline-block w-1 h-3 bg-purple-400/60 animate-pulse ml-0.5 align-middle" />}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ChatPanel({
@@ -173,12 +229,21 @@ export default function ChatPanel({
     setError(null);
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text };
+    const streamMsgId = crypto.randomUUID();
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
+    // 创建一个流式占位消息
+    const streamMsg: ChatMessage = {
+      id: streamMsgId,
+      role: 'assistant',
+      content: '',
+      thinkingContent: '',
+    };
+    setMessages((prev) => [...prev, streamMsg]);
+
     const history: LlmChatMessage[] = messages.map((m) => {
       if (m.role === 'assistant' && m.adjustments && m.adjustments.length > 0) {
-        // 将 AI 上一轮建议的调整结果编码进历史，让 LLM 知道自己上次建议了什么
         const adjSummary = m.adjustments
           .map((a) => `${a.label}(${a.key}): ${m.appliedValues?.[a.key] ?? a.value}`)
           .join(', ');
@@ -187,9 +252,46 @@ export default function ChatPanel({
       return { role: m.role, content: m.content };
     });
 
+    // 监听流式事件
+    const unlisten = await listen<StreamChunkPayload>('chat-stream-chunk', (event) => {
+      const { chunk_type, text: chunkText, result } = event.payload;
+
+      if (chunk_type === 'thinking') {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === streamMsgId ? { ...msg, thinkingContent: (msg.thinkingContent || '') + chunkText } : msg,
+          ),
+        );
+      } else if (chunk_type === 'content') {
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === streamMsgId ? { ...msg, content: msg.content + chunkText } : msg)),
+        );
+      } else if (chunk_type === 'done' && result) {
+        // 流结束，更新最终结果
+        const updates: Partial<Adjustments> = {};
+        result.adjustments.forEach((s) => {
+          (updates as Record<string, number>)[s.key] = s.value;
+        });
+        if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === streamMsgId
+              ? {
+                  ...msg,
+                  content: result.understanding,
+                  adjustments: result.adjustments,
+                  appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                }
+              : msg,
+          ),
+        );
+      }
+    });
+
     try {
       const simpleAdj = getSimpleAdjustments(adjustments);
-      const result = await invoke<ChatAdjustResponse>(Invokes.ChatAdjust, {
+      await invoke<ChatAdjustResponse>(Invokes.ChatAdjust, {
         message: text,
         history,
         currentAdjustments: simpleAdj,
@@ -197,24 +299,12 @@ export default function ChatPanel({
         llmApiKey: llmApiKey || null,
         llmModel: activeModel || null,
       });
-
-      const updates: Partial<Adjustments> = {};
-      result.adjustments.forEach((s) => {
-        (updates as Record<string, number>)[s.key] = s.value;
-      });
-      if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
-
-      const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: result.understanding,
-        adjustments: result.adjustments,
-        appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
     } catch (e) {
       setError(String(e));
+      // 移除流式占位消息（如果没有内容）
+      setMessages((prev) => prev.filter((msg) => msg.id !== streamMsgId || msg.content || msg.adjustments));
     } finally {
+      unlisten();
       setIsLoading(false);
     }
   }, [input, isLoading, messages, adjustments, endpoint, llmApiKey, activeModel, setAdjustments]);
@@ -231,7 +321,7 @@ export default function ChatPanel({
     setError(null);
   };
 
-  // 风格迁移：导入参考图并分析
+  // 风格迁移：导入参考图并分析（流式显示思考过程）
   const handleStyleTransfer = useCallback(async () => {
     if (isLoading) return;
     if (!currentImagePath) {
@@ -258,44 +348,98 @@ export default function ChatPanel({
         role: 'user',
         content: t('chat.styleTransferRequest'),
       };
-      setMessages((prev) => [...prev, userMsg]);
+
+      // 创建 AI 流式占位消息（立即显示等待动画）
+      const streamMsgId = crypto.randomUUID();
+      const streamMsg: ChatMessage = {
+        id: streamMsgId,
+        role: 'assistant',
+        content: '',
+        thinkingContent: '',
+      };
+      setMessages((prev) => [...prev, userMsg, streamMsg]);
 
       const simpleAdj = getSimpleAdjustments(adjustments);
 
-      // Ollama 在线时用 LLM 增强版，否则用纯算法版
-      let result: ChatAdjustResponse;
-      if (ollamaStatus === 'online') {
-        result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferWithLlm, {
-          referencePath: refPath,
-          currentImagePath: currentImagePath,
-          currentAdjustments: simpleAdj,
-          llmEndpoint: endpoint,
-          llmApiKey: llmApiKey || null,
-          llmModel: activeModel || null,
-        });
-      } else {
-        result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
-          referencePath: refPath,
-          currentImagePath: currentImagePath,
-          currentAdjustments: simpleAdj,
-        });
-      }
+      // 监听风格迁移流式事件
+      const unlisten = await listen<StreamChunkPayload>('style-transfer-stream', (event) => {
+        const { chunk_type, text: chunkText, result } = event.payload;
 
-      // 自动应用结果
-      const updates: Partial<Adjustments> = {};
-      result.adjustments.forEach((s) => {
-        (updates as Record<string, number>)[s.key] = s.value;
+        if (chunk_type === 'thinking') {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === streamMsgId ? { ...msg, thinkingContent: (msg.thinkingContent || '') + chunkText } : msg,
+            ),
+          );
+        } else if (chunk_type === 'content') {
+          setMessages((prev) =>
+            prev.map((msg) => (msg.id === streamMsgId ? { ...msg, content: msg.content + chunkText } : msg)),
+          );
+        } else if (chunk_type === 'done' && result) {
+          // 流结束，自动应用结果
+          const updates: Partial<Adjustments> = {};
+          result.adjustments.forEach((s) => {
+            (updates as Record<string, number>)[s.key] = s.value;
+          });
+          if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === streamMsgId
+                ? {
+                    ...msg,
+                    content: result.understanding,
+                    adjustments: result.adjustments,
+                    appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                  }
+                : msg,
+            ),
+          );
+        }
       });
-      if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
 
-      const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: result.understanding,
-        adjustments: result.adjustments,
-        appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      try {
+        // Ollama 在线时用 LLM 增强版（流式），否则用纯算法版
+        if (ollamaStatus === 'online') {
+          await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferWithLlm, {
+            referencePath: refPath,
+            currentImagePath: currentImagePath,
+            currentAdjustments: simpleAdj,
+            llmEndpoint: endpoint,
+            llmApiKey: llmApiKey || null,
+            llmModel: activeModel || null,
+          });
+        } else {
+          const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
+            referencePath: refPath,
+            currentImagePath: currentImagePath,
+            currentAdjustments: simpleAdj,
+          });
+
+          // 纯算法版没有流式，直接更新
+          const updates: Partial<Adjustments> = {};
+          result.adjustments.forEach((s) => {
+            (updates as Record<string, number>)[s.key] = s.value;
+          });
+          if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === streamMsgId
+                ? {
+                    ...msg,
+                    content: result.understanding,
+                    adjustments: result.adjustments,
+                    appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                    thinkingContent: '',
+                  }
+                : msg,
+            ),
+          );
+        }
+      } finally {
+        unlisten();
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -515,10 +659,17 @@ export default function ChatPanel({
               )}
             </div>
             <div className={`flex flex-col gap-1.5 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              {/* 思考过程（可折叠） */}
+              {msg.role === 'assistant' && msg.thinkingContent && (
+                <ThinkingBlock content={msg.thinkingContent} isStreaming={isLoading && !msg.adjustments} />
+              )}
               <div
                 className={`px-2.5 py-1.5 rounded-lg text-xs leading-relaxed ${msg.role === 'user' ? 'bg-blue-500/20 text-text-primary' : 'bg-surface text-text-primary'}`}
               >
-                {msg.content}
+                {msg.content ||
+                  (isLoading && !msg.adjustments ? (
+                    <Loader2 size={12} className="animate-spin text-text-secondary" />
+                  ) : null)}
               </div>
               {msg.adjustments && msg.adjustments.length > 0 && (
                 <div className="w-full bg-surface/50 rounded-lg p-2 space-y-2 border border-surface">
@@ -551,17 +702,6 @@ export default function ChatPanel({
             </div>
           </div>
         ))}
-
-        {isLoading && (
-          <div className="flex gap-2">
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-surface flex items-center justify-center">
-              <Bot size={12} className="text-text-secondary" />
-            </div>
-            <div className="px-2.5 py-1.5 rounded-lg bg-surface">
-              <Loader2 size={12} className="animate-spin text-text-secondary" />
-            </div>
-          </div>
-        )}
 
         {error && <div className="text-[10px] text-red-400 bg-red-500/10 rounded px-2 py-1.5">{error}</div>}
         <div ref={messagesEndRef} />

@@ -933,7 +933,10 @@
     "modelInfo": "Available models:",
     "importReference": "Import reference image (Style Transfer)",
     "styleTransferRequest": "📷 Reference image imported, analyzing color style...",
+    "styleTransferAnalyzing": "Analyzing reference image style...",
     "noImageOpen": "Please open an image first before using style transfer",
-    "imageFiles": "Image files"
+    "imageFiles": "Image files",
+    "thinking": "Thinking...",
+    "thoughtComplete": "Thought complete"
   }
 }

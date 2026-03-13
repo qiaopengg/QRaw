@@ -1,8 +1,26 @@
 use image::{DynamicImage, GenericImageView, Pixel};
+use rawler::decoders::RawDecodeParams;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
+use tauri::Emitter;
+use crate::llm_chat::StreamChunkPayload;
+
+/// 智能加载图像：先尝试 image crate（支持 JPEG/PNG 等），失败则用 rawler 解码 RAW 文件
+/// 为风格分析优化：优先提取预览图（更快、更省内存），避免全尺寸 RAW 解码
+fn smart_open_image(path: &str) -> Result<DynamicImage, String> {
+    // 先尝试标准格式
+    match image::open(path) {
+        Ok(img) => Ok(img),
+        Err(_std_err) => {
+            // 尝试用 rawler 提取预览图（比 raw_to_srgb 快得多且省内存）
+            let params = RawDecodeParams::default();
+            rawler::analyze::extract_preview_pixels(path, &params)
+                .map_err(|e| format!("无法打开图片（标准格式和 RAW 均失败）: {}", e))
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StyleFeatures {
@@ -18,7 +36,7 @@ pub struct StyleFeatures {
     pub vignette_diff: f64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StyleTransferSuggestion {
     pub key: String,
     pub value: f64,
@@ -28,7 +46,7 @@ pub struct StyleTransferSuggestion {
     pub reason: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StyleTransferResponse {
     pub understanding: String,
     pub adjustments: Vec<StyleTransferSuggestion>,
@@ -47,11 +65,11 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
         };
     }
 
-    // 降采样加速：如果图像太大，缩小到 max 800px 边
-    let analysis_img = if w > 800 || h > 800 {
-        img.resize(800, 800, image::imageops::FilterType::Triangle)
+    // 降采样加速：如果图像太大，缩小到 max 600px 边（减少内存占用）
+    let analysis_img = if w > 600 || h > 600 {
+        img.resize(600, 600, image::imageops::FilterType::Nearest)
     } else {
-        img.clone()
+        img.resize(w, h, image::imageops::FilterType::Nearest) // 避免 clone 大图
     };
     let (aw, ah) = analysis_img.dimensions();
     let a_total = (aw as f64) * (ah as f64);
@@ -185,7 +203,7 @@ fn compute_laplacian_variance(gray: &image::GrayImage, w: u32, h: u32) -> f64 {
     (sum_sq / count) - mean * mean
 }
 
-/// 将两组特征的差异映射为滑块调整参数
+/// 将两组特征的差异映射为滑块调整参数（优化版：更精准的感知映射）
 fn map_features_to_adjustments(
     ref_feat: &StyleFeatures,
     cur_feat: &StyleFeatures,
@@ -193,21 +211,23 @@ fn map_features_to_adjustments(
 ) -> Vec<StyleTransferSuggestion> {
     let mut suggestions = Vec::new();
 
-    // 辅助函数：获取当前调整值
     let get_current = |key: &str, default: f64| -> f64 {
         current_adjustments.get(key).and_then(|v| v.as_f64()).unwrap_or(default)
     };
 
-    // 辅助函数：限制范围
     let clamp = |v: f64, min: f64, max: f64| -> f64 { v.max(min).min(max) };
 
-    // 1. 曝光 (exposure): 基于平均亮度差
+    // ===== 保守系数设计原则 =====
+    // RAW 预览 vs JPEG 参考图天然存在巨大差异（RAW 未处理，JPEG 已调色）
+    // 因此所有系数必须非常保守，宁可调不够也不能调过头
+    // 每个参数都有两级钳位：delta 钳位 + 最终值钳位
+
+    // 1. 曝光 (exposure): 线性映射，保守系数
     let lum_diff = ref_feat.mean_luminance - cur_feat.mean_luminance;
-    if lum_diff.abs() > 0.02 {
-        // 亮度差 0~1 映射到 exposure 调整量 0~3
-        let exposure_delta = lum_diff * 3.0;
+    if lum_diff.abs() > 0.05 {
+        let exposure_delta = clamp(lum_diff * 1.0, -0.8, 0.8);
         let cur_exposure = get_current("exposure", 0.0);
-        let new_exposure = clamp(cur_exposure + exposure_delta, -5.0, 5.0);
+        let new_exposure = clamp(cur_exposure + exposure_delta, -2.0, 2.0);
         suggestions.push(StyleTransferSuggestion {
             key: "exposure".to_string(),
             value: (new_exposure * 100.0).round() / 100.0,
@@ -217,12 +237,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 2. 对比度 (contrast): 基于亮度标准差差异
+    // 2. 对比度 (contrast): 保守映射
     let contrast_diff = ref_feat.contrast_spread - cur_feat.contrast_spread;
-    if contrast_diff.abs() > 0.01 {
-        let contrast_delta = contrast_diff * 300.0; // 标准差差 0~0.3 → 调整量 0~90
+    if contrast_diff.abs() > 0.02 {
+        let contrast_delta = clamp(contrast_diff * 100.0, -30.0, 30.0);
         let cur_contrast = get_current("contrast", 0.0);
-        let new_contrast = clamp(cur_contrast + contrast_delta, -100.0, 100.0);
+        let new_contrast = clamp(cur_contrast + contrast_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "contrast".to_string(),
             value: new_contrast.round(),
@@ -232,12 +252,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 3. 高光 (highlights): 基于高光像素比例差
+    // 3. 高光 (highlights): 保守映射
     let hl_diff = ref_feat.highlight_ratio - cur_feat.highlight_ratio;
-    if hl_diff.abs() > 0.02 {
-        let hl_delta = hl_diff * 250.0;
+    if hl_diff.abs() > 0.05 {
+        let hl_delta = clamp(hl_diff * 80.0, -30.0, 30.0);
         let cur_hl = get_current("highlights", 0.0);
-        let new_hl = clamp(cur_hl + hl_delta, -100.0, 100.0);
+        let new_hl = clamp(cur_hl + hl_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "highlights".to_string(),
             value: new_hl.round(),
@@ -247,13 +267,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 4. 阴影 (shadows): 基于阴影像素比例差
+    // 4. 阴影 (shadows): 保守映射
     let sh_diff = ref_feat.shadow_ratio - cur_feat.shadow_ratio;
-    if sh_diff.abs() > 0.02 {
-        // 阴影比例高 → shadows 应该更负（更暗）
-        let sh_delta = -sh_diff * 250.0;
+    if sh_diff.abs() > 0.05 {
+        let sh_delta = clamp(-sh_diff * 80.0, -30.0, 30.0);
         let cur_sh = get_current("shadows", 0.0);
-        let new_sh = clamp(cur_sh + sh_delta, -100.0, 100.0);
+        let new_sh = clamp(cur_sh + sh_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "shadows".to_string(),
             value: new_sh.round(),
@@ -263,12 +282,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 5. 色温 (temperature): 基于 R/B 通道比值差
+    // 5. 色温 (temperature): 保守映射
     let temp_diff = ref_feat.rb_ratio - cur_feat.rb_ratio;
-    if temp_diff.abs() > 0.02 {
-        let temp_delta = temp_diff * 80.0; // R/B 比值差 0~1 → 调整量 0~80
+    if temp_diff.abs() > 0.03 {
+        let temp_delta = clamp(temp_diff * 30.0, -30.0, 30.0);
         let cur_temp = get_current("temperature", 0.0);
-        let new_temp = clamp(cur_temp + temp_delta, -100.0, 100.0);
+        let new_temp = clamp(cur_temp + temp_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "temperature".to_string(),
             value: new_temp.round(),
@@ -278,12 +297,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 6. 色调偏移 (tint): 基于 G/B 通道比值差
+    // 6. 色调偏移 (tint): 保守映射
     let tint_diff = ref_feat.gb_ratio - cur_feat.gb_ratio;
-    if tint_diff.abs() > 0.02 {
-        let tint_delta = -tint_diff * 60.0; // G 偏高 → tint 偏绿（负值）
+    if tint_diff.abs() > 0.03 {
+        let tint_delta = clamp(-tint_diff * 25.0, -20.0, 20.0);
         let cur_tint = get_current("tint", 0.0);
-        let new_tint = clamp(cur_tint + tint_delta, -100.0, 100.0);
+        let new_tint = clamp(cur_tint + tint_delta, -40.0, 40.0);
         suggestions.push(StyleTransferSuggestion {
             key: "tint".to_string(),
             value: new_tint.round(),
@@ -293,12 +312,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 7. 饱和度 (saturation): 基于 HSL S 通道均值差
+    // 7. 饱和度 (saturation): 保守映射
     let sat_diff = ref_feat.mean_saturation - cur_feat.mean_saturation;
-    if sat_diff.abs() > 0.02 {
-        let sat_delta = sat_diff * 200.0;
+    if sat_diff.abs() > 0.03 {
+        let sat_delta = clamp(sat_diff * 80.0, -30.0, 30.0);
         let cur_sat = get_current("saturation", 0.0);
-        let new_sat = clamp(cur_sat + sat_delta, -100.0, 100.0);
+        let new_sat = clamp(cur_sat + sat_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "saturation".to_string(),
             value: new_sat.round(),
@@ -308,12 +327,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 8. 自然饱和度 (vibrance): 基于饱和度分布差
+    // 8. 自然饱和度 (vibrance): 保守映射
     let vib_diff = ref_feat.saturation_spread - cur_feat.saturation_spread;
-    if vib_diff.abs() > 0.01 {
-        let vib_delta = vib_diff * 250.0;
+    if vib_diff.abs() > 0.02 {
+        let vib_delta = clamp(vib_diff * 100.0, -25.0, 25.0);
         let cur_vib = get_current("vibrance", 0.0);
-        let new_vib = clamp(cur_vib + vib_delta, -100.0, 100.0);
+        let new_vib = clamp(cur_vib + vib_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "vibrance".to_string(),
             value: new_vib.round(),
@@ -323,13 +342,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 9. 清晰度/结构 (clarity/structure): 基于拉普拉斯方差差
+    // 9. 清晰度 (clarity): 保守映射
     let lap_diff = ref_feat.laplacian_variance - cur_feat.laplacian_variance;
-    if lap_diff.abs() > 50.0 {
-        // 拉普拉斯方差范围很大，归一化
-        let clarity_delta = (lap_diff / 100.0).max(-60.0).min(60.0);
+    if lap_diff.abs() > 100.0 {
+        let clarity_delta = clamp(lap_diff / 300.0, -25.0, 25.0);
         let cur_clarity = get_current("clarity", 0.0);
-        let new_clarity = clamp(cur_clarity + clarity_delta, -100.0, 100.0);
+        let new_clarity = clamp(cur_clarity + clarity_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "clarity".to_string(),
             value: new_clarity.round(),
@@ -339,12 +357,12 @@ fn map_features_to_adjustments(
         });
     }
 
-    // 10. 暗角 (vignetteAmount): 基于中心-边缘亮度差
+    // 10. 暗角 (vignetteAmount): 保守映射
     let vig_diff = ref_feat.vignette_diff - cur_feat.vignette_diff;
-    if vig_diff.abs() > 0.02 {
-        let vig_delta = -vig_diff * 150.0; // 正差值=参考图暗角更重 → vignetteAmount 更负
+    if vig_diff.abs() > 0.03 {
+        let vig_delta = clamp(-vig_diff * 50.0, -25.0, 25.0);
         let cur_vig = get_current("vignetteAmount", 0.0);
-        let new_vig = clamp(cur_vig + vig_delta, -100.0, 100.0);
+        let new_vig = clamp(cur_vig + vig_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "vignetteAmount".to_string(),
             value: new_vig.round(),
@@ -352,6 +370,41 @@ fn map_features_to_adjustments(
             min: -100.0, max: 100.0,
             reason: format!("参考图暗角{}", if vig_diff > 0.0 { "更明显" } else { "更轻微" }),
         });
+    }
+
+    // ===== 总体亮度安全检查 =====
+    // 防止 exposure + highlights + shadows 同方向叠加导致白图/黑图
+    // 基于 delta（变化量）计算综合亮度影响，而非最终绝对值
+    let mut brightness_impact: f64 = 0.0;
+    for s in &suggestions {
+        let cur = get_current(&s.key, 0.0);
+        let delta = s.value - cur;
+        match s.key.as_str() {
+            "exposure" => brightness_impact += delta * 40.0, // exposure 1.0 EV ≈ 40 亮度单位
+            "highlights" => brightness_impact += delta * 0.3,
+            "shadows" => brightness_impact += delta * 0.3,
+            "contrast" => brightness_impact += delta * 0.1,
+            _ => {}
+        }
+    }
+    // 如果综合亮度变化影响超过 60，按比例缩减所有亮度相关参数的 delta
+    if brightness_impact.abs() > 60.0 {
+        let scale = 60.0 / brightness_impact.abs();
+        for s in &mut suggestions {
+            match s.key.as_str() {
+                "exposure" | "highlights" | "shadows" | "contrast" => {
+                    let cur = get_current(&s.key, 0.0);
+                    let delta = s.value - cur;
+                    s.value = cur + delta * scale;
+                    if s.key == "exposure" {
+                        s.value = (s.value * 100.0).round() / 100.0;
+                    } else {
+                        s.value = s.value.round();
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     suggestions
@@ -382,8 +435,8 @@ pub async fn analyze_style_transfer(
     let cur_path = current_image_path.clone();
 
     let (ref_img, cur_img) = tokio::task::spawn_blocking(move || {
-        let r = image::open(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
-        let c = image::open(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
+        let r = smart_open_image(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
+        let c = smart_open_image(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
         Ok::<(DynamicImage, DynamicImage), String>((r, c))
     })
     .await
@@ -505,6 +558,9 @@ fn build_style_transfer_prompt(
 2. 基于统计数据和算法建议，给出优化后的调整参数
 3. 你可以修正算法建议的值（算法是纯数学映射，可能不够精准），也可以补充算法未覆盖的参数
 4. value 是最终绝对值，不是增量
+5. 重要：参数值必须合理，避免极端值。大多数参数应在 ±50 以内，除非参考图风格确实极端
+6. 优先调整色温、饱和度、对比度等对风格影响最大的参数
+7. 如果两张图差异不大，只做微调（±5~15），不要过度调整
 
 ## 参数范围
 - exposure: -5.0 ~ 5.0（步长 0.01）
@@ -601,7 +657,7 @@ fn extract_json_from_response(text: &str) -> Result<String, String> {
     Err(format!("无法从 LLM 响应中提取 JSON: {}", &cleaned[..cleaned.len().min(200)]))
 }
 
-/// 调用 LLM 增强风格迁移结果
+/// 调用 LLM 增强风格迁移结果（流式推送思考过程）
 async fn enhance_with_llm(
     ref_feat: &StyleFeatures,
     cur_feat: &StyleFeatures,
@@ -610,9 +666,10 @@ async fn enhance_with_llm(
     llm_endpoint: &str,
     llm_api_key: Option<&str>,
     llm_model: &str,
+    app_handle: &tauri::AppHandle,
 ) -> Result<StyleTransferResponse, String> {
     let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -626,12 +683,12 @@ async fn enhance_with_llm(
     let endpoint = llm_endpoint.trim_end_matches('/');
     let url = format!("{}/v1/chat/completions", endpoint);
 
+    // 使用流式请求
     let request_body = json!({
         "model": llm_model,
         "messages": messages,
         "temperature": 0.3,
-        "stream": false,
-        "response_format": {"type": "json_object"}
+        "stream": true
     });
 
     let mut req = client.post(&url).json(&request_body);
@@ -649,21 +706,86 @@ async fn enhance_with_llm(
         return Err(format!("LLM 返回错误 {}: {}", status, body));
     }
 
-    let resp_json: Value = response.json().await.map_err(|e| format!("解析 LLM 响应失败: {}", e))?;
+    // 逐行读取 SSE 流，推送思考过程
+    let mut full_content = String::new();
+    let mut in_thinking = false;
 
-    let content = resp_json["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or("LLM 响应格式错误：缺少 content 字段")?;
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut line_buffer = String::new();
 
-    let json_str = extract_json_from_response(content)?;
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("流读取错误: {}", e))?;
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        line_buffer.push_str(&chunk_str);
 
-    let parsed: StyleTransferResponse = serde_json::from_str(&json_str)
-        .map_err(|e| format!("解析风格迁移 JSON 失败: {}，原始: {}", e, content))?;
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line = line_buffer[..newline_pos].trim().to_string();
+            line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+            if line.is_empty() || line == "data: [DONE]" {
+                continue;
+            }
+
+            if let Some(json_str) = line.strip_prefix("data: ") {
+                if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                        if delta_content.is_empty() {
+                            continue;
+                        }
+
+                        full_content.push_str(delta_content);
+
+                        if delta_content.contains("<think>") {
+                            in_thinking = true;
+                        }
+
+                        if in_thinking {
+                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            if !clean.is_empty() {
+                                let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+                                    chunk_type: "thinking".to_string(),
+                                    text: clean,
+                                    result: None,
+                                });
+                            }
+                        }
+
+                        if delta_content.contains("</think>") {
+                            in_thinking = false;
+                            // 思考结束，推送过渡提示
+                            let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+                                chunk_type: "thinking".to_string(),
+                                text: "\n正在生成调整参数...\n".to_string(),
+                                result: None,
+                            });
+                        }
+
+                        // 非思考内容是 JSON 格式，不推送给前端显示
+                        // 前端会在 done 事件中获取解析后的自然语言 understanding
+                    }
+                }
+            }
+        }
+    }
+
+    // 流结束，解析完整内容
+    let json_str = extract_json_from_response(&full_content)?;
+    let mut parsed: StyleTransferResponse = serde_json::from_str(&json_str)
+        .map_err(|e| format!("解析风格迁移 JSON 失败: {}，原始: {}", e, &full_content[..full_content.len().min(500)]))?;
+
+    // 安全钳位：防止 LLM 返回极端值
+    for adj in &mut parsed.adjustments {
+        match adj.key.as_str() {
+            "exposure" => adj.value = adj.value.max(-2.5).min(2.5),
+            _ => adj.value = adj.value.max(-80.0).min(80.0),
+        }
+    }
 
     Ok(parsed)
 }
 
-/// 带 LLM 增强的风格迁移分析命令
+/// 带 LLM 增强的风格迁移分析命令（流式推送思考过程）
 #[tauri::command]
 pub async fn analyze_style_transfer_with_llm(
     reference_path: String,
@@ -672,6 +794,7 @@ pub async fn analyze_style_transfer_with_llm(
     llm_endpoint: String,
     llm_api_key: Option<String>,
     llm_model: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<StyleTransferResponse, String> {
     // 先执行纯算法分析
     if !Path::new(&reference_path).exists() {
@@ -686,20 +809,41 @@ pub async fn analyze_style_transfer_with_llm(
         return Err("参考图文件过大（超过 100MB）".to_string());
     }
 
+    // 推送：正在加载图像
+    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+        chunk_type: "thinking".to_string(),
+        text: "正在加载参考图和当前图片...\n".to_string(),
+        result: None,
+    });
+
     let ref_path = reference_path.clone();
     let cur_path = current_image_path.clone();
 
     let (ref_img, cur_img) = tokio::task::spawn_blocking(move || {
-        let r = image::open(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
-        let c = image::open(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
+        let r = smart_open_image(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
+        let c = smart_open_image(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
         Ok::<(DynamicImage, DynamicImage), String>((r, c))
     })
     .await
     .map_err(|e| format!("图像加载任务失败: {}", e))??;
 
+    // 推送：正在提取特征
+    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+        chunk_type: "thinking".to_string(),
+        text: "正在提取图像色彩特征（亮度、对比度、色温、饱和度等）...\n".to_string(),
+        result: None,
+    });
+
     let ref_features = extract_features(&ref_img);
     let cur_features = extract_features(&cur_img);
     let algo_suggestions = map_features_to_adjustments(&ref_features, &cur_features, &current_adjustments);
+
+    // 推送：算法分析完成
+    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+        chunk_type: "thinking".to_string(),
+        text: format!("算法分析完成，初步建议 {} 项调整。正在请求 AI 优化...\n", algo_suggestions.len()),
+        result: None,
+    });
 
     // 尝试 LLM 增强
     let model = llm_model.unwrap_or_else(|| "qwen3.5:9b".to_string());
@@ -711,10 +855,29 @@ pub async fn analyze_style_transfer_with_llm(
         &llm_endpoint,
         llm_api_key.as_deref(),
         &model,
+        &app_handle,
     )
     .await
     {
-        Ok(llm_result) => Ok(llm_result),
+        Ok(llm_result) => {
+            // 推送完成事件
+            let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+                chunk_type: "done".to_string(),
+                text: String::new(),
+                result: Some(crate::llm_chat::ChatAdjustResponse {
+                    understanding: llm_result.understanding.clone(),
+                    adjustments: llm_result.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
+                        key: s.key.clone(),
+                        value: s.value,
+                        label: s.label.clone(),
+                        min: s.min,
+                        max: s.max,
+                        reason: s.reason.clone(),
+                    }).collect(),
+                }),
+            });
+            Ok(llm_result)
+        }
         Err(llm_err) => {
             // LLM 失败时回退到纯算法结果
             log::warn!("LLM 风格增强失败，回退到算法结果: {}", llm_err);
@@ -726,10 +889,27 @@ pub async fn analyze_style_transfer_with_llm(
                     algo_suggestions.len()
                 )
             };
-            Ok(StyleTransferResponse {
-                understanding,
-                adjustments: algo_suggestions,
-            })
+            let result = StyleTransferResponse {
+                understanding: understanding.clone(),
+                adjustments: algo_suggestions.clone(),
+            };
+            // 推送完成事件（算法回退）
+            let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
+                chunk_type: "done".to_string(),
+                text: String::new(),
+                result: Some(crate::llm_chat::ChatAdjustResponse {
+                    understanding,
+                    adjustments: result.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
+                        key: s.key.clone(),
+                        value: s.value,
+                        label: s.label.clone(),
+                        min: s.min,
+                        max: s.max,
+                        reason: s.reason.clone(),
+                    }).collect(),
+                }),
+            });
+            Ok(result)
         }
     }
 }
