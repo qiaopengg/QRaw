@@ -130,15 +130,16 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
   }, [messages]);
 
   const handleSliderChange = useCallback(
-    (msgId: string, key: string, e: { target: { value: number } } | React.ChangeEvent<HTMLInputElement>) => {
-      const value = (e as { target: { value: number } }).target.value;
+    (msgId: string, key: string, e: { target: { value: number | string } } | React.ChangeEvent<HTMLInputElement>) => {
+      const numericValue = parseFloat(String(e.target.value));
+      if (isNaN(numericValue)) return;
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== msgId || !msg.adjustments) return msg;
-          return { ...msg, appliedValues: { ...(msg.appliedValues || {}), [key]: value } };
+          return { ...msg, appliedValues: { ...(msg.appliedValues || {}), [key]: numericValue } };
         }),
       );
-      setAdjustments((prev) => ({ ...prev, [key]: value }));
+      setAdjustments((prev) => ({ ...prev, [key]: numericValue }));
     },
     [setAdjustments],
   );
@@ -148,8 +149,7 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
       if (!msg.adjustments) return;
       const updates: Partial<Adjustments> = {};
       msg.adjustments.forEach((s) => {
-        const val = msg.appliedValues?.[s.key] ?? s.value;
-        (updates as Record<string, number>)[s.key] = val;
+        (updates as Record<string, number>)[s.key] = s.value;
       });
       setAdjustments((prev) => ({ ...prev, ...updates }));
     },
@@ -450,7 +450,9 @@ export default function ChatPanel({ adjustments, setAdjustments, llmEndpoint, ll
                         min={s.min}
                         max={s.max}
                         step={s.key === 'exposure' ? 0.01 : 1}
-                        value={msg.appliedValues?.[s.key] ?? s.value}
+                        value={
+                          (adjustments[s.key as keyof Adjustments] as number) ?? msg.appliedValues?.[s.key] ?? s.value
+                        }
                         onChange={(e) => handleSliderChange(msg.id, s.key, e)}
                       />
                     </div>
