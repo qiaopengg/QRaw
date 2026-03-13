@@ -55,6 +55,7 @@ import AIPanel from './components/panel/right/AIPanel';
 import ExportPanel from './components/panel/right/ExportPanel';
 import LibraryExportPanel from './components/panel/right/LibraryExportPanel';
 import MasksPanel from './components/panel/right/MasksPanel';
+import ChatPanel from './components/panel/right/ChatPanel';
 import BottomBar from './components/panel/BottomBar';
 import { ContextMenuProvider, useContextMenu } from './context/ContextMenuContext';
 import TaggingSubMenu from './context/TaggingSubMenu';
@@ -206,6 +207,7 @@ const RIGHT_PANEL_ORDER = [
   Panel.Crop,
   Panel.Masks,
   Panel.Ai,
+  Panel.Chat,
   Panel.Presets,
   Panel.Export,
 ];
@@ -4921,6 +4923,15 @@ function App() {
                             setAdjustments={setAdjustments}
                             setBrushSettings={setBrushSettings}
                             setCustomEscapeHandler={setCustomEscapeHandler}
+                          />
+                        )}
+                        {renderedRightPanel === Panel.Chat && (
+                          <ChatPanel
+                            adjustments={adjustments}
+                            setAdjustments={setAdjustments}
+                            llmEndpoint={appSettings?.llmEndpoint}
+                            llmApiKey={appSettings?.llmApiKey}
+                            llmModel={appSettings?.llmModel}
                           />
                         )}
                       </motion.div>

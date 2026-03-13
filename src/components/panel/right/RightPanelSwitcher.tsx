@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { SlidersHorizontal, Info, Scaling, BrushCleaning, Bookmark, Save, Layers } from 'lucide-react';
+import { SlidersHorizontal, Info, Scaling, BrushCleaning, Bookmark, Save, Layers, MessageSquare } from 'lucide-react';
 import { Panel } from '../../ui/AppProperties';
 
 interface PanelOptions {
@@ -23,6 +23,7 @@ const PANEL_GROUPS: Array<Array<Omit<PanelOptions, 'title'> & { titleKey: string
     { id: Panel.Crop, icon: Scaling, titleKey: 'panels.crop' },
     { id: Panel.Masks, icon: Layers, titleKey: 'panels.masks' },
     { id: Panel.Ai, icon: BrushCleaning, titleKey: 'panels.inpaint' },
+    { id: Panel.Chat, icon: MessageSquare, titleKey: 'panels.chat' },
   ],
   [
     { id: Panel.Presets, icon: Bookmark, titleKey: 'panels.presets' },

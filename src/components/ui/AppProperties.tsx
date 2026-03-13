@@ -84,6 +84,7 @@ export enum Invokes {
   StitchPanorama = 'stitch_panorama',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
+  ChatAdjust = 'chat_adjust',
   UpdateWindowEffect = 'update_window_effect',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
@@ -94,6 +95,7 @@ export enum Invokes {
 export enum Panel {
   Adjustments = 'adjustments',
   Ai = 'ai',
+  Chat = 'chat',
   Crop = 'crop',
   Export = 'export',
   Masks = 'masks',
@@ -169,6 +171,9 @@ export interface AppSettings {
   customAiTags?: string[];
   aiTagCount?: number;
   transparent?: boolean;
+  llmEndpoint?: string;
+  llmApiKey?: string;
+  llmModel?: string;
 }
 
 export interface BrushSettings {

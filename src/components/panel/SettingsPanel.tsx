@@ -319,6 +319,9 @@ export default function SettingsPanel({
 
   const [aiProvider, setAiProvider] = useState(appSettings?.aiProvider || 'cpu');
   const [aiConnectorAddress, setAiConnectorAddress] = useState<string>(appSettings?.aiConnectorAddress || '');
+  const [llmEndpoint, setLlmEndpoint] = useState<string>(appSettings?.llmEndpoint || 'http://localhost:11434');
+  const [llmApiKey, setLlmApiKey] = useState<string>(appSettings?.llmApiKey || '');
+  const [llmModel, setLlmModel] = useState<string>(appSettings?.llmModel || 'qwen2.5:7b');
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
@@ -1556,6 +1559,47 @@ export default function SettingsPanel({
                         </motion.div>
                       )}
                     </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <Text variant={TextVariants.title} color={TextColors.accent} className="mb-8">
+                    {t('chat.llmSettings')}
+                  </Text>
+                  <div className="space-y-6">
+                    <SettingItem label={t('chat.llmEndpoint')} description="Ollama 默认地址：http://localhost:11434">
+                      <Input
+                        value={llmEndpoint}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLlmEndpoint(e.target.value)}
+                        onBlur={() => onSettingsChange({ ...appSettings, llmEndpoint })}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder={t('chat.llmEndpointPlaceholder')}
+                        type="text"
+                      />
+                    </SettingItem>
+                    <SettingItem
+                      label={t('chat.llmModel')}
+                      description="推荐：qwen2.5:7b（中文）或 llama3.2:3b（英文）"
+                    >
+                      <Input
+                        value={llmModel}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLlmModel(e.target.value)}
+                        onBlur={() => onSettingsChange({ ...appSettings, llmModel })}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder={t('chat.llmModelPlaceholder')}
+                        type="text"
+                      />
+                    </SettingItem>
+                    <SettingItem label={t('chat.llmApiKey')} description="使用 OpenAI 等付费服务时填写">
+                      <Input
+                        value={llmApiKey}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLlmApiKey(e.target.value)}
+                        onBlur={() => onSettingsChange({ ...appSettings, llmApiKey })}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder={t('chat.llmApiKeyPlaceholder')}
+                        type="password"
+                      />
+                    </SettingItem>
                   </div>
                 </div>
 

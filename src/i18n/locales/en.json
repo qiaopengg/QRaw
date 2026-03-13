@@ -38,7 +38,8 @@
     "masks": "Masks",
     "inpaint": "Inpaint",
     "presets": "Presets",
-    "export": "Export"
+    "export": "Export",
+    "chat": "AI Chat"
   },
   "adjustments": {
     "toneMapper": "Tone Mapper",
@@ -900,5 +901,22 @@
     "failedToShowOriginal": "Failed to show original image.",
     "failedToOpenFolderDialog": "Failed to open folder selection dialog.",
     "failedToRestoreSession": "Failed to restore session. The last used folder may have been moved or deleted."
+  },
+  "chat": {
+    "title": "AI Chat",
+    "placeholder": "Describe the style you want, AI will adjust the parameters",
+    "inputPlaceholder": "e.g. Make it brighter with a sunny feel...",
+    "enterToSend": "Enter to send, Shift+Enter for new line",
+    "clearHistory": "Clear chat history",
+    "suggestions": "Suggested adjustments",
+    "applyAll": "Apply all",
+    "notConfigured": "Please configure LLM endpoint in settings",
+    "llmSettings": "LLM Settings",
+    "llmEndpoint": "LLM Endpoint",
+    "llmEndpointPlaceholder": "http://localhost:11434",
+    "llmApiKey": "API Key (optional)",
+    "llmApiKeyPlaceholder": "Leave empty if not needed",
+    "llmModel": "Model name",
+    "llmModelPlaceholder": "qwen2.5:7b"
   }
 }

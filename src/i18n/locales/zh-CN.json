@@ -38,7 +38,8 @@
     "masks": "蒙版",
     "inpaint": "修复",
     "presets": "预设",
-    "export": "导出"
+    "export": "导出",
+    "chat": "AI 对话"
   },
   "adjustments": {
     "toneMapper": "色调映射",
@@ -814,6 +815,23 @@
     "waveform": "波形图",
     "luma": "亮度",
     "rgb": "RGB"
+  },
+  "chat": {
+    "title": "AI 对话调色",
+    "placeholder": "描述你想要的照片风格，AI 会自动调整参数",
+    "inputPlaceholder": "例如：让照片更明亮，阳光明媚的感觉...",
+    "enterToSend": "Enter 发送，Shift+Enter 换行",
+    "clearHistory": "清除对话历史",
+    "suggestions": "建议调整",
+    "applyAll": "全部应用",
+    "notConfigured": "请在设置中配置 LLM 地址",
+    "llmSettings": "LLM 设置",
+    "llmEndpoint": "LLM 地址",
+    "llmEndpointPlaceholder": "http://localhost:11434",
+    "llmApiKey": "API Key（可选）",
+    "llmApiKeyPlaceholder": "留空则不使用",
+    "llmModel": "模型名称",
+    "llmModelPlaceholder": "qwen2.5:7b"
   },
   "editorToolbar": {
     "backToLibrary": "返回图库",
