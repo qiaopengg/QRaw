@@ -831,7 +831,20 @@
     "llmApiKey": "API Key（可选）",
     "llmApiKeyPlaceholder": "留空则不使用",
     "llmModel": "模型名称",
-    "llmModelPlaceholder": "qwen2.5:7b"
+    "llmModelPlaceholder": "qwen2.5:7b",
+    "switchModel": "切换模型",
+    "customModel": "自定义模型名...",
+    "checking": "正在检测 Ollama...",
+    "retry": "重试",
+    "checkAgain": "重新检测",
+    "ollamaOffline": "未检测到 Ollama，请按以下步骤安装",
+    "step1Title": "安装 Ollama",
+    "step1Desc": "Ollama 是免费的本地 AI 运行时，支持 macOS / Windows / Linux。",
+    "step2Title": "下载推荐模型（约 5GB）",
+    "step2Desc": "在终端中运行以下命令：",
+    "step2Note": "qwen3.5:9b 是目前最强的免费开源中文模型（Apache 2.0）",
+    "step3Title": "完成后点击重新检测",
+    "modelInfo": "可用模型参考："
   },
   "editorToolbar": {
     "backToLibrary": "返回图库",

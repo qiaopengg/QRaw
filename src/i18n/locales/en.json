@@ -917,6 +917,19 @@
     "llmApiKey": "API Key (optional)",
     "llmApiKeyPlaceholder": "Leave empty if not needed",
     "llmModel": "Model name",
-    "llmModelPlaceholder": "qwen2.5:7b"
+    "llmModelPlaceholder": "qwen2.5:7b",
+    "switchModel": "Switch model",
+    "customModel": "Custom model name...",
+    "checking": "Checking Ollama...",
+    "retry": "Retry",
+    "checkAgain": "Check again",
+    "ollamaOffline": "Ollama not detected. Follow the steps below to set it up.",
+    "step1Title": "Install Ollama",
+    "step1Desc": "Ollama is a free local AI runtime for macOS / Windows / Linux.",
+    "step2Title": "Download the recommended model (~5GB)",
+    "step2Desc": "Run this command in your terminal:",
+    "step2Note": "qwen3.5:9b is the strongest free open-source Chinese model (Apache 2.0)",
+    "step3Title": "Click check again when done",
+    "modelInfo": "Available models:"
   }
 }

@@ -321,7 +321,7 @@ export default function SettingsPanel({
   const [aiConnectorAddress, setAiConnectorAddress] = useState<string>(appSettings?.aiConnectorAddress || '');
   const [llmEndpoint, setLlmEndpoint] = useState<string>(appSettings?.llmEndpoint || 'http://localhost:11434');
   const [llmApiKey, setLlmApiKey] = useState<string>(appSettings?.llmApiKey || '');
-  const [llmModel, setLlmModel] = useState<string>(appSettings?.llmModel || 'qwen2.5:7b');
+  const [llmModel, setLlmModel] = useState<string>(appSettings?.llmModel || 'qwen3.5:9b');
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
