@@ -1,7 +1,7 @@
 [package]
-name = "RapidRAW"
-description = "A blazingly-fast, non-destructive, and GPU-accelerated RAW image editor built with performance in mind."
-authors = ["Timon Käch"]
+name = "QRaw"
+description = "A blazingly-fast, non-destructive, and GPU-accelerated RAW image editor. Based on RapidRAW by Timon Käch (AGPL-3.0)."
+authors = ["qiaopengg"]
 edition = "2024"
 rust-version = "1.94"
 

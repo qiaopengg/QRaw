@@ -13,8 +13,10 @@
         "label": "main",
         "create": false,
         "title": "QRaw",
-        "width": 1280,
-        "height": 720,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
         "transparent": true,
         "decorations": false
       }

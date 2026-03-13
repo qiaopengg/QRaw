@@ -1624,25 +1624,25 @@ export default function MainLibrary({
             thumbnailAspectRatio={thumbnailAspectRatio}
           />
           <Button
-            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
+            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onNavigateToCommunity}
             data-tooltip={t('library.communityPresets')}
           >
-            <Users size={18} />
+            <Users size={20} />
           </Button>
           <Button
-            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
+            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onOpenFolder}
             data-tooltip={t('library.openAnotherFolder')}
           >
-            <Folder size={18} />
+            <Folder size={20} />
           </Button>
           <Button
-            className="h-10 w-10 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
+            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center rounded-lg hover:bg-card-active transition-colors"
             onClick={onGoHome}
             data-tooltip={t('common.goToHome')}
           >
-            <Home size={18} />
+            <Home size={20} />
           </Button>
         </div>
       </header>

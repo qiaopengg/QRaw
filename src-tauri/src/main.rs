@@ -2795,7 +2795,7 @@ async fn invoke_generative_replace_with_mask_def(
         }
     } else {
         return Err(
-            "No generative backend available. Connect to a RapidRAW AI Connector or upgrade to Pro for Cloud AI."
+            "No generative backend available. Connect to a QRaw AI Connector or upgrade to Pro for Cloud AI."
                 .to_string(),
         );
     };
@@ -2867,7 +2867,7 @@ async fn fetch_community_presets() -> Result<Vec<CommunityPreset>, String> {
 
     let response = client
         .get(url)
-        .header("User-Agent", "RapidRAW-App")
+        .header("User-Agent", "QRaw-App")
         .send()
         .await
         .map_err(|e| format!("Failed to fetch manifest from GitHub: {}", e))?;
@@ -3683,8 +3683,8 @@ fn frontend_ready(
                         {
                             let monitor_size = monitor.size();
                             let monitor_pos = monitor.position();
-                            let default_width = 1280i32;
-                            let default_height = 720i32;
+                            let default_width = 1440i32;
+                            let default_height = 900i32;
                             let center_x = monitor_pos.x + (monitor_size.width as i32 - default_width) / 2;
                             let center_y = monitor_pos.y + (monitor_size.height as i32 - default_height) / 2;
 
@@ -3840,11 +3840,12 @@ fn main() {
                 let path = config_dir.join("window_state.json");
                 if let Ok(contents) = std::fs::read_to_string(&path) {
                     if let Ok(state) = serde_json::from_str::<WindowState>(&contents) {
-                        if state.width >= 200 && state.height >= 150 {
+                        if state.width >= 1100 && state.height >= 700 {
                             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(state.width, state.height)));
                             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(state.x, state.y)));
                         } else {
-                            log::warn!("Saved window state had unreasonable dimensions ({}x{}), centering instead.", state.width, state.height);
+                            log::warn!("Saved window state had unreasonable dimensions ({}x{}), using default size and centering.", state.width, state.height);
+                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(1440, 900)));
                             let _ = window.center();
                         }
                     } else { let _ = window.center(); }
@@ -3908,8 +3909,8 @@ fn main() {
                         }
 
                         let mut state = WindowState {
-                            width: 1280,
-                            height: 720,
+                            width: 1440,
+                            height: 900,
                             x: 0,
                             y: 0,
                             maximized,
