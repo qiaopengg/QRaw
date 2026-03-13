@@ -1,6 +1,7 @@
 use image::{DynamicImage, GenericImageView, Pixel};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -408,4 +409,327 @@ pub async fn analyze_style_transfer(
         understanding,
         adjustments,
     })
+}
+
+/// 将特征向量格式化为 LLM 可读的文本描述
+fn describe_features(feat: &StyleFeatures, label: &str) -> String {
+    let brightness_desc = if feat.mean_luminance > 0.6 {
+        "偏亮"
+    } else if feat.mean_luminance < 0.4 {
+        "偏暗"
+    } else {
+        "中等亮度"
+    };
+    let contrast_desc = if feat.contrast_spread > 0.25 {
+        "高对比"
+    } else if feat.contrast_spread < 0.15 {
+        "低对比"
+    } else {
+        "中等对比"
+    };
+    let temp_desc = if feat.rb_ratio > 1.1 {
+        "偏暖（橙/黄调）"
+    } else if feat.rb_ratio < 0.9 {
+        "偏冷（蓝调）"
+    } else {
+        "中性色温"
+    };
+    let sat_desc = if feat.mean_saturation > 0.5 {
+        "高饱和"
+    } else if feat.mean_saturation < 0.25 {
+        "低饱和/淡雅"
+    } else {
+        "中等饱和"
+    };
+    let vig_desc = if feat.vignette_diff > 0.05 {
+        "有明显暗角"
+    } else {
+        "无明显暗角"
+    };
+
+    format!(
+        "【{}】亮度={:.2}（{}），高光占比={:.1}%，阴影占比={:.1}%，对比度={:.3}（{}），\
+         R/B比={:.3}（{}），饱和度={:.3}（{}），饱和度分布={:.3}，\
+         纹理方差={:.1}，暗角差={:.3}（{}）",
+        label,
+        feat.mean_luminance, brightness_desc,
+        feat.highlight_ratio * 100.0,
+        feat.shadow_ratio * 100.0,
+        feat.contrast_spread, contrast_desc,
+        feat.rb_ratio, temp_desc,
+        feat.mean_saturation, sat_desc,
+        feat.saturation_spread,
+        feat.laplacian_variance,
+        feat.vignette_diff, vig_desc,
+    )
+}
+
+/// 构建风格迁移的 LLM system prompt
+fn build_style_transfer_prompt(
+    ref_feat: &StyleFeatures,
+    cur_feat: &StyleFeatures,
+    algo_suggestions: &[StyleTransferSuggestion],
+    current_adjustments: &Value,
+) -> String {
+    let ref_desc = describe_features(ref_feat, "参考图");
+    let cur_desc = describe_features(cur_feat, "当前图");
+    let adj_str = serde_json::to_string_pretty(current_adjustments).unwrap_or_default();
+
+    let algo_desc = if algo_suggestions.is_empty() {
+        "算法未检测到显著差异。".to_string()
+    } else {
+        algo_suggestions
+            .iter()
+            .map(|s| format!("  - {}({}): {} → 建议值 {}（{}）", s.label, s.key, s.reason, s.value, s.reason))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        r#"你是一位专业摄影后期调色师。用户想把一张参考图的调色风格复刻到当前图片上。
+
+## 图像统计分析结果
+{ref_desc}
+{cur_desc}
+
+## 算法初步建议
+{algo_desc}
+
+## 当前图片的滑块参数
+```json
+{adj_str}
+```
+
+## 你的任务
+1. 理解参考图的整体风格（如：复古胶片、清新日系、电影感、高对比黑白等）
+2. 基于统计数据和算法建议，给出优化后的调整参数
+3. 你可以修正算法建议的值（算法是纯数学映射，可能不够精准），也可以补充算法未覆盖的参数
+4. value 是最终绝对值，不是增量
+
+## 参数范围
+- exposure: -5.0 ~ 5.0（步长 0.01）
+- brightness: -100 ~ 100
+- contrast: -100 ~ 100
+- highlights: -100 ~ 100
+- shadows: -100 ~ 100
+- whites: -100 ~ 100
+- blacks: -100 ~ 100
+- saturation: -100 ~ 100
+- vibrance: -100 ~ 100
+- temperature: -100 ~ 100（负=冷/蓝，正=暖/橙）
+- tint: -100 ~ 100（负=绿，正=品红）
+- clarity: -100 ~ 100
+- dehaze: -100 ~ 100
+- structure: -100 ~ 100
+- sharpness: 0 ~ 100
+- vignetteAmount: -100 ~ 100（负=暗角）
+
+## 输出格式（严格 JSON）
+{{
+  "understanding": "用 1-2 句话描述参考图的风格特征和你的调色思路",
+  "adjustments": [
+    {{
+      "key": "参数键名",
+      "value": 数值,
+      "label": "中文参数名",
+      "min": 最小值,
+      "max": 最大值,
+      "reason": "调整原因（简短）"
+    }}
+  ]
+}}"#,
+        ref_desc = ref_desc,
+        cur_desc = cur_desc,
+        algo_desc = algo_desc,
+        adj_str = adj_str,
+    )
+}
+
+/// 剥离 <think>...</think> 标签（复用 llm_chat 的逻辑）
+fn strip_thinking_tags(text: &str) -> String {
+    let mut result = text.to_string();
+    while let Some(start) = result.find("<think>") {
+        if let Some(end) = result.find("</think>") {
+            let end_pos = end + "</think>".len();
+            result = format!("{}{}", &result[..start], &result[end_pos..]);
+        } else {
+            result = result[..start].to_string();
+            break;
+        }
+    }
+    result.trim().to_string()
+}
+
+/// 从文本中提取 JSON
+fn extract_json_from_response(text: &str) -> Result<String, String> {
+    let cleaned = strip_thinking_tags(text);
+
+    if serde_json::from_str::<Value>(&cleaned).is_ok() {
+        return Ok(cleaned);
+    }
+
+    // markdown 代码块
+    if let Some(start) = cleaned.find("```json") {
+        let after = &cleaned[start + 7..];
+        if let Some(end) = after.find("```") {
+            let candidate = after[..end].trim();
+            if serde_json::from_str::<Value>(candidate).is_ok() {
+                return Ok(candidate.to_string());
+            }
+        }
+    }
+    if let Some(start) = cleaned.find("```\n") {
+        let after = &cleaned[start + 4..];
+        if let Some(end) = after.find("```") {
+            let candidate = after[..end].trim();
+            if serde_json::from_str::<Value>(candidate).is_ok() {
+                return Ok(candidate.to_string());
+            }
+        }
+    }
+
+    // 花括号匹配
+    if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+        if start < end {
+            let candidate = &cleaned[start..=end];
+            if serde_json::from_str::<Value>(candidate).is_ok() {
+                return Ok(candidate.to_string());
+            }
+        }
+    }
+
+    Err(format!("无法从 LLM 响应中提取 JSON: {}", &cleaned[..cleaned.len().min(200)]))
+}
+
+/// 调用 LLM 增强风格迁移结果
+async fn enhance_with_llm(
+    ref_feat: &StyleFeatures,
+    cur_feat: &StyleFeatures,
+    algo_suggestions: &[StyleTransferSuggestion],
+    current_adjustments: &Value,
+    llm_endpoint: &str,
+    llm_api_key: Option<&str>,
+    llm_model: &str,
+) -> Result<StyleTransferResponse, String> {
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let system_prompt = build_style_transfer_prompt(ref_feat, cur_feat, algo_suggestions, current_adjustments);
+
+    let messages = vec![
+        json!({ "role": "system", "content": system_prompt }),
+        json!({ "role": "user", "content": "请分析参考图的调色风格，给出优化后的调整参数。" }),
+    ];
+
+    let endpoint = llm_endpoint.trim_end_matches('/');
+    let url = format!("{}/v1/chat/completions", endpoint);
+
+    let request_body = json!({
+        "model": llm_model,
+        "messages": messages,
+        "temperature": 0.3,
+        "stream": false,
+        "response_format": {"type": "json_object"}
+    });
+
+    let mut req = client.post(&url).json(&request_body);
+    if let Some(key) = llm_api_key {
+        if !key.is_empty() {
+            req = req.bearer_auth(key);
+        }
+    }
+
+    let response = req.send().await.map_err(|e| format!("LLM 请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("LLM 返回错误 {}: {}", status, body));
+    }
+
+    let resp_json: Value = response.json().await.map_err(|e| format!("解析 LLM 响应失败: {}", e))?;
+
+    let content = resp_json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or("LLM 响应格式错误：缺少 content 字段")?;
+
+    let json_str = extract_json_from_response(content)?;
+
+    let parsed: StyleTransferResponse = serde_json::from_str(&json_str)
+        .map_err(|e| format!("解析风格迁移 JSON 失败: {}，原始: {}", e, content))?;
+
+    Ok(parsed)
+}
+
+/// 带 LLM 增强的风格迁移分析命令
+#[tauri::command]
+pub async fn analyze_style_transfer_with_llm(
+    reference_path: String,
+    current_image_path: String,
+    current_adjustments: Value,
+    llm_endpoint: String,
+    llm_api_key: Option<String>,
+    llm_model: Option<String>,
+) -> Result<StyleTransferResponse, String> {
+    // 先执行纯算法分析
+    if !Path::new(&reference_path).exists() {
+        return Err("参考图文件不存在".to_string());
+    }
+    if !Path::new(&current_image_path).exists() {
+        return Err("当前图片文件不存在".to_string());
+    }
+
+    let ref_meta = std::fs::metadata(&reference_path).map_err(|e| format!("无法读取参考图信息: {}", e))?;
+    if ref_meta.len() > 100 * 1024 * 1024 {
+        return Err("参考图文件过大（超过 100MB）".to_string());
+    }
+
+    let ref_path = reference_path.clone();
+    let cur_path = current_image_path.clone();
+
+    let (ref_img, cur_img) = tokio::task::spawn_blocking(move || {
+        let r = image::open(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
+        let c = image::open(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
+        Ok::<(DynamicImage, DynamicImage), String>((r, c))
+    })
+    .await
+    .map_err(|e| format!("图像加载任务失败: {}", e))??;
+
+    let ref_features = extract_features(&ref_img);
+    let cur_features = extract_features(&cur_img);
+    let algo_suggestions = map_features_to_adjustments(&ref_features, &cur_features, &current_adjustments);
+
+    // 尝试 LLM 增强
+    let model = llm_model.unwrap_or_else(|| "qwen3.5:9b".to_string());
+    match enhance_with_llm(
+        &ref_features,
+        &cur_features,
+        &algo_suggestions,
+        &current_adjustments,
+        &llm_endpoint,
+        llm_api_key.as_deref(),
+        &model,
+    )
+    .await
+    {
+        Ok(llm_result) => Ok(llm_result),
+        Err(llm_err) => {
+            // LLM 失败时回退到纯算法结果
+            log::warn!("LLM 风格增强失败，回退到算法结果: {}", llm_err);
+            let understanding = if algo_suggestions.is_empty() {
+                "两张图片的调色风格非常接近，无需调整。（LLM 不可用，使用纯算法分析）".to_string()
+            } else {
+                format!(
+                    "已分析参考图风格，建议调整 {} 项参数。（LLM 不可用，使用纯算法分析）",
+                    algo_suggestions.len()
+                )
+            };
+            Ok(StyleTransferResponse {
+                understanding,
+                adjustments: algo_suggestions,
+            })
+        }
+    }
 }

@@ -261,11 +261,25 @@ export default function ChatPanel({
       setMessages((prev) => [...prev, userMsg]);
 
       const simpleAdj = getSimpleAdjustments(adjustments);
-      const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
-        referencePath: refPath,
-        currentImagePath: currentImagePath,
-        currentAdjustments: simpleAdj,
-      });
+
+      // Ollama 在线时用 LLM 增强版，否则用纯算法版
+      let result: ChatAdjustResponse;
+      if (ollamaStatus === 'online') {
+        result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferWithLlm, {
+          referencePath: refPath,
+          currentImagePath: currentImagePath,
+          currentAdjustments: simpleAdj,
+          llmEndpoint: endpoint,
+          llmApiKey: llmApiKey || null,
+          llmModel: activeModel || null,
+        });
+      } else {
+        result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
+          referencePath: refPath,
+          currentImagePath: currentImagePath,
+          currentAdjustments: simpleAdj,
+        });
+      }
 
       // 自动应用结果
       const updates: Partial<Adjustments> = {};
@@ -287,7 +301,7 @@ export default function ChatPanel({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, currentImagePath, adjustments, setAdjustments, t]);
+  }, [isLoading, currentImagePath, adjustments, setAdjustments, t, ollamaStatus, endpoint, llmApiKey, activeModel]);
 
   // 离线引导页
   if (ollamaStatus === 'offline') {

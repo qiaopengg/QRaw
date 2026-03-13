@@ -4056,6 +4056,7 @@ fn main() {
             negative_conversion::convert_negatives,
             llm_chat::chat_adjust,
             style_transfer::analyze_style_transfer,
+            style_transfer::analyze_style_transfer_with_llm,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
