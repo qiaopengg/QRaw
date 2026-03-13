@@ -23,7 +23,7 @@ interface EditorToolbarProps {
   showOriginal: boolean;
   showDateView: boolean;
   onToggleDateView(): void;
-  adjustmentsHistory: any[];
+  adjustmentsHistory: Record<string, unknown>[];
   adjustmentsHistoryIndex: number;
   goToAdjustmentsHistoryIndex(index: number): void;
 }
@@ -256,14 +256,14 @@ const EditorToolbar = memo(
           if (prev[key] === curr[key]) continue;
 
           if (key === 'masks') {
-            const prevMasks = prev.masks || [];
-            const currMasks = curr.masks || [];
+            const prevMasks = (prev.masks as Record<string, unknown>[]) || [];
+            const currMasks = (curr.masks as Record<string, unknown>[]) || [];
 
             if (currMasks.length > prevMasks.length) changed.push('Added Mask');
             else if (currMasks.length < prevMasks.length) changed.push('Deleted Mask');
             else {
-              currMasks.forEach((cMask: any) => {
-                const pMask = prevMasks.find((m: any) => m.id === cMask.id);
+              currMasks.forEach((cMask: Record<string, unknown>) => {
+                const pMask = prevMasks.find((m: Record<string, unknown>) => m.id === cMask.id);
                 if (pMask) {
                   if (pMask.opacity !== cMask.opacity) changed.push('Mask Opacity');
                   if (pMask.invert !== cMask.invert) changed.push('Mask Invert');
@@ -271,8 +271,10 @@ const EditorToolbar = memo(
                   if (pMask.subMasks !== cMask.subMasks) changed.push('Mask Area / Brush');
 
                   if (pMask.adjustments !== cMask.adjustments) {
-                    for (const adjKey of Object.keys(cMask.adjustments || {})) {
-                      if (pMask.adjustments[adjKey] !== cMask.adjustments[adjKey]) {
+                    const cAdj = (cMask.adjustments as Record<string, unknown>) || {};
+                    const pAdj = (pMask.adjustments as Record<string, unknown>) || {};
+                    for (const adjKey of Object.keys(cAdj)) {
+                      if (pAdj[adjKey] !== cAdj[adjKey]) {
                         changed.push(`Mask ${formatKey(adjKey)}`);
                       }
                     }
@@ -281,14 +283,18 @@ const EditorToolbar = memo(
               });
             }
           } else if (key === 'aiPatches') {
-            const prevPatches = prev.aiPatches || [];
-            const currPatches = curr.aiPatches || [];
+            const prevPatches: Record<string, unknown>[] = Array.isArray(prev.aiPatches)
+              ? (prev.aiPatches as Record<string, unknown>[])
+              : [];
+            const currPatches: Record<string, unknown>[] = Array.isArray(curr.aiPatches)
+              ? (curr.aiPatches as Record<string, unknown>[])
+              : [];
 
             if (currPatches.length > prevPatches.length) changed.push('Added AI Patch');
             else if (currPatches.length < prevPatches.length) changed.push('Deleted AI Patch');
             else {
-              currPatches.forEach((cPatch: any) => {
-                const pPatch = prevPatches.find((p: any) => p.id === cPatch.id);
+              currPatches.forEach((cPatch: Record<string, unknown>) => {
+                const pPatch = prevPatches.find((p: Record<string, unknown>) => p.id === cPatch.id);
                 if (pPatch) {
                   if (pPatch.visible !== cPatch.visible) changed.push('AI Patch Visibility');
                   if (pPatch.subMasks !== cPatch.subMasks) changed.push('AI Patch Area');

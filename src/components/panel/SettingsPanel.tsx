@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Cloud,
@@ -31,7 +31,7 @@ import Switch from '../ui/Switch';
 import Input from '../ui/Input';
 import Slider from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
-import { Invokes } from '../ui/AppProperties';
+import { Invokes, AppSettings } from '../ui/AppProperties';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { platform } from '@tauri-apps/plugin-os';
@@ -48,9 +48,9 @@ interface ConfirmModalState {
 interface DataActionItemProps {
   buttonAction(): void;
   buttonText: string;
-  description: any;
+  description: React.ReactNode;
   disabled?: boolean;
-  icon: any;
+  icon: React.ReactNode;
   isProcessing: boolean;
   message: string;
   title: string;
@@ -62,16 +62,16 @@ interface KeybindItemProps {
 }
 
 interface SettingItemProps {
-  children: any;
+  children: React.ReactNode;
   description?: string;
   label: string;
 }
 
 interface SettingsPanelProps {
-  appSettings: any;
+  appSettings: AppSettings;
   onBack(): void;
   onLibraryRefresh(): void;
-  onSettingsChange(settings: any): void;
+  onSettingsChange(settings: AppSettings): void;
   rootPath: string | null;
 }
 
@@ -405,11 +405,11 @@ export default function SettingsPanel({
     fetchLogPath();
 
     invoke('get_lensfun_makers')
-      .then((m: any) => setLensMakers(m))
+      .then((m: unknown) => setLensMakers(m as string[]))
       .catch(console.error);
   }, []);
 
-  const handleProcessingSettingChange = (key: string, value: any) => {
+  const handleProcessingSettingChange = (key: string, value: unknown) => {
     setProcessingSettings((prev) => ({ ...prev, [key]: value }));
     if (key === 'processingBackend' || key === 'linuxGpuOptimization') {
       setRestartRequired(true);
@@ -443,7 +443,7 @@ export default function SettingsPanel({
     setLensModels([]);
     if (maker) {
       invoke('get_lensfun_lenses_for_maker', { maker })
-        .then((l: any) => setLensModels(l))
+        .then((l: unknown) => setLensModels(l as string[]))
         .catch(console.error);
     }
   };
@@ -487,7 +487,7 @@ export default function SettingsPanel({
       const count: number = await invoke(Invokes.ClearAllSidecars, { rootPath: effectiveRootPath });
       setClearMessage(t('settings.sidecarsDeleted', { count }));
       onLibraryRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to clear sidecars:', err);
       setClearMessage(`Error: ${err}`);
     } finally {
@@ -516,7 +516,7 @@ export default function SettingsPanel({
       const count: number = await invoke(Invokes.ClearAiTags, { rootPath: effectiveRootPath });
       setAiTagsClearMessage(t('settings.aiTagsCleared', { count }));
       onLibraryRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to clear AI tags:', err);
       setAiTagsClearMessage(`Error: ${err}`);
     } finally {
@@ -545,7 +545,7 @@ export default function SettingsPanel({
       const count: number = await invoke(Invokes.ClearAllTags, { rootPath: effectiveRootPath });
       setTagsClearMessage(t('settings.allTagsCleared', { count }));
       onLibraryRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to clear tags:', err);
       setTagsClearMessage(`Error: ${err}`);
     } finally {
@@ -597,7 +597,7 @@ export default function SettingsPanel({
       await invoke(Invokes.ClearThumbnailCache);
       setCacheClearMessage(t('settings.thumbnailCacheCleared'));
       onLibraryRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to clear thumbnail cache:', err);
       setCacheClearMessage(`Error: ${err}`);
     } finally {
@@ -758,7 +758,7 @@ export default function SettingsPanel({
                   <div className="space-y-8">
                     <SettingItem label={t('settings.theme')} description={t('settings.themeDescription')}>
                       <Dropdown
-                        onChange={(value: any) => onSettingsChange({ ...appSettings, theme: value })}
+                        onChange={(value) => onSettingsChange({ ...appSettings, theme: value })}
                         options={THEMES.map((theme: ThemeProps) => ({
                           value: theme.id,
                           label: t(`settings.theme_${theme.id}`, { defaultValue: theme.name }),
@@ -848,7 +848,7 @@ export default function SettingsPanel({
 
                     <SettingItem label={t('settings.font')} description={t('settings.fontDescription')}>
                       <Dropdown
-                        onChange={(value: any) => onSettingsChange({ ...appSettings, fontFamily: value })}
+                        onChange={(value) => onSettingsChange({ ...appSettings, fontFamily: value })}
                         options={[
                           { value: 'poppins', label: t('settings.font_poppins') },
                           { value: 'system', label: t('settings.font_system') },
@@ -859,7 +859,7 @@ export default function SettingsPanel({
 
                     <SettingItem label={t('settings.language')} description={t('settings.languageDescription')}>
                       <Dropdown
-                        onChange={(value: any) => i18n.changeLanguage(value)}
+                        onChange={(value) => i18n.changeLanguage(value)}
                         options={LANGUAGES.map((lang) => ({ value: lang.code, label: lang.label }))}
                         value={i18n.language}
                       />
@@ -1021,7 +1021,7 @@ export default function SettingsPanel({
                                   step={1}
                                   value={appSettings?.aiTagCount ?? 10}
                                   defaultValue={10}
-                                  onChange={(e: any) =>
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                                     onSettingsChange({ ...appSettings, aiTagCount: parseInt(e.target.value) })
                                   }
                                 />
@@ -1248,7 +1248,7 @@ export default function SettingsPanel({
                                   label={t('settings.previewResolution')}
                                 >
                                   <Dropdown
-                                    onChange={(value: any) =>
+                                    onChange={(value) =>
                                       handleProcessingSettingChange('editorPreviewResolution', value)
                                     }
                                     options={resolutions}
@@ -1274,7 +1274,7 @@ export default function SettingsPanel({
                                   label={t('settings.staticPreviewResolution')}
                                 >
                                   <Dropdown
-                                    onChange={(value: any) =>
+                                    onChange={(value) =>
                                       handleProcessingSettingChange('editorPreviewResolution', value)
                                     }
                                     options={resolutions}
@@ -1287,9 +1287,7 @@ export default function SettingsPanel({
                                   description={t('settings.renderResolutionScaleDescription')}
                                 >
                                   <Dropdown
-                                    onChange={(value: any) =>
-                                      handleProcessingSettingChange('highResZoomMultiplier', value)
-                                    }
+                                    onChange={(value) => handleProcessingSettingChange('highResZoomMultiplier', value)}
                                     options={zoomMultiplierOptions}
                                     value={processingSettings.highResZoomMultiplier}
                                   />
@@ -1376,7 +1374,7 @@ export default function SettingsPanel({
                         step={0.1}
                         value={processingSettings.rawHighlightCompression}
                         defaultValue={2.5}
-                        onChange={(e: any) =>
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           handleProcessingSettingChange('rawHighlightCompression', parseFloat(e.target.value))
                         }
                       />
@@ -1387,7 +1385,7 @@ export default function SettingsPanel({
                       description={t('settings.linearRawProcessingDescription')}
                     >
                       <Dropdown
-                        onChange={(value: any) => onSettingsChange({ ...appSettings, linearRawMode: value })}
+                        onChange={(value) => onSettingsChange({ ...appSettings, linearRawMode: value })}
                         options={linearRawOptions(t)}
                         value={appSettings?.linearRawMode || 'auto'}
                       />
@@ -1398,7 +1396,7 @@ export default function SettingsPanel({
                       description={t('settings.processingBackendDescription')}
                     >
                       <Dropdown
-                        onChange={(value: any) => handleProcessingSettingChange('processingBackend', value)}
+                        onChange={(value) => handleProcessingSettingChange('processingBackend', value)}
                         options={filteredBackendOptions}
                         value={
                           filteredBackendOptions.some((option) => option.value === processingSettings.processingBackend)
@@ -1497,8 +1495,10 @@ export default function SettingsPanel({
                                   onBlur={() =>
                                     onSettingsChange({ ...appSettings, aiConnectorAddress: aiConnectorAddress })
                                   }
-                                  onChange={(e: any) => setAiConnectorAddress(e.target.value)}
-                                  onKeyDown={(e: any) => e.stopPropagation()}
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                    setAiConnectorAddress(e.target.value)
+                                  }
+                                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
                                   placeholder="127.0.0.1:8188"
                                   type="text"
                                   value={aiConnectorAddress}

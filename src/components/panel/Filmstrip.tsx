@@ -19,13 +19,13 @@ interface ImageLayer {
 
 interface ItemData {
   imageList: ImageFile[];
-  imageRatings: any;
+  imageRatings: Record<string, number> | null | undefined;
   selectedPath: string | undefined;
   multiSelectedPaths: string[];
   thumbnails: Record<string, string> | undefined;
   thumbnailAspectRatio: ThumbnailAspectRatio;
-  onContextMenu?: (event: any, path: string) => void;
-  onImageSelect?: (path: string, event: any) => void;
+  onContextMenu?: (event: React.MouseEvent, path: string) => void;
+  onImageSelect?: (path: string, event: React.MouseEvent) => void;
   itemHeight: number;
   setSize: (index: number, width: number) => void;
 }
@@ -46,11 +46,11 @@ const FilmstripThumbnail = memo(
     knownWidth,
   }: {
     imageFile: ImageFile;
-    imageRatings: any;
+    imageRatings: Record<string, number> | null | undefined;
     isActive: boolean;
     isSelected: boolean;
-    onContextMenu?: (event: any, path: string) => void;
-    onImageSelect?: (path: string, event: any) => void;
+    onContextMenu?: (event: React.MouseEvent, path: string) => void;
+    onImageSelect?: (path: string, event: React.MouseEvent) => void;
     thumbData: string | undefined;
     thumbnailAspectRatio: ThumbnailAspectRatio;
     itemHeight: number;
@@ -160,11 +160,11 @@ const FilmstripThumbnail = memo(
           'h-full w-full rounded-md overflow-hidden cursor-pointer flex-shrink-0 group relative transition-all duration-150 bg-surface',
           ringClass,
         )}
-        onClick={(e: any) => {
+        onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
           onImageSelect?.(path, e);
         }}
-        onContextMenu={(e: any) => onContextMenu?.(e, path)}
+        onContextMenu={(e: React.MouseEvent) => onContextMenu?.(e, path)}
         style={{
           zIndex: isActive ? 2 : isSelected ? 1 : 'auto',
         }}
@@ -237,6 +237,21 @@ const FilmstripThumbnail = memo(
   },
 );
 
+interface FilmstripCellProps {
+  columnIndex: number;
+  style: React.CSSProperties;
+  imageList: ImageFile[];
+  imageRatings: Record<string, number> | null | undefined;
+  selectedPath: string | undefined;
+  multiSelectedPaths: string[];
+  thumbnails: Record<string, string> | undefined;
+  thumbnailAspectRatio: ThumbnailAspectRatio;
+  onContextMenu?: (event: React.MouseEvent, path: string) => void;
+  onImageSelect?: (path: string, event: React.MouseEvent) => void;
+  itemHeight: number;
+  setSize: (index: number, width: number) => void;
+}
+
 const FilmstripCell = ({
   columnIndex,
   style,
@@ -250,7 +265,7 @@ const FilmstripCell = ({
   onImageSelect,
   itemHeight,
   setSize,
-}: any) => {
+}: FilmstripCellProps) => {
   const imageFile = imageList[columnIndex];
   const fullWidth = style.width as number;
   const contentWidth = fullWidth - ITEM_GAP;
@@ -307,7 +322,7 @@ const FilmstripList = ({
   const pendingResizeRef = useRef<number | null>(null);
   const lowestPendingIndexRef = useRef<number>(Infinity);
   const isAnimatingScroll = useRef(false);
-  const scrollAnimationTimeout = useRef<any>(null);
+  const scrollAnimationTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingScrollTarget = useRef<number | null>(null);
   const itemHeight = Math.max(20, height - VERTICAL_PADDING);
 
@@ -483,7 +498,7 @@ const FilmstripList = ({
         columnCount={data.imageList.length}
         columnWidth={getColumnWidth}
         cellComponent={FilmstripCell}
-        cellProps={cellProps}
+        cellProps={cellProps as unknown as { columnIndex: never; style: never } & typeof cellProps}
         className="custom-scrollbar"
         style={{ overflowY: 'hidden' }}
         onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
@@ -501,12 +516,12 @@ const FilmstripList = ({
 
 interface FilmStripProps {
   imageList: Array<ImageFile>;
-  imageRatings: any;
+  imageRatings: Record<string, number> | null | undefined;
   isLoading: boolean;
   multiSelectedPaths: Array<string>;
   onClearSelection?(): void;
-  onContextMenu?(event: any, path: string): void;
-  onImageSelect?(path: string, event: any): void;
+  onContextMenu?(event: React.MouseEvent, path: string): void;
+  onImageSelect?(path: string, event: React.MouseEvent): void;
   selectedImage?: SelectedImage;
   thumbnails: Record<string, string> | undefined;
   thumbnailAspectRatio: ThumbnailAspectRatio;
@@ -527,7 +542,7 @@ export default function Filmstrip({
 }: FilmStripProps) {
   const clickTriggeredScroll = useRef(false);
 
-  const handleImageSelect = (path: string, event: any) => {
+  const handleImageSelect = (path: string, event: React.MouseEvent) => {
     if (path !== selectedImage?.path) {
       clickTriggeredScroll.current = true;
     }

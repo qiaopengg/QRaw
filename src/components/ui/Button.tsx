@@ -1,11 +1,12 @@
+import React from 'react';
 import clsx from 'clsx';
 
 interface ButtonProps {
   autoFocus?: boolean;
-  children: any;
+  children: React.ReactNode;
   className?: string;
   disabled?: boolean;
-  onClick: any;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
   size?: string;
   tabIndex?: number;
   title?: string;

@@ -1,6 +1,6 @@
 import { Crop } from 'react-image-crop';
 import { v4 as uuidv4 } from 'uuid';
-import { SubMask, SubMaskMode } from '../components/panel/right/Masks';
+import { SubMask, SubMaskMode, Mask } from '../components/panel/right/Masks';
 
 export enum ActiveChannel {
   Blue = 'blue',
@@ -124,7 +124,7 @@ export interface ColorCalibration {
 }
 
 export interface Adjustments {
-  [index: string]: any;
+  [index: string]: unknown;
   aiPatches: Array<AiPatch>;
   aspectRatio: number | null;
   blacks: number;
@@ -210,7 +210,7 @@ export interface AiPatch {
   isLoading: boolean;
   invert: boolean;
   name: string;
-  patchData: any | null;
+  patchData: Record<string, unknown> | null;
   prompt: string;
   subMasks: Array<SubMask>;
   visible: boolean;
@@ -262,7 +262,7 @@ interface Hsl {
 }
 
 export interface MaskAdjustments {
-  [index: string]: any;
+  [index: string]: unknown;
   blacks: number;
   brightness: number;
   clarity: number;
@@ -292,7 +292,7 @@ export interface MaskAdjustments {
 
 export interface MaskContainer {
   adjustments: MaskAdjustments;
-  id?: any;
+  id?: string;
   invert: boolean;
   name: string;
   opacity: number;
@@ -515,18 +515,20 @@ export const INITIAL_ADJUSTMENTS: Adjustments = {
   whites: 0,
 };
 
-export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any => {
+export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): Adjustments => {
   if (!loadedAdjustments) {
     return INITIAL_ADJUSTMENTS;
   }
 
-  const normalizeSubMasks = (subMasks: any[]) => {
+  const normalizeSubMasks = (subMasks: Partial<SubMask>[]): SubMask[] => {
     return (subMasks || []).map((subMask: Partial<SubMask>) => ({
       visible: true,
       mode: SubMaskMode.Additive,
       invert: false,
       opacity: 100,
       ...subMask,
+      id: subMask.id ?? uuidv4(),
+      type: subMask.type ?? Mask.Brush,
     }));
   };
 
@@ -556,9 +558,9 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     };
   });
 
-  const normalizedAiPatches = (loadedAdjustments.aiPatches || []).map((patch: any) => ({
-    visible: true,
+  const normalizedAiPatches = ((loadedAdjustments.aiPatches as AiPatch[]) || []).map((patch: AiPatch) => ({
     ...patch,
+    visible: patch.visible ?? true,
     subMasks: normalizeSubMasks(patch.subMasks),
   }));
 

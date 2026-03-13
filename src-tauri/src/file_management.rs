@@ -142,7 +142,8 @@ impl fmt::Display for ReadFileError {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LastFolderState {
-    pub current_folder_path: String,
+    #[serde(default)]
+    pub current_folder_path: Option<String>,
     pub expanded_folders: Vec<String>,
 }
 

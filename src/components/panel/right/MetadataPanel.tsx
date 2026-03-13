@@ -8,7 +8,7 @@ import { SelectedImage, AppSettings, Invokes } from '../../ui/AppProperties';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
 
 interface CameraSetting {
-  format?(value: number): void;
+  format?(value: string | number): string | number;
   label: string;
 }
 
@@ -29,7 +29,7 @@ interface GPSData {
 
 interface MetaDataItemProps {
   label: string;
-  value: any;
+  value: string | number | boolean | null | undefined;
 }
 
 interface MetaDataPanelProps {
@@ -78,22 +78,22 @@ function MetadataItem({ label, value }: MetaDataItemProps) {
 
 const KEY_CAMERA_SETTINGS_MAP: CameraSettings = {
   FNumber: {
-    format: (value: number) => `${value}`,
+    format: (value: number | string) => `${value}`,
     label: 'Aperture',
   },
   ExposureTime: {
-    format: (value: number) => `${value}`,
+    format: (value: number | string) => `${value}`,
     label: 'Shutter Speed',
   },
   PhotographicSensitivity: {
     label: 'ISO',
   },
   FocalLengthIn35mmFilm: {
-    format: (value: number) => (String(value).endsWith('mm') ? value : `${value} mm`),
+    format: (value: number | string) => (String(value).endsWith('mm') ? value : `${value} mm`),
     label: 'Focal Length',
   },
   LensModel: {
-    format: (value: number) => String(value).replace(/"/g, ''),
+    format: (value: number | string) => String(value).replace(/"/g, ''),
     label: 'Lens',
   },
 };
@@ -142,7 +142,7 @@ export default function MetadataPanel({
     const lonStr = exif.GPSLongitude;
     const lonRef = exif.GPSLongitudeRef;
 
-    const gpsData: GPSData = { lat: null, lon: null, altitude: exif.GPSAltitude || null };
+    const gpsData: GPSData = { lat: null, lon: null, altitude: exif.GPSAltitude ? Number(exif.GPSAltitude) : null };
     if (latStr && latRef && lonStr && lonRef) {
       const parsedLat = parseDms(latStr);
       const parsedLon = parseDms(lonStr);
@@ -388,8 +388,8 @@ export default function MetadataPanel({
                   {t('metadata.keyCameraSettings')}
                 </h3>
                 <div className="flex flex-col gap-1">
-                  {keyCameraSettings.map((item: any) => (
-                    <MetadataItem key={item.key} label={item.label} value={item.value} />
+                  {keyCameraSettings.map((item) => (
+                    <MetadataItem key={item!.key} label={item!.label} value={item!.value ?? ''} />
                   ))}
                 </div>
               </div>

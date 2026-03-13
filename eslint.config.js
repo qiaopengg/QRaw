@@ -54,7 +54,7 @@ module.exports = [
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
       ],
       // '@typescript-eslint/no-explicit-any': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
       // '@typescript-eslint/explicit-function-return-type': 'off',
       // 'prettier/prettier': 'error',
     },

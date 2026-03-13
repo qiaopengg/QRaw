@@ -1,6 +1,6 @@
 import { Folder, FolderOpen, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, X } from 'lucide-react';
 import clsx from 'clsx';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -17,12 +17,12 @@ interface FolderTreeProps {
   isLoading: boolean;
   isResizing: boolean;
   isVisible: boolean;
-  onContextMenu(event: any, path: string | null, isPinned?: boolean): void;
+  onContextMenu(event: React.MouseEvent, path: string | null, isPinned?: boolean): void;
   onFolderSelect(folder: string): void;
   onToggleFolder(folder: string): void;
   selectedPath: string | null;
   setIsVisible(visible: boolean): void;
-  style: any;
+  style: React.CSSProperties;
   tree: FolderTree | null;
   pinnedFolderTrees: FolderTree[];
   pinnedFolders: string[];
@@ -36,7 +36,7 @@ interface TreeNodeProps {
   expandedFolders: Set<string>;
   isExpanded: boolean;
   node: FolderTree;
-  onContextMenu(event: any, path: string, isPinned?: boolean): void;
+  onContextMenu(event: React.MouseEvent, path: string, isPinned?: boolean): void;
   onFolderSelect(folder: string): void;
   onToggle(path: string): void;
   selectedPath: string | null;
@@ -116,7 +116,7 @@ function TreeNode({
   const isSelected = node.path === selectedPath;
   const isPinned = pinnedFolders.includes(node.path);
 
-  const handleFolderIconClick = (e: any) => {
+  const handleFolderIconClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (hasChildren) {
       onToggle(node.path);
@@ -133,7 +133,7 @@ function TreeNode({
     }
   };
 
-  const containerVariants: any = {
+  const containerVariants: Variants = {
     closed: { height: 0, opacity: 0, transition: { duration: 0.2, ease: 'easeInOut' } },
     open: { height: 'auto', opacity: 1, transition: { duration: 0.25, ease: 'easeInOut' } },
   };
@@ -159,7 +159,7 @@ function TreeNode({
           'hover:bg-card-active': !isSelected,
         })}
         onClick={handleNameClick}
-        onContextMenu={(e: any) => onContextMenu(e, node.path, isPinned)}
+        onContextMenu={(e: React.MouseEvent) => onContextMenu(e, node.path, isPinned)}
       >
         <div
           className={clsx('cursor-pointer p-0.5 rounded transition-colors', {
@@ -220,7 +220,7 @@ function TreeNode({
           >
             <div className="py-1">
               <AnimatePresence>
-                {node?.children?.map((childNode: any, index: number) => (
+                {node?.children?.map((childNode: FolderTree, index: number) => (
                   <motion.div
                     animate="visible"
                     custom={{ index, total: node.children.length }}
@@ -276,7 +276,7 @@ export default function FolderTree({
   const [isHovering, setIsHovering] = useState(false);
   const { t } = useTranslation();
 
-  const handleEmptyAreaContextMenu = (e: any) => {
+  const handleEmptyAreaContextMenu = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onContextMenu(e, null, false);
     }

@@ -7,12 +7,14 @@ import { useTranslation } from 'react-i18next';
 
 interface BasicAdjustmentsProps {
   adjustments: Adjustments;
-  setAdjustments(adjustments: Partial<Adjustments>): any;
+  setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
   isForMask?: boolean;
   onDragStateChange?: (isDragging: boolean) => void;
 }
 
-const getToneMapperOptions = (t: any) => [
+type TFunction = (key: string) => string;
+
+const getToneMapperOptions = (t: TFunction) => [
   { id: 'basic', label: t('adjustments.basic'), title: t('adjustments.standardTonemapping') },
   { id: 'agx', label: t('adjustments.agx'), title: t('adjustments.filmLikeTonemapping') },
 ];
@@ -141,7 +143,9 @@ const ToneMapperSwitch = ({
             label={t('adjustments.exposure')}
             max={5}
             min={-5}
-            onChange={(e: any) => onExposureChange(parseFloat(e.target.value))}
+            onChange={(e: { target: { value: number | string } }) =>
+              onExposureChange(parseFloat(String(e.target.value)))
+            }
             step={0.01}
             value={exposureValue}
             trackClassName="bg-surface"
@@ -160,13 +164,16 @@ export default function BasicAdjustments({
   onDragStateChange,
 }: BasicAdjustmentsProps) {
   const { t } = useTranslation();
-  const handleAdjustmentChange = (key: BasicAdjustment, value: any) => {
-    const numericValue = parseFloat(value);
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [key]: numericValue }));
+  const handleAdjustmentChange = (key: BasicAdjustment, value: number | string) => {
+    const numericValue = parseFloat(String(value));
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      [key]: numericValue,
+    }));
   };
 
   const handleToneMapperChange = (mapper: string) => {
-    setAdjustments((prev: Partial<Adjustments>) => ({
+    setAdjustments((prev: Adjustments) => ({
       ...prev,
       toneMapper: mapper as 'basic' | 'agx',
     }));
@@ -178,7 +185,9 @@ export default function BasicAdjustments({
         label={t('adjustments.brightness')}
         max={5}
         min={-5}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Brightness, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Brightness, e.target.value)
+        }
         step={0.01}
         value={adjustments.brightness}
         onDragStateChange={onDragStateChange}
@@ -187,7 +196,9 @@ export default function BasicAdjustments({
         label={t('adjustments.contrast')}
         max={100}
         min={-100}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Contrast, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Contrast, e.target.value)
+        }
         step={1}
         value={adjustments.contrast}
         onDragStateChange={onDragStateChange}
@@ -196,7 +207,9 @@ export default function BasicAdjustments({
         label={t('adjustments.highlights')}
         max={100}
         min={-100}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Highlights, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Highlights, e.target.value)
+        }
         step={1}
         value={adjustments.highlights}
         onDragStateChange={onDragStateChange}
@@ -205,7 +218,9 @@ export default function BasicAdjustments({
         label={t('adjustments.shadows')}
         max={100}
         min={-100}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Shadows, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Shadows, e.target.value)
+        }
         step={1}
         value={adjustments.shadows}
         onDragStateChange={onDragStateChange}
@@ -214,7 +229,9 @@ export default function BasicAdjustments({
         label={t('adjustments.whites')}
         max={100}
         min={-100}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Whites, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Whites, e.target.value)
+        }
         step={1}
         value={adjustments.whites}
         onDragStateChange={onDragStateChange}
@@ -223,7 +240,9 @@ export default function BasicAdjustments({
         label={t('adjustments.blacks')}
         max={100}
         min={-100}
-        onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Blacks, e.target.value)}
+        onChange={(e: { target: { value: number | string } }) =>
+          handleAdjustmentChange(BasicAdjustment.Blacks, e.target.value)
+        }
         step={1}
         value={adjustments.blacks}
         onDragStateChange={onDragStateChange}
@@ -234,7 +253,9 @@ export default function BasicAdjustments({
           label={t('adjustments.exposure')}
           max={5}
           min={-5}
-          onChange={(e: any) => handleAdjustmentChange(BasicAdjustment.Exposure, e.target.value)}
+          onChange={(e: { target: { value: number | string } }) =>
+            handleAdjustmentChange(BasicAdjustment.Exposure, e.target.value)
+          }
           step={0.01}
           value={adjustments.exposure}
           onDragStateChange={onDragStateChange}

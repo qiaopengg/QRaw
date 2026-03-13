@@ -21,14 +21,14 @@ export interface ChannelConfig {
 
 interface ColorData {
   color: string;
-  data: any;
+  data: number[] | undefined;
 }
 
 interface CurveGraphProps {
   adjustments: Adjustments;
   histogram: ChannelConfig | null;
   isForMask?: boolean;
-  setAdjustments(updater: (prev: any) => any): void;
+  setAdjustments(updater: (prev: Adjustments) => Adjustments): void;
   theme: string;
   onDragStateChange?: (isDragging: boolean) => void;
 }
@@ -111,7 +111,7 @@ function getCurvePath(points: Array<Coord>) {
   return path;
 }
 
-function getHistogramPath(data: Array<any>) {
+function getHistogramPath(data: number[]) {
   if (!data || data.length === 0) {
     return '';
   }
@@ -131,7 +131,7 @@ function getHistogramPath(data: Array<any>) {
   return `M0,255 L${pathData} L255,255 Z`;
 }
 
-function getZeroHistogramPath(data: Array<any>) {
+function getZeroHistogramPath(data: number[]) {
   if (!data || data.length === 0) {
     return '';
   }
@@ -220,7 +220,7 @@ export default function CurveGraph({
   }, []);
 
   useEffect(() => {
-    const handleMouseMove = (e: any) => {
+    const handleMouseMove = (e: MouseEvent) => {
       const index = draggingIndexRef.current;
       if (index === null) return;
 
@@ -281,10 +281,10 @@ export default function CurveGraph({
   const histogramOpacity = isLightTheme ? 0.6 : 0.15;
 
   const channelConfig: ChannelConfig = {
-    luma: { color: 'rgb(var(--color-accent))', data: histogram?.luma },
-    red: { color: '#FF6B6B', data: histogram?.red },
-    green: { color: '#6BCB77', data: histogram?.green },
-    blue: { color: '#4D96FF', data: histogram?.blue },
+    luma: { color: 'rgb(var(--color-accent))', data: histogram?.luma?.data },
+    red: { color: '#FF6B6B', data: histogram?.red?.data },
+    green: { color: '#6BCB77', data: histogram?.green?.data },
+    blue: { color: '#4D96FF', data: histogram?.blue?.data },
   };
 
   const propPoints = adjustments?.curves?.[activeChannel];
@@ -310,7 +310,7 @@ export default function CurveGraph({
     }));
   };
 
-  const getMousePos = (e: any) => {
+  const getMousePos = (e: React.MouseEvent<SVGSVGElement | SVGElement | HTMLDivElement>) => {
     const svg = svgRef.current;
     if (!svg) {
       return { x: 0, y: 0 };
@@ -321,7 +321,7 @@ export default function CurveGraph({
     return { x, y };
   };
 
-  const handlePointMouseDown = (e: any, index: number) => {
+  const handlePointMouseDown = (e: React.MouseEvent<SVGCircleElement>, index: number) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -352,8 +352,8 @@ export default function CurveGraph({
     }
   };
 
-  const handleContainerMouseDown = (e: any) => {
-    if (e.button !== 0 || e.target.tagName === 'circle') {
+  const handleContainerMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target as Element).tagName === 'circle') {
       return;
     }
 
@@ -489,7 +489,7 @@ export default function CurveGraph({
     <div className="select-none" ref={containerRef}>
       <div className="flex items-center justify-between gap-1 mb-2 mt-2">
         <div className="flex items-center gap-1">
-          {Object.keys(channelConfig).map((channel: any) => (
+          {Object.keys(channelConfig).map((channel: string) => (
             <button
               className={`w-7 h-7 rounded-full flex items-center justify-center transition-all
               ${
@@ -574,7 +574,7 @@ export default function CurveGraph({
               cy={255 - p.y}
               fill={color}
               key={i}
-              onMouseDown={(e: any) => handlePointMouseDown(e, i)}
+              onMouseDown={(e: React.MouseEvent<SVGCircleElement>) => handlePointMouseDown(e, i)}
               onContextMenu={(e: React.MouseEvent) => handlePointContextMenu(e, i)}
               r="6"
               stroke="#1e1e1e"

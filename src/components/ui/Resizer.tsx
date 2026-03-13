@@ -1,9 +1,10 @@
+import React from 'react';
 import clsx from 'clsx';
 import { Orientation } from './AppProperties';
 
 interface ResizerProps {
   direction: Orientation;
-  onMouseDown: any;
+  onMouseDown: React.MouseEventHandler<HTMLDivElement>;
 }
 
 const Resizer = ({ direction, onMouseDown }: ResizerProps) => (

@@ -4,10 +4,10 @@ import { GLOBAL_KEYS } from './AppProperties';
 interface SliderProps {
   defaultValue?: number;
   disabled?: boolean;
-  label: any;
+  label: React.ReactNode;
   max: number;
   min: number;
-  onChange(event: any): void;
+  onChange(event: { target: { value: number } } | React.ChangeEvent<HTMLInputElement>): void;
   onDragStateChange?(state: boolean): void;
   step?: number;
   value: number;
@@ -29,7 +29,7 @@ const Slider = ({
 }: SliderProps) => {
   const [displayValue, setDisplayValue] = useState<number>(value);
   const [isDragging, setIsDragging] = useState(false);
-  const animationFrameRef = useRef<any>(undefined);
+  const animationFrameRef = useRef<number | undefined>(undefined);
   const [isEditing, setIsEditing] = useState(false);
   const [inputValue, setInputValue] = useState<string>(String(value));
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -103,11 +103,11 @@ const Slider = ({
     const startValue = displayValue;
     const endValue = value;
     const duration = 300;
-    let startTime: any = null;
+    let startTime: number | null = null;
 
     const easeInOut = (t: number) => t * t * (3 - 2 * t);
 
-    const animate = (timestamp: any) => {
+    const animate = (timestamp: number) => {
       if (!startTime) {
         startTime = timestamp;
       }
@@ -299,7 +299,13 @@ const Slider = ({
           onMouseDown={handleDragStart}
           onMouseUp={handleDragEnd}
           onTouchEnd={handleDragEnd}
-          onTouchStart={handleDragStart as any}
+          onTouchStart={(e: React.TouchEvent<HTMLInputElement>) => {
+            if (Date.now() - lastUpTime.current < DOUBLE_CLICK_THRESHOLD_MS) {
+              e.preventDefault();
+              return;
+            }
+            setIsDragging(true);
+          }}
           step={String(step)}
           type="range"
           value={displayValue}

@@ -1,3 +1,4 @@
+import React from 'react';
 import {
   Brush,
   Circle,
@@ -39,7 +40,7 @@ export enum ToolType {
 
 export interface MaskType {
   disabled: boolean;
-  icon: any;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   id?: string;
   name: string;
   type: Mask | null;
@@ -50,12 +51,12 @@ export interface SubMask {
   invert: boolean;
   mode: SubMaskMode;
   opacity: number;
-  parameters?: any;
+  parameters?: Record<string, unknown>;
   type: Mask;
   visible: boolean;
 }
 
-export const MASK_ICON_MAP: Record<Mask, any> = {
+export const MASK_ICON_MAP: Record<Mask, React.ComponentType<{ size?: number; className?: string }>> = {
   [Mask.AiForeground]: User,
   [Mask.AiSky]: Cloud,
   [Mask.AiSubject]: Sparkles,
@@ -68,7 +69,7 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Radial]: Circle,
 };
 
-export const getMaskPanelCreationTypes = (t: any): Array<MaskType> => [
+export const getMaskPanelCreationTypes = (t: (key: string) => string): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,
@@ -108,7 +109,7 @@ export const getMaskPanelCreationTypes = (t: any): Array<MaskType> => [
   },
 ];
 
-export const getAiPanelCreationTypes = (t: any): Array<MaskType> => [
+export const getAiPanelCreationTypes = (t: (key: string) => string): Array<MaskType> => [
   {
     disabled: false,
     icon: Eraser,
@@ -147,7 +148,7 @@ export const getAiPanelCreationTypes = (t: any): Array<MaskType> => [
   },
 ];
 
-export const getSubMaskComponentTypes = (t: any): Array<MaskType> => [
+export const getSubMaskComponentTypes = (t: (key: string) => string): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,
@@ -187,7 +188,7 @@ export const getSubMaskComponentTypes = (t: any): Array<MaskType> => [
   },
 ];
 
-export const getOthersMaskTypes = (t: any): Array<MaskType> => [
+export const getOthersMaskTypes = (t: (key: string) => string): Array<MaskType> => [
   {
     disabled: false,
     icon: Brush,
@@ -202,7 +203,7 @@ export const getOthersMaskTypes = (t: any): Array<MaskType> => [
   },
 ];
 
-export const getAiSubMaskComponentTypes = (t: any): Array<MaskType> => [
+export const getAiSubMaskComponentTypes = (t: (key: string) => string): Array<MaskType> => [
   {
     disabled: false,
     icon: Sparkles,

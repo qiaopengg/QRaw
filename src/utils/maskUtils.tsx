@@ -12,7 +12,7 @@ export const createSubMask = (
   opacity: number;
   mode: SubMaskMode;
   type: Mask;
-  parameters: any;
+  parameters: Record<string, number | boolean | string | null | Array<unknown>>;
 } => {
   const { width, height } = imageDimensions || { width: 1000, height: 1000 };
   const common = { id: uuidv4(), visible: true, invert: false, opacity: 100, mode: SubMaskMode.Additive, type };

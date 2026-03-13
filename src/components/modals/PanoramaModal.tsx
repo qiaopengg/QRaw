@@ -73,7 +73,7 @@ export default function PanoramaModal({
   };
 
   const handleKeyDown = useCallback(
-    (e: any) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
         handleClose();
       }

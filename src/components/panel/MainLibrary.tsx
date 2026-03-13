@@ -1475,7 +1475,7 @@ export default function MainLibrary({
         <div className="w-full md:w-1/2 flex flex-col p-8 lg:p-16 relative">
           {showSettings ? (
             <SettingsPanel
-              appSettings={appSettings}
+              appSettings={appSettings ?? { lastRootPath: null, theme: 'dark' as const }}
               onBack={() => setShowSettings(false)}
               onLibraryRefresh={onLibraryRefresh}
               onSettingsChange={onSettingsChange}

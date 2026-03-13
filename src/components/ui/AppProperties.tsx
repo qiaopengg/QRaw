@@ -1,9 +1,18 @@
+import React from 'react';
 import { ExportPreset } from './ExportImportProperties';
-import { Adjustments } from '../../utils/adjustments';
+import { Adjustments, CopyPasteSettings } from '../../utils/adjustments';
 import { ToolType } from '../panel/right/Masks';
 
 export const GLOBAL_KEYS = [' ', 'ArrowUp', 'ArrowDown', 'f', 'b', 'w', 'ArrowLeft', 'ArrowRight'];
 export const OPTION_SEPARATOR = 'separator';
+
+export interface CollapsibleSectionsState extends Record<string, boolean> {
+  basic: boolean;
+  color: boolean;
+  curves: boolean;
+  details: boolean;
+  effects: boolean;
+}
 
 export enum Invokes {
   AddTagForPaths = 'add_tag_for_paths',
@@ -121,10 +130,10 @@ export enum ThumbnailAspectRatio {
 }
 
 export interface AppSettings {
-  adaptiveEditorTheme?: Theme;
+  adaptiveEditorTheme?: boolean;
   aiConnectorAddress?: string;
-  copyPasteSettings?: any;
-  decorations?: any;
+  copyPasteSettings?: CopyPasteSettings;
+  decorations?: Record<string, unknown>;
   editorPreviewResolution?: number;
   enableZoomHifi?: boolean;
   useFullDpiRendering?: boolean;
@@ -135,8 +144,8 @@ export interface AppSettings {
   enableExifReading?: boolean;
   filterCriteria?: FilterCriteria;
   fontFamily?: string;
-  lastFolderState?: any;
-  pinnedFolders?: any;
+  lastFolderState?: { currentFolderPath?: string; expandedFolders?: string[] };
+  pinnedFolders?: string[];
   lastRootPath: string | null;
   libraryViewMode?: LibraryViewMode;
   sortCriteria?: SortCriteria;
@@ -151,11 +160,15 @@ export interface AppSettings {
   processingBackend?: string;
   linuxGpuOptimization?: boolean;
   exportPresets?: ExportPreset[];
-  myLenses?: any;
+  myLenses?: Array<{ maker: string; model: string }>;
   enableFolderImageCounts?: boolean;
   linearRawMode?: string;
   enableXmpSync?: boolean;
   createXmpIfMissing?: boolean;
+  aiProvider?: string;
+  customAiTags?: string[];
+  aiTagCount?: number;
+  transparent?: boolean;
 }
 
 export interface BrushSettings {
@@ -176,7 +189,7 @@ export interface FilterCriteria {
 }
 
 export interface Folder {
-  children: any;
+  children: (Folder | Preset)[];
   id?: string | undefined;
   name?: string | undefined;
   imageCount?: number;
@@ -193,12 +206,15 @@ export interface ImageFile {
 
 export interface Option {
   color?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  customComponent?: React.ComponentType<any>;
+  customProps?: Record<string, unknown>;
   disabled?: boolean;
-  icon?: any;
+  icon?: React.ComponentType<{ size?: number }>;
   isDestructive?: boolean;
   label?: string;
   onClick?(): void;
-  submenu?: any;
+  submenu?: Option[];
   type?: string;
 }
 
@@ -222,11 +238,11 @@ export interface Progress {
 }
 
 export interface SelectedImage {
-  exif: any;
+  exif: { [key: string]: string } | null;
   height: number;
   isRaw: boolean;
   isReady: boolean;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   original_base64?: string;
   originalUrl: string | null;
   path: string;

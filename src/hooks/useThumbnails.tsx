@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
+import type React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ImageFile, Invokes, Progress } from '../components/ui/AppProperties';
 
-export function useThumbnails(imageList: Array<ImageFile>, setThumbnails: any) {
+export function useThumbnails(
+  imageList: Array<ImageFile>,
+  setThumbnails: React.Dispatch<React.SetStateAction<Record<string, string>>>,
+) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress>({ completed: 0, total: 0 });
   const processedImageListKey = useRef<string | null>(null);
@@ -39,22 +43,23 @@ export function useThumbnails(imageList: Array<ImageFile>, setThumbnails: any) {
         }
       });
 
-      return hasChanges || Object.keys(nextThumbnails).length !== imagePaths.length 
-        ? nextThumbnails 
-        : prevThumbnails;
+      return hasChanges || Object.keys(nextThumbnails).length !== imagePaths.length ? nextThumbnails : prevThumbnails;
     });
 
-    let unlistenComplete: any;
-    let unlistenProgress: any;
+    let unlistenComplete: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
 
     const setupListenersAndInvoke = async () => {
       setLoading(true);
       setProgress({ completed: 0, total: imagePaths.length });
 
-      unlistenProgress = await listen('thumbnail-progress', (event: any) => {
-        const { completed, total } = event.payload;
-        setProgress({ completed, total });
-      });
+      unlistenProgress = await listen(
+        'thumbnail-progress',
+        (event: { payload: { completed: number; total: number } }) => {
+          const { completed, total } = event.payload;
+          setProgress({ completed, total });
+        },
+      );
 
       unlistenComplete = await listen('thumbnail-generation-complete', () => {
         setLoading(false);

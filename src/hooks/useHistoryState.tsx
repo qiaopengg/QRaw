@@ -1,13 +1,13 @@
 import { useState, useMemo, useCallback } from 'react';
 
-export const useHistoryState = (initialState: any) => {
-  const [history, setHistory] = useState([initialState]);
+export const useHistoryState = <T,>(initialState: T) => {
+  const [history, setHistory] = useState<T[]>([initialState]);
   const [index, setIndex] = useState(0);
   const state = useMemo(() => history[index], [history, index]);
 
   const setState = useCallback(
-    (newState: any) => {
-      const resolvedState = typeof newState === 'function' ? newState(history[index]) : newState;
+    (newState: T | ((prev: T) => T)) => {
+      const resolvedState = typeof newState === 'function' ? (newState as (prev: T) => T)(history[index]) : newState;
       if (JSON.stringify(resolvedState) === JSON.stringify(history[index])) {
         return;
       }
@@ -31,16 +31,19 @@ export const useHistoryState = (initialState: any) => {
     }
   }, [index, history.length]);
 
-  const resetHistory = useCallback((newInitialState: any) => {
+  const resetHistory = useCallback((newInitialState: T) => {
     setHistory([newInitialState]);
     setIndex(0);
   }, []);
 
-  const goToIndex = useCallback((newIndex: number) => {
-    if (newIndex >= 0 && newIndex < history.length) {
-      setIndex(newIndex);
-    }
-  }, [history.length]);
+  const goToIndex = useCallback(
+    (newIndex: number) => {
+      if (newIndex >= 0 && newIndex < history.length) {
+        setIndex(newIndex);
+      }
+    },
+    [history.length],
+  );
 
   const canUndo = index > 0;
   const canRedo = index < history.length - 1;

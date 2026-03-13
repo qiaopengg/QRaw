@@ -23,6 +23,7 @@ pub fn get_or_init_gpu_context(state: &tauri::State<AppState>) -> Result<GpuCont
     if let Some(context) = &*context_lock {
         return Ok(context.clone());
     }
+    #[allow(unused_mut)]
     let mut instance_desc = wgpu::InstanceDescriptor::from_env_or_default();
 
     #[cfg(target_os = "windows")]

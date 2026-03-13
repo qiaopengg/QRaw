@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,14 +29,14 @@ interface LibraryExportPanelProps {
   isVisible: boolean;
   multiSelectedPaths: Array<string>;
   onClose(): void;
-  setExportState(state: any): void;
+  setExportState(state: ExportState): void;
   imageList: ImageFile[];
   appSettings: AppSettings | null;
   onSettingsChange: (settings: AppSettings) => void;
 }
 
 interface SectionProps {
-  children: any;
+  children: React.ReactNode;
   title: string;
 }
 
@@ -157,7 +157,7 @@ const formatBytes = (bytes: number, decimals = 2) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 };
 
-const getResizeModeOptions = (t: any) => [
+const getResizeModeOptions = (t: (key: string) => string) => [
   { label: t('export.longEdge'), value: 'longEdge' },
   { label: t('export.shortEdge'), value: 'shortEdge' },
   { label: t('export.width'), value: 'width' },
@@ -527,7 +527,7 @@ export default function LibraryExportPanel({
                     label={t('export.quality')}
                     max={100}
                     min={1}
-                    onChange={(e) => setJpegQuality(parseInt(e.target.value))}
+                    onChange={(e) => setJpegQuality(Number(e.target.value))}
                     step={1}
                     value={jpegQuality}
                   />
@@ -579,7 +579,7 @@ export default function LibraryExportPanel({
                       className="w-24 bg-bg-primary text-center rounded-md p-2 border border-surface focus:border-accent focus:ring-accent"
                       disabled={isExporting}
                       min="1"
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setResizeValue(parseInt(e?.target?.value))}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setResizeValue(parseInt(String(e?.target?.value)))}
                       type="number"
                       value={resizeValue}
                     />
@@ -653,7 +653,7 @@ export default function LibraryExportPanel({
                         max={50}
                         step={1}
                         value={watermarkScale}
-                        onChange={(e) => setWatermarkScale(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkScale(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={10}
                       />
@@ -663,7 +663,7 @@ export default function LibraryExportPanel({
                         max={25}
                         step={1}
                         value={watermarkSpacing}
-                        onChange={(e) => setWatermarkSpacing(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={5}
                       />
@@ -673,7 +673,7 @@ export default function LibraryExportPanel({
                         max={100}
                         step={1}
                         value={watermarkOpacity}
-                        onChange={(e) => setWatermarkOpacity(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={75}
                       />

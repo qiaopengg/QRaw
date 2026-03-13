@@ -117,19 +117,21 @@ const RgbWaveformDisplay = ({ redData, greenData, blueData, width, height, maxVa
 
 export default function Waveform({ waveformData, onClose }: WaveformProps) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>(DisplayMode.Rgb);
-  const nodeRef = useRef<any>(null);
+  const nodeRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
 
   const { red, green, blue, luma, width, height } = waveformData || {};
 
-  const maxVals: any = waveformData
+  const maxVals: MaxValues = waveformData
     ? {
+        height: waveformData.height,
+        width: waveformData.width,
         luma: Math.max(...(luma || [])),
         red: Math.max(...(red || [])),
         green: Math.max(...(green || [])),
         blue: Math.max(...(blue || [])),
       }
-    : {};
+    : { height: 0, width: 0, luma: 0, red: 0, green: 0, blue: 0 };
 
   const baseButtonClass =
     'flex-grow text-center px-2 py-1 text-xs rounded-lg font-medium transition-colors duration-150';

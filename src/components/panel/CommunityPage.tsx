@@ -13,7 +13,7 @@ const DEFAULT_PREVIEW_IMAGE_URL = 'https://raw.githubusercontent.com/CyberTimon/
 interface CommunityPreset {
   name: string;
   creator: string;
-  adjustments: Record<string, any>;
+  adjustments: Record<string, unknown>;
 }
 
 const containerVariants = {
@@ -42,7 +42,7 @@ interface CommunityPageProps {
 }
 
 // More robust shuffle algorithm
-const shuffleArray = (array: any[]) => {
+const shuffleArray = <T,>(array: T[]): T[] => {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

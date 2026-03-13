@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type React from 'react';
 
 export interface ImageDimensions {
   height: number;
@@ -13,11 +14,14 @@ export interface RenderSize {
   width: number;
 }
 
-export const useImageRenderSize = (containerRef: any, imageDimensions: ImageDimensions | null) => {
+export const useImageRenderSize = (
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  imageDimensions: ImageDimensions | null,
+) => {
   const [renderSize, setRenderSize] = useState<RenderSize>({ width: 0, height: 0, scale: 1, offsetX: 0, offsetY: 0 });
 
   useEffect(() => {
-    const container: HTMLDivElement = containerRef.current;
+    const container: HTMLDivElement = containerRef.current!;
     const { width: imgWidth, height: imgHeight } = imageDimensions || {};
     if (!container || !imgWidth || !imgHeight) {
       if (renderSize.width !== 0 || renderSize.height !== 0) {

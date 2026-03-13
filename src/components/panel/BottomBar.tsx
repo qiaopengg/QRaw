@@ -22,10 +22,10 @@ interface BottomBarProps {
   isResizing?: boolean;
   multiSelectedPaths?: Array<string>;
   onClearSelection?(): void;
-  onContextMenu?(event: any, path: string): void;
+  onContextMenu?(event: React.MouseEvent, path: string): void;
   onCopy(): void;
   onExportClick?(): void;
-  onImageSelect?(path: string, event: any): void;
+  onImageSelect?(path: string, event: React.MouseEvent): void;
   onOpenCopyPasteSettings?(): void;
   onPaste(): void;
   onRate(rate: number): void;

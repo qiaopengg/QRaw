@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { TransformWrapper, TransformComponent, type ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Crop, PercentCrop } from 'react-image-crop';
 import { Loader2 } from 'lucide-react';
 import clsx from 'clsx';
@@ -36,7 +36,7 @@ interface EditorProps {
   isWaveformVisible: boolean;
   onBackToLibrary(): void;
   onCloseWaveform(): void;
-  onContextMenu(event: any): void;
+  onContextMenu(event: React.MouseEvent): void;
   onGenerateAiMask(subMaskId: string, startPoint: Coord, endPoint: Coord): void;
   onQuickErase(subMaskId: string | null, startPoint: Coord, endpoint: Coord): void;
   onRedo(): void;
@@ -49,17 +49,25 @@ interface EditorProps {
   onZoomed(state: TransformState): void;
   renderedRightPanel: Panel | null;
   selectedImage: SelectedImage;
-  setAdjustments(adjustments: Partial<Adjustments>): void;
-  setShowOriginal(show: any): void;
+  setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
+  setShowOriginal(show: boolean | ((prev: boolean) => boolean)): void;
   showOriginal: boolean;
   targetZoom: number;
   thumbnails: Record<string, string>;
-  transformWrapperRef: any;
+  transformWrapperRef: React.RefObject<ReactZoomPanPinchRef | null>;
   transformedOriginalUrl: string | null;
   uncroppedAdjustedPreviewUrl: string | null;
   updateSubMask(id: string | null, subMask: Partial<SubMask>): void;
   waveform: WaveformData | null;
-  onDisplaySizeChange?(size: any): void;
+  onDisplaySizeChange?(size: {
+    width: number;
+    height: number;
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    containerWidth: number;
+    containerHeight: number;
+  }): void;
   onInitialFitScale?(scale: number): void;
   onZoomChange?(zoomValue: number, fitToWindow?: boolean): void;
   originalSize?: ImageDimensions;
@@ -69,7 +77,7 @@ interface EditorProps {
   onWbPicked?: () => void;
   overlayMode?: OverlayMode;
   overlayRotation?: number;
-  adjustmentsHistory: any[];
+  adjustmentsHistory: Record<string, unknown>[];
   adjustmentsHistoryIndex: number;
   goToAdjustmentsHistoryIndex(index: number): void;
   liveRotation?: number | null;
@@ -133,7 +141,9 @@ export default function Editor({
 }: EditorProps) {
   const { t } = useTranslation();
   const [crop, setCrop] = useState<Crop | null>(null);
-  const prevCropParams = useRef<any>(null);
+  const prevCropParams = useRef<{ rotation: number; aspectRatio: number | null; orientationSteps: number } | null>(
+    null,
+  );
   const [isMaskHovered, setIsMaskHovered] = useState(false);
   const [isLoaderVisible, setIsLoaderVisible] = useState(false);
   const [showExifDateView, setShowExifDateView] = useState(false);
@@ -154,7 +164,7 @@ export default function Editor({
   const isTransitioningRef = useRef(false);
   const [toolbarOverflowVisible, setToolbarOverflowVisible] = useState(!isFullScreen);
   const isGeneratingOverlayRef = useRef(false);
-  const pendingOverlayRequestRef = useRef<any>(null);
+  const pendingOverlayRequestRef = useRef<{ maskDef: unknown; renderSize: typeof imageRenderSize } | null>(null);
   const prevRenderState = useRef({
     containerLeft: 0,
     containerTop: 0,
@@ -215,7 +225,10 @@ export default function Editor({
   }, [targetZoom, transformWrapperRef]);
 
   const handleTransform = useCallback(
-    (ref: any, state: TransformState) => {
+    (
+      ref: { instance?: { wrapperComponent: HTMLElement | null; contentComponent: HTMLElement | null } },
+      state: TransformState,
+    ) => {
       setTransformState(state);
 
       if (!isTransitioningRef.current) {
@@ -378,7 +391,7 @@ export default function Editor({
     const { maskDef, renderSize } = pendingOverlayRequestRef.current;
     pendingOverlayRequestRef.current = null;
 
-    if (!maskDef || !maskDef.visible || renderSize.width === 0) {
+    if (!maskDef || !(maskDef as Record<string, unknown>).visible || renderSize.width === 0) {
       setMaskOverlayUrl(null);
       return;
     }
@@ -409,9 +422,9 @@ export default function Editor({
   }, [adjustments.crop]);
 
   const handleLiveMaskPreview = useCallback(
-    (maskDef: any) => {
+    (maskDef: AiPatch | MaskContainer | Record<string, unknown>) => {
       let normalizedDef = maskDef;
-      if (maskDef && !maskDef.adjustments) {
+      if (maskDef && !(maskDef as Record<string, unknown>).adjustments) {
         normalizedDef = {
           ...maskDef,
           adjustments: {},
@@ -419,7 +432,10 @@ export default function Editor({
         };
       }
 
-      pendingOverlayRequestRef.current = { maskDef: normalizedDef, renderSize: imageRenderSize };
+      pendingOverlayRequestRef.current = {
+        maskDef: normalizedDef as Record<string, unknown>,
+        renderSize: imageRenderSize,
+      };
       processOverlayQueue();
     },
     [imageRenderSize, processOverlayQueue],
@@ -555,7 +571,7 @@ export default function Editor({
             currentAdjCrop.height !== maxPixelCrop.height;
 
           if (isDifferent) {
-            setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, crop: maxPixelCrop }));
+            setAdjustments((prev: Adjustments) => ({ ...prev, crop: maxPixelCrop }));
           }
         }
       }
@@ -604,7 +620,7 @@ export default function Editor({
   }, []);
 
   const handleCropComplete = useCallback(
-    (_: any, pc: PercentCrop) => {
+    (_: Crop, pc: PercentCrop) => {
       if (!pc.width || !pc.height || !selectedImage?.width) {
         return;
       }
@@ -625,7 +641,7 @@ export default function Editor({
         y: Math.round((pc.y / 100) * cropBaseHeight),
       };
 
-      setAdjustments((prev: Partial<Adjustments>) => {
+      setAdjustments((prev: Adjustments) => {
         if (JSON.stringify(newPixelCrop) !== JSON.stringify(prev.crop)) {
           return { ...prev, crop: newPixelCrop };
         }
@@ -634,10 +650,6 @@ export default function Editor({
     },
     [selectedImage, adjustments.orientationSteps, setAdjustments, liveRotation],
   );
-
-  const toggleShowOriginal = useCallback(() => setShowOriginal((prev: boolean) => !prev), [setShowOriginal]);
-
-  const doubleClickProps = useMemo(() => ({ disabled: true }), []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     mouseDownPos.current = { x: e.clientX, y: e.clientY };
@@ -797,7 +809,7 @@ export default function Editor({
           onBackToLibrary={onBackToLibrary}
           onRedo={onRedo}
           onToggleFullScreen={onToggleFullScreen}
-          onToggleShowOriginal={toggleShowOriginal}
+          onToggleShowOriginal={() => setShowOriginal((prev) => !prev)}
           onToggleWaveform={onToggleWaveform}
           onUndo={onUndo}
           selectedImage={selectedImage}
@@ -832,8 +844,10 @@ export default function Editor({
           maxScale={transformConfig.maxScale}
           limitToBounds={true}
           centerZoomedOut={true}
-          doubleClick={doubleClickProps}
-          panning={{ disabled: isPanningDisabled || isWbPickerActive }}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          doubleClick={{ disabled: true } as any}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          panning={{ disabled: isPanningDisabled || isWbPickerActive } as any}
           onTransformed={handleTransform}
           onPanning={() => setIsPanningState(true)}
           onPanningStop={() => setIsPanningState(false)}

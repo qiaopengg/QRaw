@@ -3657,7 +3657,9 @@ fn frontend_ready(
     state: tauri::State<AppState>
 ) -> Result<(), String> {
     let is_first_run = !state.window_setup_complete.swap(true, std::sync::atomic::Ordering::Relaxed);
+    #[allow(unused_mut)]
     let mut should_maximize = false;
+    #[allow(unused_mut)]
     let mut should_fullscreen = false;
 
     if is_first_run {
@@ -3671,6 +3673,8 @@ fn frontend_ready(
                         should_maximize = saved_state.maximized;
                         should_fullscreen = saved_state.fullscreen;
                     }
+                    #[cfg(not(any(windows, target_os = "linux")))]
+                    let _ = &saved_state;
 
                     if should_maximize || should_fullscreen {
                         if let Some(monitor) = window.current_monitor().ok().flatten()

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -30,13 +30,13 @@ interface ExportPanelProps {
   exportState: ExportState;
   multiSelectedPaths: Array<string>;
   selectedImage: SelectedImage;
-  setExportState(state: any): void;
+  setExportState(state: ExportState): void;
   appSettings: AppSettings | null;
   onSettingsChange: (settings: AppSettings) => void;
 }
 
 interface SectionProps {
-  children: any;
+  children: React.ReactNode;
   title: string;
 }
 
@@ -438,18 +438,18 @@ export default function ExportPanel({
           });
         }
       } else {
-        const selectedFormat: any = FILE_FORMATS.find((f) => f.id === fileFormat);
+        const selectedFormat: FileFormat | undefined = FILE_FORMATS.find((f) => f.id === fileFormat);
         const originalFilename = selectedImage.path.split(/[\\/]/).pop() || '';
         const stem = originalFilename.substring(0, originalFilename.lastIndexOf('.')) || originalFilename;
         const suggestedName = finalFilenameTemplate.replace('{original_filename}', stem);
         const defaultPath = lastExportPath
-          ? `${lastExportPath}/${suggestedName}.${selectedFormat.extensions[0]}`
-          : `${suggestedName}.${selectedFormat.extensions[0]}`;
+          ? `${lastExportPath}/${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`
+          : `${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`;
         const filePath = await save({
           title: 'Save Edited Image',
           defaultPath,
           filters: [
-            { name: selectedFormat.name, extensions: selectedFormat.extensions },
+            { name: selectedFormat?.name ?? 'Image', extensions: selectedFormat?.extensions ?? ['jpg'] },
             ...FILE_FORMATS.filter((f: FileFormat) => f.id !== fileFormat).map((f: FileFormat) => ({
               name: f.name,
               extensions: f.extensions,
@@ -525,7 +525,7 @@ export default function ExportPanel({
                     label="Quality"
                     max={100}
                     min={1}
-                    onChange={(e) => setJpegQuality(parseInt(e.target.value))}
+                    onChange={(e) => setJpegQuality(Number(e.target.value))}
                     step={1}
                     value={jpegQuality}
                   />
@@ -655,7 +655,7 @@ export default function ExportPanel({
                         max={50}
                         step={1}
                         value={watermarkScale}
-                        onChange={(e) => setWatermarkScale(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkScale(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={10}
                       />
@@ -665,7 +665,7 @@ export default function ExportPanel({
                         max={25}
                         step={1}
                         value={watermarkSpacing}
-                        onChange={(e) => setWatermarkSpacing(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={5}
                       />
@@ -675,7 +675,7 @@ export default function ExportPanel({
                         max={100}
                         step={1}
                         value={watermarkOpacity}
-                        onChange={(e) => setWatermarkOpacity(parseInt(e.target.value))}
+                        onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
                         disabled={isExporting}
                         defaultValue={75}
                       />

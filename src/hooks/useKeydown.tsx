@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 
-export const useKeydown = (key: any, callback: any, enabled = true) => {
+export const useKeydown = (key: string, callback: () => void, enabled = true) => {
   const memoizedCallback = useCallback(callback, [callback]);
 
   useEffect(() => {
@@ -8,7 +8,7 @@ export const useKeydown = (key: any, callback: any, enabled = true) => {
       return;
     }
 
-    const handler = (e: any) => {
+    const handler = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === key.toLowerCase()) {
         if (document.activeElement?.tagName?.toLowerCase() === 'input') {
           return;

@@ -29,8 +29,8 @@ interface CropPanelProps {
   adjustments: Adjustments;
   isStraightenActive: boolean;
   selectedImage: SelectedImage;
-  setAdjustments(adjustments: Partial<Adjustments> | ((prev: Adjustments) => Adjustments)): void;
-  setIsStraightenActive(active: any): void;
+  setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
+  setIsStraightenActive(active: boolean | ((prev: boolean) => boolean)): void;
   setIsRotationActive?(active: boolean): void;
   overlayMode?: OverlayMode;
   setOverlayMode?(mode: OverlayMode): void;
@@ -341,14 +341,14 @@ export default function CropPanel({
       }
     }
 
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, aspectRatio: newAspectRatio, crop: null }));
+    setAdjustments((prev: Adjustments) => ({ ...prev, aspectRatio: newAspectRatio, crop: null }));
   };
 
   const handleOrientationToggle = useCallback(() => {
     if (aspectRatio && aspectRatio !== 1) {
       const newRatio = 1 / aspectRatio;
       setPreferPortrait(newRatio < 1);
-      setAdjustments((prev: Partial<Adjustments>) => ({
+      setAdjustments((prev: Adjustments) => ({
         ...prev,
         aspectRatio: newRatio,
         crop: null,
@@ -425,7 +425,7 @@ export default function CropPanel({
 
   const resetFineRotation = () => {
     updateLocalRotation(null);
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, rotation: 0 }));
+    setAdjustments((prev: Adjustments) => ({ ...prev, rotation: 0 }));
   };
 
   const handleRotationMouseDown = () => {
@@ -534,7 +534,7 @@ export default function CropPanel({
                     if (preferPortrait || (imageRatio && imageRatio < 1)) {
                       newAspectRatio = 1 / BASE_RATIO;
                     }
-                    setAdjustments((prev: Partial<Adjustments>) => ({
+                    setAdjustments((prev: Adjustments) => ({
                       ...prev,
                       aspectRatio: newAspectRatio,
                       crop: null,

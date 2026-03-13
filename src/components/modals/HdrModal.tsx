@@ -73,7 +73,7 @@ export default function HdrModal({
   };
 
   const handleKeyDown = useCallback(
-    (e: any) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
         handleClose();
       }

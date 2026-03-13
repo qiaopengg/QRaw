@@ -1,10 +1,11 @@
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { SlidersHorizontal, Info, Scaling, BrushCleaning, Bookmark, Save, Layers } from 'lucide-react';
 import { Panel } from '../../ui/AppProperties';
 
 interface PanelOptions {
-  icon: any;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   id: Panel;
   title: string;
 }

@@ -42,7 +42,8 @@ export const generatePaletteFromImage = (imageUrl: string) => {
 
       const accentColor = bestAccentCandidate.color;
 
-      const toRgbSpace = (c: any) => `${Math.round(c.r)} ${Math.round(c.g)} ${Math.round(c.b)}`;
+      const toRgbSpace = (c: { r: number; g: number; b: number }) =>
+        `${Math.round(c.r)} ${Math.round(c.g)} ${Math.round(c.b)}`;
       const borderColor = {
         r: Math.min(255, accentColor.r + 40),
         g: Math.min(255, accentColor.g + 40),

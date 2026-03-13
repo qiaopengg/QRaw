@@ -22,13 +22,13 @@ declare module 'react-image-crop' {
     crop?: Crop | null;
     onChange: (crop: Crop, percentCrop: PercentCrop) => void;
     onComplete?: (crop: Crop, percentCrop: PercentCrop) => void;
-    onDragStart?: (e: any) => void;
-    onDragEnd?: (e: any) => void;
+    onDragStart?: (e: MouseEvent) => void;
+    onDragEnd?: (e: MouseEvent) => void;
     disabled?: boolean;
     locked?: boolean;
     className?: string;
     style?: CSSProperties;
-    children?: any;
+    children?: React.ReactNode;
     aspect?: number | null;
     minWidth?: number;
     minHeight?: number;
@@ -37,8 +37,8 @@ declare module 'react-image-crop' {
     keepSelection?: boolean;
     ruleOfThirds?: boolean;
     circularCrop?: boolean;
-    renderSelectionAddon?: (state: any) => any;
-    [key: string]: any;
+    renderSelectionAddon?: (state: Record<string, unknown>) => React.ReactNode;
+    [key: string]: unknown;
   }
 
   export default class ReactCrop extends Component<ReactCropProps> {}

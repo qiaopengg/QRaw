@@ -10,7 +10,7 @@ interface KeyboardShortcutsProps {
   canRedo: boolean;
   canUndo: boolean;
   copiedFilePaths: Array<string>;
-  customEscapeHandler: any;
+  customEscapeHandler: (() => void) | null | undefined;
   handleBackToLibrary(): void;
   handleCopyAdjustments(): void;
   handleDeleteAiPatch(patchId: string): void;
@@ -37,11 +37,11 @@ interface KeyboardShortcutsProps {
   setActiveMaskContainerId(id: string | null): void;
   setActiveMaskId(id: string | null): void;
   setCopiedFilePaths(paths: Array<string>): void;
-  setIsStraightenActive(active: any): void;
-  setIsWaveformVisible(visible: any): void;
+  setIsStraightenActive(active: boolean | ((prev: boolean) => boolean)): void;
+  setIsWaveformVisible(visible: boolean | ((prev: boolean) => boolean)): void;
   setLibraryActivePath(path: string): void;
   setMultiSelectedPaths(paths: Array<string>): void;
-  setShowOriginal(show: any): void;
+  setShowOriginal(show: boolean | ((prev: boolean) => boolean)): void;
   sortedImageList: Array<ImageFile>;
   undo(): void;
   zoom: number;
@@ -99,7 +99,7 @@ export const useKeyboardShortcuts = ({
   originalSize,
 }: KeyboardShortcutsProps) => {
   useEffect(() => {
-    const handleKeyDown = (event: any) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (isModalOpen) {
         return;
       }

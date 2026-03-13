@@ -5,11 +5,13 @@ import { X, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Invokes } from '../components/ui/AppProperties';
 
+import { AppSettings } from '../components/ui/AppProperties';
+
 interface TaggingSubMenuProps {
   paths: string[];
   initialTags: { tag: string; isUser: boolean }[];
   onTagsChanged: (paths: string[], newTags: { tag: string; isUser: boolean }[]) => void;
-  appSettings: any;
+  appSettings: AppSettings | null;
   hideContextMenu: () => void;
 }
 

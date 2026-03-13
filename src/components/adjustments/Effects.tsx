@@ -6,10 +6,12 @@ import Text from '../ui/Text';
 import { TextVariants } from '../../types/typography';
 import { useTranslation } from 'react-i18next';
 
+type SliderEvent = { target: { value: number | string } };
+
 interface EffectsPanelProps {
   adjustments: Adjustments;
   isForMask: boolean;
-  setAdjustments(adjustments: Partial<Adjustments>): any;
+  setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
   handleLutSelect(path: string): void;
   appSettings: AppSettings | null;
   onDragStateChange?: (isDragging: boolean) => void;
@@ -24,17 +26,23 @@ export default function EffectsPanel({
   onDragStateChange,
 }: EffectsPanelProps) {
   const { t } = useTranslation();
-  const handleAdjustmentChange = (key: string, value: string) => {
-    const numericValue = parseInt(value, 10);
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [key]: numericValue }));
+  const handleAdjustmentChange = (key: string, value: number | string) => {
+    const numericValue = parseInt(String(value), 10);
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      [key]: numericValue,
+    }));
   };
 
   const handleLutIntensityChange = (intensity: number) => {
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, lutIntensity: intensity }));
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      lutIntensity: intensity,
+    }));
   };
 
   const handleLutClear = () => {
-    setAdjustments((prev: Partial<Adjustments>) => ({
+    setAdjustments((prev: Adjustments) => ({
       ...prev,
       lutPath: null,
       lutName: null,
@@ -57,7 +65,7 @@ export default function EffectsPanel({
           label={t('adjustments.glow')}
           max={100}
           min={0}
-          onChange={(e: any) => handleAdjustmentChange(CreativeAdjustment.GlowAmount, e.target.value)}
+          onChange={(e: SliderEvent) => handleAdjustmentChange(CreativeAdjustment.GlowAmount, e.target.value)}
           step={1}
           value={adjustments.glowAmount}
           onDragStateChange={onDragStateChange}
@@ -67,7 +75,7 @@ export default function EffectsPanel({
           label={t('adjustments.halation')}
           max={100}
           min={0}
-          onChange={(e: any) => handleAdjustmentChange(CreativeAdjustment.HalationAmount, e.target.value)}
+          onChange={(e: SliderEvent) => handleAdjustmentChange(CreativeAdjustment.HalationAmount, e.target.value)}
           step={1}
           value={adjustments.halationAmount}
           onDragStateChange={onDragStateChange}
@@ -78,7 +86,7 @@ export default function EffectsPanel({
             label={t('adjustments.lightFlares')}
             max={100}
             min={0}
-            onChange={(e: any) => handleAdjustmentChange(CreativeAdjustment.FlareAmount, e.target.value)}
+            onChange={(e: SliderEvent) => handleAdjustmentChange(CreativeAdjustment.FlareAmount, e.target.value)}
             step={1}
             value={adjustments.flareAmount}
             onDragStateChange={onDragStateChange}
@@ -111,7 +119,7 @@ export default function EffectsPanel({
                 label={t('adjustments.amount')}
                 max={100}
                 min={-100}
-                onChange={(e: any) => handleAdjustmentChange(Effect.VignetteAmount, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.VignetteAmount, e.target.value)}
                 step={1}
                 value={adjustments.vignetteAmount}
                 onDragStateChange={onDragStateChange}
@@ -121,7 +129,7 @@ export default function EffectsPanel({
                 label={t('adjustments.midpoint')}
                 max={100}
                 min={0}
-                onChange={(e: any) => handleAdjustmentChange(Effect.VignetteMidpoint, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.VignetteMidpoint, e.target.value)}
                 step={1}
                 value={adjustments.vignetteMidpoint}
                 onDragStateChange={onDragStateChange}
@@ -130,7 +138,7 @@ export default function EffectsPanel({
                 label={t('adjustments.roundness')}
                 max={100}
                 min={-100}
-                onChange={(e: any) => handleAdjustmentChange(Effect.VignetteRoundness, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.VignetteRoundness, e.target.value)}
                 step={1}
                 value={adjustments.vignetteRoundness}
                 onDragStateChange={onDragStateChange}
@@ -140,7 +148,7 @@ export default function EffectsPanel({
                 label={t('adjustments.feather')}
                 max={100}
                 min={0}
-                onChange={(e: any) => handleAdjustmentChange(Effect.VignetteFeather, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.VignetteFeather, e.target.value)}
                 step={1}
                 value={adjustments.vignetteFeather}
                 onDragStateChange={onDragStateChange}
@@ -157,7 +165,7 @@ export default function EffectsPanel({
                 label={t('adjustments.amount')}
                 max={100}
                 min={0}
-                onChange={(e: any) => handleAdjustmentChange(Effect.GrainAmount, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.GrainAmount, e.target.value)}
                 step={1}
                 value={adjustments.grainAmount}
                 onDragStateChange={onDragStateChange}
@@ -167,7 +175,7 @@ export default function EffectsPanel({
                 label={t('adjustments.size')}
                 max={100}
                 min={0}
-                onChange={(e: any) => handleAdjustmentChange(Effect.GrainSize, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.GrainSize, e.target.value)}
                 step={1}
                 value={adjustments.grainSize}
                 onDragStateChange={onDragStateChange}
@@ -177,7 +185,7 @@ export default function EffectsPanel({
                 label={t('adjustments.roughness')}
                 max={100}
                 min={0}
-                onChange={(e: any) => handleAdjustmentChange(Effect.GrainRoughness, e.target.value)}
+                onChange={(e: SliderEvent) => handleAdjustmentChange(Effect.GrainRoughness, e.target.value)}
                 step={1}
                 value={adjustments.grainRoughness}
                 onDragStateChange={onDragStateChange}

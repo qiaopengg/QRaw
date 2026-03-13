@@ -1,3 +1,4 @@
+import React from 'react';
 import { RotateCcw, Copy, ClipboardPaste, Aperture } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import BasicAdjustments from '../../adjustments/Basic';
@@ -8,28 +9,35 @@ import EffectsPanel from '../../adjustments/Effects';
 import CollapsibleSection from '../../ui/CollapsibleSection';
 import { Adjustments, SectionVisibility, INITIAL_ADJUSTMENTS, ADJUSTMENT_SECTIONS } from '../../../utils/adjustments';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { OPTION_SEPARATOR, SelectedImage, AppSettings } from '../../ui/AppProperties';
+import { OPTION_SEPARATOR, SelectedImage, AppSettings, CollapsibleSectionsState } from '../../ui/AppProperties';
 import { ChannelConfig } from '../../adjustments/Curves';
 
 interface ControlsPanelOption {
   disabled?: boolean;
-  icon?: any;
+  icon?: React.ComponentType<{ size?: number; className?: string }>;
   label?: string;
   onClick?(): void;
   type?: string;
 }
 
+interface CopiedSectionAdjustments {
+  section: string;
+  values: Partial<Adjustments>;
+}
+
 interface ControlsProps {
   adjustments: Adjustments;
-  collapsibleState: any;
-  copiedSectionAdjustments: Adjustments | null;
+  collapsibleState: CollapsibleSectionsState;
+  copiedSectionAdjustments: CopiedSectionAdjustments | null;
   handleAutoAdjustments(): void;
   handleLutSelect(path: string): void;
   histogram: ChannelConfig | null;
   selectedImage: SelectedImage;
-  setAdjustments(updater: (prev: Adjustments) => Adjustments): void;
-  setCollapsibleState(state: any): void;
-  setCopiedSectionAdjustments(adjustments: any): void;
+  setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
+  setCollapsibleState(
+    state: CollapsibleSectionsState | ((prev: CollapsibleSectionsState) => CollapsibleSectionsState),
+  ): void;
+  setCopiedSectionAdjustments(adjustments: CopiedSectionAdjustments): void;
   theme: string;
   appSettings: AppSettings | null;
   isWbPickerActive?: boolean;
@@ -75,7 +83,7 @@ export default function Controls({
       ...prev,
       ...Object.keys(ADJUSTMENT_SECTIONS)
         .flatMap((s) => ADJUSTMENT_SECTIONS[s])
-        .reduce((acc: any, key: string) => {
+        .reduce((acc: Record<string, unknown>, key: string) => {
           acc[key] = INITIAL_ADJUSTMENTS[key];
           return acc;
         }, {}),
@@ -84,10 +92,10 @@ export default function Controls({
   };
 
   const handleToggleSection = (section: string) => {
-    setCollapsibleState((prev: any) => ({ ...prev, [section]: !prev[section] }));
+    setCollapsibleState((prev: CollapsibleSectionsState) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const handleSectionContextMenu = (event: any, sectionName: string) => {
+  const handleSectionContextMenu = (event: React.MouseEvent, sectionName: string) => {
     event.preventDefault();
     event.stopPropagation();
 
@@ -97,10 +105,10 @@ export default function Controls({
     }
 
     const handleCopy = () => {
-      const adjustmentsToCopy: any = {};
+      const adjustmentsToCopy: Partial<Adjustments> = {};
       for (const key of sectionKeys) {
         if (Object.prototype.hasOwnProperty.call(adjustments, key)) {
-          adjustmentsToCopy[key] = JSON.parse(JSON.stringify(adjustments[key]));
+          (adjustmentsToCopy as Record<string, unknown>)[key] = JSON.parse(JSON.stringify(adjustments[key]));
         }
       }
       setCopiedSectionAdjustments({ section: sectionName, values: adjustmentsToCopy });
@@ -121,9 +129,9 @@ export default function Controls({
     };
 
     const handleReset = () => {
-      const resetValues: any = {};
+      const resetValues: Partial<Adjustments> = {};
       for (const key of sectionKeys) {
-        resetValues[key] = JSON.parse(JSON.stringify(INITIAL_ADJUSTMENTS[key]));
+        (resetValues as Record<string, unknown>)[key] = JSON.parse(JSON.stringify(INITIAL_ADJUSTMENTS[key]));
       }
       setAdjustments((prev: Adjustments) => ({
         ...prev,
@@ -185,13 +193,15 @@ export default function Controls({
       </div>
       <div className="flex-grow overflow-y-auto p-4 flex flex-col gap-2">
         {Object.keys(ADJUSTMENT_SECTIONS).map((sectionName: string) => {
-          const SectionComponent: any = {
-            basic: BasicAdjustments,
-            curves: CurveGraph,
-            color: ColorPanel,
-            details: DetailsPanel,
-            effects: EffectsPanel,
-          }[sectionName];
+          const SectionComponent = (
+            {
+              basic: BasicAdjustments,
+              curves: CurveGraph,
+              color: ColorPanel,
+              details: DetailsPanel,
+              effects: EffectsPanel,
+            } as unknown as Record<string, React.ComponentType<Record<string, unknown>>>
+          )[sectionName];
 
           const title = t(`adjustments.${sectionName}`, {
             defaultValue: sectionName.charAt(0).toUpperCase() + sectionName.slice(1),
@@ -203,7 +213,7 @@ export default function Controls({
               <CollapsibleSection
                 isContentVisible={sectionVisibility[sectionName]}
                 isOpen={collapsibleState[sectionName]}
-                onContextMenu={(e: any) => handleSectionContextMenu(e, sectionName)}
+                onContextMenu={(e: React.MouseEvent) => handleSectionContextMenu(e, sectionName)}
                 onToggle={() => handleToggleSection(sectionName)}
                 onToggleVisibility={() => handleToggleVisibility(sectionName)}
                 title={title}
