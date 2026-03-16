@@ -3,7 +3,7 @@ use futures::stream::{self, StreamExt};
 use image::{DynamicImage, imageops::FilterType};
 use ndarray::{Array, Axis};
 use ort::session::Session;
-use ort::value::Tensor; 
+use ort::value::Tensor;
 use rayon::prelude::*;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -295,7 +295,9 @@ pub async fn start_background_indexing(
             Ok(entries) => entries
                 .filter_map(Result::ok)
                 .map(|entry| entry.path())
-                .filter(|path| path.is_file() && is_supported_image_file(&path.to_string_lossy().as_ref()))
+                .filter(|path| {
+                    path.is_file() && is_supported_image_file(&path.to_string_lossy().as_ref())
+                })
                 .collect(),
             Err(e) => {
                 eprintln!("Failed to read directory '{}': {}", folder_path, e);
@@ -342,11 +344,9 @@ pub async fn start_background_indexing(
 
                     let should_generate_tags = match &metadata.tags {
                         None => true,
-                        Some(tags) => {
-                            !tags.iter().any(|tag| {
-                                !tag.starts_with(COLOR_TAG_PREFIX) && !tag.starts_with(USER_TAG_PREFIX)
-                            })
-                        }
+                        Some(tags) => !tags.iter().any(|tag| {
+                            !tag.starts_with(COLOR_TAG_PREFIX) && !tag.starts_with(USER_TAG_PREFIX)
+                        }),
                     };
 
                     if should_generate_tags {
@@ -359,28 +359,24 @@ pub async fn start_background_indexing(
                                 if let (Some(clip_model), Some(clip_tokenizer)) =
                                     (&models_inner.clip_model, &models_inner.clip_tokenizer)
                                 {
-                                    if let Ok(ai_tags) =
-                                        generate_tags_with_clip(
-                                            &image, 
-                                            clip_model, 
-                                            clip_tokenizer, 
-                                            (*tags_inner).clone(), 
-                                            ai_tag_count
-                                        )
-                                    {
+                                    if let Ok(ai_tags) = generate_tags_with_clip(
+                                        &image,
+                                        clip_model,
+                                        clip_tokenizer,
+                                        (*tags_inner).clone(),
+                                        ai_tag_count,
+                                    ) {
                                         println!("Found AI tags for {}: {:?}", path_str, ai_tags);
 
-                                        let mut existing_tags: HashSet<String> = metadata
-                                            .tags
-                                            .unwrap_or_default()
-                                            .into_iter()
-                                            .collect();
+                                        let mut existing_tags: HashSet<String> =
+                                            metadata.tags.unwrap_or_default().into_iter().collect();
 
                                         for tag in ai_tags {
                                             existing_tags.insert(tag);
                                         }
 
-                                        let mut final_tags: Vec<String> = existing_tags.into_iter().collect();
+                                        let mut final_tags: Vec<String> =
+                                            existing_tags.into_iter().collect();
                                         final_tags.sort_unstable();
 
                                         metadata.tags = Some(final_tags);
@@ -430,7 +426,10 @@ pub async fn start_background_indexing(
     Ok(())
 }
 
-fn modify_tags_for_path(path_str: &str, modify_fn: impl Fn(&mut Vec<String>)) -> Result<(), String> {
+fn modify_tags_for_path(
+    path_str: &str,
+    modify_fn: impl Fn(&mut Vec<String>),
+) -> Result<(), String> {
     let (_, sidecar_path) = parse_virtual_path(path_str);
 
     let mut metadata: ImageMetadata = if sidecar_path.exists() {

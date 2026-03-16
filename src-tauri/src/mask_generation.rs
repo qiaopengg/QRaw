@@ -50,7 +50,9 @@ pub struct MaskDefinition {
 
 impl MaskDefinition {
     pub fn requires_warped_image(&self) -> bool {
-        self.sub_masks.iter().any(|sm| sm.mask_type == "color" || sm.mask_type == "luminance")
+        self.sub_masks
+            .iter()
+            .any(|sm| sm.mask_type == "color" || sm.mask_type == "luminance")
     }
 }
 
@@ -271,7 +273,7 @@ fn draw_feathered_ellipse_mut(
 
             if dist_sq <= radius_sq {
                 let intensity = if dist_sq <= inner_radius_sq {
-                    1.0 
+                    1.0
                 } else {
                     let dist = dist_sq.sqrt();
                     1.0 - (dist - inner_radius) / feather_range
@@ -735,7 +737,7 @@ fn generate_color_bitmap(
     let scaled_coarse_rotated_h = coarse_rotated_h as f32 * scale;
     let center_x = scaled_coarse_rotated_w / 2.0;
     let center_y = scaled_coarse_rotated_h / 2.0;
-    
+
     let tolerance_sq = (params.tolerance * 2.55).max(1.0).powi(2) * 3.0;
     let inv_scale = 1.0 / scale;
 
@@ -752,13 +754,24 @@ fn generate_color_bitmap(
             let x_unrotated = x_centered * cos_a + y_sin + center_x;
             let y_unrotated = -x_centered * sin_a + y_cos + center_y;
 
-            let x_unflipped = if params.flip_horizontal { scaled_coarse_rotated_w - x_unrotated } else { x_unrotated };
-            let y_unflipped = if params.flip_vertical { scaled_coarse_rotated_h - y_unrotated } else { y_unrotated };
+            let x_unflipped = if params.flip_horizontal {
+                scaled_coarse_rotated_w - x_unrotated
+            } else {
+                x_unrotated
+            };
+            let y_unflipped = if params.flip_vertical {
+                scaled_coarse_rotated_h - y_unrotated
+            } else {
+                y_unrotated
+            };
 
             let (x_unrotated_coarse, y_unrotated_coarse) = match params.orientation_steps {
                 0 => (x_unflipped, y_unflipped),
                 1 => (y_unflipped, scaled_coarse_rotated_w - x_unflipped),
-                2 => (scaled_coarse_rotated_w - x_unflipped, scaled_coarse_rotated_h - y_unflipped),
+                2 => (
+                    scaled_coarse_rotated_w - x_unflipped,
+                    scaled_coarse_rotated_h - y_unflipped,
+                ),
                 3 => (scaled_coarse_rotated_h - y_unflipped, x_unflipped),
                 _ => (x_unflipped, y_unflipped),
             };
@@ -769,9 +782,9 @@ fn generate_color_bitmap(
 
                 if x_src < full_w && y_src < full_h {
                     let pixel = warped.get_pixel(x_src, y_src);
-                    let dist_sq = (pixel[0] as f32 - ref_r).powi(2) +
-                                  (pixel[1] as f32 - ref_g).powi(2) +
-                                  (pixel[2] as f32 - ref_b).powi(2);
+                    let dist_sq = (pixel[0] as f32 - ref_r).powi(2)
+                        + (pixel[1] as f32 - ref_g).powi(2)
+                        + (pixel[2] as f32 - ref_b).powi(2);
 
                     if dist_sq <= tolerance_sq {
                         let intensity = 1.0 - (dist_sq.sqrt() / tolerance_sq.sqrt());
@@ -805,7 +818,8 @@ fn generate_luminance_bitmap(
     }
 
     let ref_pixel = warped.get_pixel(target_x as u32, target_y as u32);
-    let ref_luma = 0.299 * ref_pixel[0] as f32 + 0.587 * ref_pixel[1] as f32 + 0.114 * ref_pixel[2] as f32;
+    let ref_luma =
+        0.299 * ref_pixel[0] as f32 + 0.587 * ref_pixel[1] as f32 + 0.114 * ref_pixel[2] as f32;
 
     let mut mask = GrayImage::new(width, height);
 
@@ -823,7 +837,7 @@ fn generate_luminance_bitmap(
     let scaled_coarse_rotated_h = coarse_rotated_h as f32 * scale;
     let center_x = scaled_coarse_rotated_w / 2.0;
     let center_y = scaled_coarse_rotated_h / 2.0;
-    
+
     let tolerance_val = (params.tolerance * 2.55).max(1.0);
     let inv_scale = 1.0 / scale;
 
@@ -840,13 +854,24 @@ fn generate_luminance_bitmap(
             let x_unrotated = x_centered * cos_a + y_sin + center_x;
             let y_unrotated = -x_centered * sin_a + y_cos + center_y;
 
-            let x_unflipped = if params.flip_horizontal { scaled_coarse_rotated_w - x_unrotated } else { x_unrotated };
-            let y_unflipped = if params.flip_vertical { scaled_coarse_rotated_h - y_unrotated } else { y_unrotated };
+            let x_unflipped = if params.flip_horizontal {
+                scaled_coarse_rotated_w - x_unrotated
+            } else {
+                x_unrotated
+            };
+            let y_unflipped = if params.flip_vertical {
+                scaled_coarse_rotated_h - y_unrotated
+            } else {
+                y_unrotated
+            };
 
             let (x_unrotated_coarse, y_unrotated_coarse) = match params.orientation_steps {
                 0 => (x_unflipped, y_unflipped),
                 1 => (y_unflipped, scaled_coarse_rotated_w - x_unflipped),
-                2 => (scaled_coarse_rotated_w - x_unflipped, scaled_coarse_rotated_h - y_unflipped),
+                2 => (
+                    scaled_coarse_rotated_w - x_unflipped,
+                    scaled_coarse_rotated_h - y_unflipped,
+                ),
                 3 => (scaled_coarse_rotated_h - y_unflipped, x_unflipped),
                 _ => (x_unflipped, y_unflipped),
             };
@@ -857,7 +882,8 @@ fn generate_luminance_bitmap(
 
                 if x_src < full_w && y_src < full_h {
                     let pixel = warped.get_pixel(x_src, y_src);
-                    let luma = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+                    let luma =
+                        0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
                     let dist = (luma - ref_luma).abs();
 
                     if dist <= tolerance_val {
@@ -890,15 +916,53 @@ fn generate_sub_mask_bitmap(
     }
 
     match sub_mask.mask_type.as_str() {
-        "radial" => Some(generate_radial_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)),
-        "linear" => Some(generate_linear_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)),
-        "brush" => Some(generate_brush_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)),
-        "color" => generate_color_bitmap(&sub_mask.parameters, width, height, scale, crop_offset, warped_image),
-        "luminance" => generate_luminance_bitmap(&sub_mask.parameters, width, height, scale, crop_offset, warped_image),
-        "ai-subject" => generate_ai_subject_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
-        "ai-foreground" => generate_ai_foreground_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
+        "radial" => Some(generate_radial_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+        )),
+        "linear" => Some(generate_linear_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+        )),
+        "brush" => Some(generate_brush_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+        )),
+        "color" => generate_color_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+            warped_image,
+        ),
+        "luminance" => generate_luminance_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+            warped_image,
+        ),
+        "ai-subject" => {
+            generate_ai_subject_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
+        }
+        "ai-foreground" => {
+            generate_ai_foreground_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
+        }
         "ai-sky" => generate_ai_sky_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
-        "quick-eraser" => generate_ai_subject_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
+        "quick-eraser" => {
+            generate_ai_subject_bitmap(&sub_mask.parameters, width, height, scale, crop_offset)
+        }
         "all" => Some(generate_all_bitmap(width, height)),
         _ => None,
     }

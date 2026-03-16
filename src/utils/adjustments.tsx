@@ -10,11 +10,11 @@ export enum ActiveChannel {
 }
 
 export enum DisplayMode {
-  Blue = 'blue',
-  Green = 'green',
   Luma = 'luma',
-  Red = 'red',
   Rgb = 'rgb',
+  Parade = 'parade',
+  Vectorscope = 'vectorscope',
+  Histogram = 'histogram',
 }
 
 export enum PasteMode {

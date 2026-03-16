@@ -92,11 +92,15 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
             if pixel_states[(y * width + x) as usize] != PIXEL_KNOWN {
                 row_sum += 1;
             }
-            let prev_col = if y > 0 { sat[((y - 1) * width + x) as usize] } else { 0 };
+            let prev_col = if y > 0 {
+                sat[((y - 1) * width + x) as usize]
+            } else {
+                0
+            };
             sat[(y * width + x) as usize] = prev_col + row_sum;
         }
     }
-    
+
     let mut num_unknowns = vec![0u32; (width * height) as usize];
     if height > 2 * patch_radius && width > 2 * patch_radius {
         for y in patch_radius..=height.saturating_sub(patch_radius + 1) {
@@ -112,7 +116,8 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
                     count -= sat[(y1 * width + x - patch_radius - 1) as usize] as i64;
                 }
                 if y > patch_radius && x > patch_radius {
-                    count += sat[((y - patch_radius - 1) * width + x - patch_radius - 1) as usize] as i64;
+                    count += sat[((y - patch_radius - 1) * width + x - patch_radius - 1) as usize]
+                        as i64;
                 }
                 num_unknowns[(y * width + x) as usize] = count as u32;
             }
@@ -212,7 +217,7 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
                 let p_hat_confidence = p_hat_item.confidence;
                 let search_radius = (patch_radius * 7).max(30);
                 let max_samples = 500;
-                
+
                 let (best_match_x, best_match_y) = find_best_match_local(
                     output.as_raw(),
                     &pixel_states,
@@ -235,16 +240,23 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
 
                 for dy in -r..=r {
                     for dx in -r..=r {
-                        let target_x = (px as i32 + dx).clamp(0, (width.saturating_sub(1)) as i32) as u32;
-                        let target_y = (py as i32 + dy).clamp(0, (height.saturating_sub(1)) as i32) as u32;
+                        let target_x =
+                            (px as i32 + dx).clamp(0, (width.saturating_sub(1)) as i32) as u32;
+                        let target_y =
+                            (py as i32 + dy).clamp(0, (height.saturating_sub(1)) as i32) as u32;
                         let idx = (target_y * width + target_x) as usize;
 
                         if mask_slice[idx] > 0 {
-                            let source_x = (best_match_x as i32 + dx).clamp(0, (width.saturating_sub(1)) as i32) as u32;
-                            let source_y = (best_match_y as i32 + dy).clamp(0, (height.saturating_sub(1)) as i32) as u32;
+                            let source_x = (best_match_x as i32 + dx)
+                                .clamp(0, (width.saturating_sub(1)) as i32)
+                                as u32;
+                            let source_y = (best_match_y as i32 + dy)
+                                .clamp(0, (height.saturating_sub(1)) as i32)
+                                as u32;
 
-                            let weight = gaussian_kernel[((dy + r) as usize * patch_diameter) + (dx + r) as usize];
-                            
+                            let weight = gaussian_kernel
+                                [((dy + r) as usize * patch_diameter) + (dx + r) as usize];
+
                             let src_idx = ((source_y * width + source_x) * 3) as usize;
                             let src_r = out_slice_mut[src_idx] as f32;
                             let src_g = out_slice_mut[src_idx + 1] as f32;
@@ -257,9 +269,15 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
 
                             if total_weights[idx] > 0.0 {
                                 let target_idx = idx * 3;
-                                out_slice_mut[target_idx] = (float_output[idx][0] / total_weights[idx]).clamp(0.0, 255.0) as u8;
-                                out_slice_mut[target_idx + 1] = (float_output[idx][1] / total_weights[idx]).clamp(0.0, 255.0) as u8;
-                                out_slice_mut[target_idx + 2] = (float_output[idx][2] / total_weights[idx]).clamp(0.0, 255.0) as u8;
+                                out_slice_mut[target_idx] =
+                                    (float_output[idx][0] / total_weights[idx]).clamp(0.0, 255.0)
+                                        as u8;
+                                out_slice_mut[target_idx + 1] =
+                                    (float_output[idx][1] / total_weights[idx]).clamp(0.0, 255.0)
+                                        as u8;
+                                out_slice_mut[target_idx + 2] =
+                                    (float_output[idx][2] / total_weights[idx]).clamp(0.0, 255.0)
+                                        as u8;
                             }
 
                             if pixel_states[idx] != PIXEL_KNOWN {
@@ -267,17 +285,22 @@ fn inpaint_criminisi(source_image: &RgbImage, mask: &GrayImage, patch_radius: u3
                                 pixel_states[idx] = PIXEL_KNOWN;
                                 filled_pixels_coords.push((target_x, target_y));
 
-                                let cy_min = (target_y.saturating_sub(patch_radius)).max(patch_radius);
-                                let cy_max = (target_y + patch_radius).min(height.saturating_sub(patch_radius + 1));
-                                let cx_min = (target_x.saturating_sub(patch_radius)).max(patch_radius);
-                                let cx_max = (target_x + patch_radius).min(width.saturating_sub(patch_radius + 1));
+                                let cy_min =
+                                    (target_y.saturating_sub(patch_radius)).max(patch_radius);
+                                let cy_max = (target_y + patch_radius)
+                                    .min(height.saturating_sub(patch_radius + 1));
+                                let cx_min =
+                                    (target_x.saturating_sub(patch_radius)).max(patch_radius);
+                                let cx_max = (target_x + patch_radius)
+                                    .min(width.saturating_sub(patch_radius + 1));
 
                                 if cy_min <= cy_max && cx_min <= cx_max {
                                     for cy in cy_min..=cy_max {
                                         let row_offset = (cy * width) as usize;
                                         for cx in cx_min..=cx_max {
                                             let unk_idx = row_offset + cx as usize;
-                                            num_unknowns[unk_idx] = num_unknowns[unk_idx].saturating_sub(1);
+                                            num_unknowns[unk_idx] =
+                                                num_unknowns[unk_idx].saturating_sub(1);
                                         }
                                     }
                                 }
@@ -346,7 +369,7 @@ fn calculate_normal(pixel_states: &[u8], width: u32, height: u32, x: u32, y: u32
     let x_m1 = x.saturating_sub(1);
     let y_p1 = (y + 1).min(height.saturating_sub(1));
     let y_m1 = y.saturating_sub(1);
-    
+
     let state_at = |cx, cy| {
         if pixel_states[(cy * width + cx) as usize] == PIXEL_KNOWN {
             0
@@ -354,7 +377,7 @@ fn calculate_normal(pixel_states: &[u8], width: u32, height: u32, x: u32, y: u32
             1
         }
     };
-    
+
     let grad_x = (state_at(x_p1, y) as i32 - state_at(x_m1, y) as i32) as f32;
     let grad_y = (state_at(x, y_p1) as i32 - state_at(x, y_m1) as i32) as f32;
     let mag = (grad_x * grad_x + grad_y * grad_y).sqrt();
@@ -380,7 +403,9 @@ fn get_gradient_at_point(
 
     let get_luma = |cx: u32, cy: u32| {
         let idx = ((cy * width + cx) * 3) as usize;
-        0.299 * out_slice[idx] as f32 + 0.587 * out_slice[idx + 1] as f32 + 0.114 * out_slice[idx + 2] as f32
+        0.299 * out_slice[idx] as f32
+            + 0.587 * out_slice[idx + 1] as f32
+            + 0.114 * out_slice[idx + 2] as f32
     };
 
     let mut grad_x = 0.0;
@@ -532,24 +557,31 @@ fn find_best_match_local(
         }
     }
 
-    let best_match = search_sample.par_iter().map(|&(cx, cy)| {
-        let mut ssd = 0.0;
-        for tp in &target_pixels {
-            let source_x = (cx as i32 + tp.dx) as u32;
-            let source_y = (cy as i32 + tp.dy) as u32;
-            let idx = ((source_y * width + source_x) * 3) as usize;
+    let best_match = search_sample
+        .par_iter()
+        .map(|&(cx, cy)| {
+            let mut ssd = 0.0;
+            for tp in &target_pixels {
+                let source_x = (cx as i32 + tp.dx) as u32;
+                let source_y = (cy as i32 + tp.dy) as u32;
+                let idx = ((source_y * width + source_x) * 3) as usize;
 
-            let diff0 = tp.color[0] - out_slice[idx] as f64;
-            let diff1 = tp.color[1] - out_slice[idx + 1] as f64;
-            let diff2 = tp.color[2] - out_slice[idx + 2] as f64;
-            ssd += (diff0 * diff0 + diff1 * diff1 + diff2 * diff2) * tp.weight;
-        }
+                let diff0 = tp.color[0] - out_slice[idx] as f64;
+                let diff1 = tp.color[1] - out_slice[idx + 1] as f64;
+                let diff2 = tp.color[2] - out_slice[idx + 2] as f64;
+                ssd += (diff0 * diff0 + diff1 * diff1 + diff2 * diff2) * tp.weight;
+            }
 
-        let score = if total_weight == 0.0 { f64::MAX } else { ssd / total_weight }
-            + ((px as i64 - cx as i64).pow(2) + (py as i64 - cy as i64).pow(2)) as f64 * 0.05;
+            let score =
+                if total_weight == 0.0 {
+                    f64::MAX
+                } else {
+                    ssd / total_weight
+                } + ((px as i64 - cx as i64).pow(2) + (py as i64 - cy as i64).pow(2)) as f64 * 0.05;
 
-        (FloatOrdF64(score), cx, cy)
-    }).min_by(|a, b| a.0.cmp(&b.0));
+            (FloatOrdF64(score), cx, cy)
+        })
+        .min_by(|a, b| a.0.cmp(&b.0));
 
     best_match.map(|v| (v.1, v.2)).unwrap_or((px, py))
 }
@@ -562,24 +594,27 @@ pub fn perform_fast_inpaint(
     if patch_radius == 0 {
         return Err("Patch radius must be greater than 0.".to_string());
     }
-    
+
     let (width, height) = source_image.dimensions();
     if width <= 2 * patch_radius + 1 || height <= 2 * patch_radius + 1 {
-        return Err(format!("Image bounds ({}x{}) are too small for a patch radius of {}.", width, height, patch_radius));
+        return Err(format!(
+            "Image bounds ({}x{}) are too small for a patch radius of {}.",
+            width, height, patch_radius
+        ));
     }
-    
+
     let source_rgb = source_image.to_rgb8();
     let inpainted_rgb = inpaint_criminisi(&source_rgb, mask, patch_radius);
-    
+
     let mut final_image = source_image.to_rgba8();
     let final_slice = final_image.as_mut();
     let inpaint_slice = inpainted_rgb.as_raw();
-    
+
     for i in 0..(width * height) as usize {
         final_slice[i * 4] = inpaint_slice[i * 3];
         final_slice[i * 4 + 1] = inpaint_slice[i * 3 + 1];
         final_slice[i * 4 + 2] = inpaint_slice[i * 3 + 2];
     }
-    
+
     Ok(final_image)
 }

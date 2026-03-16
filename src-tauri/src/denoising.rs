@@ -2,15 +2,15 @@ use crate::file_management::load_settings;
 use crate::formats::is_raw_file;
 use crate::image_loader::load_base_image_from_bytes;
 use crate::image_processing::apply_cpu_default_raw_processing;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgb, Rgb32FImage};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter};
 
 const BLOCK_SIZE: usize = 8;
@@ -42,14 +42,16 @@ impl Bm3dParams {
 
 fn rgb_to_ycbcr(r: &[f32], g: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let n = r.len();
-    let mut y  = vec![0.0f32; n];
+    let mut y = vec![0.0f32; n];
     let mut cb = vec![0.0f32; n];
     let mut cr = vec![0.0f32; n];
     for i in 0..n {
-        let rv = r[i]; let gv = g[i]; let bv = b[i];
-        y[i]  =  0.299    * rv + 0.587    * gv + 0.114    * bv;
-        cb[i] = -0.168736 * rv - 0.331264 * gv + 0.5      * bv + 128.0;
-        cr[i] =  0.5      * rv - 0.418688 * gv - 0.081312 * bv + 128.0;
+        let rv = r[i];
+        let gv = g[i];
+        let bv = b[i];
+        y[i] = 0.299 * rv + 0.587 * gv + 0.114 * bv;
+        cb[i] = -0.168736 * rv - 0.331264 * gv + 0.5 * bv + 128.0;
+        cr[i] = 0.5 * rv - 0.418688 * gv - 0.081312 * bv + 128.0;
     }
     (y, cb, cr)
 }
@@ -60,12 +62,12 @@ fn ycbcr_to_rgb(y: &[f32], cb: &[f32], cr: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f
     let mut g = vec![0.0f32; n];
     let mut b = vec![0.0f32; n];
     for i in 0..n {
-        let yv  = y[i];
+        let yv = y[i];
         let cbv = cb[i] - 128.0;
         let crv = cr[i] - 128.0;
-        r[i] = yv + 1.402    * crv;
+        r[i] = yv + 1.402 * crv;
         g[i] = yv - 0.344136 * cbv - 0.714136 * crv;
-        b[i] = yv + 1.772    * cbv;
+        b[i] = yv + 1.772 * cbv;
     }
     (r, g, b)
 }
@@ -91,13 +93,14 @@ pub fn denoise_image(
     let file_bytes = fs::read(path).map_err(|e| e.to_string())?;
 
     let mut dynamic_img = load_base_image_from_bytes(
-        &file_bytes, 
-        &path_str, 
-        false, 
-        highlight_compression, 
-        linear_mode, 
-        None
-    ).map_err(|e| e.to_string())?;
+        &file_bytes,
+        &path_str,
+        false,
+        highlight_compression,
+        linear_mode,
+        None,
+    )
+    .map_err(|e| e.to_string())?;
 
     if is_raw {
         let _ = app_handle.emit("denoise-progress", "Preparing RAW data...");
@@ -145,7 +148,11 @@ pub fn denoise_image(
         }
     }
 
-    let (r, g, b) = ycbcr_to_rgb(&denoised_channels[0], &denoised_channels[1], &denoised_channels[2]);
+    let (r, g, b) = ycbcr_to_rgb(
+        &denoised_channels[0],
+        &denoised_channels[1],
+        &denoised_channels[2],
+    );
 
     let _ = app_handle.emit("denoise-progress", "Finalizing data...");
     let out_img_buffer = merge_channels(&vec![r, g, b], width, height);
@@ -278,23 +285,15 @@ fn run_bm3d_step_joint(
     ref_patches.par_iter().for_each(|&(rx, ry)| {
         let c = counter.fetch_add(1, AtomicOrdering::Relaxed);
         if c % 200 == 0 {
-             let pct = (c as f32 / total_work as f32) * 100.0;
-             let step_str = if is_step_1 { "Step 1/2" } else { "Step 2/2" };
-             let msg = format!("{} - {:.0}%", step_str, pct);
-             let _ = app_handle.emit("denoise-progress", msg);
+            let pct = (c as f32 / total_work as f32) * 100.0;
+            let step_str = if is_step_1 { "Step 1/2" } else { "Step 2/2" };
+            let msg = format!("{} - {:.0}%", step_str, pct);
+            let _ = app_handle.emit("denoise-progress", msg);
         }
 
         let mut group_locs_buf = [(0, 0); MAX_GROUP_SIZE];
-        let group_size = block_matching_joint(
-            guide,
-            w,
-            h,
-            rx,
-            ry,
-            is_step_1,
-            params,
-            &mut group_locs_buf,
-        );
+        let group_size =
+            block_matching_joint(guide, w, h, rx, ry, is_step_1, params, &mut group_locs_buf);
         let group_locs = &group_locs_buf[0..group_size];
 
         for ch in 0..num_channels {
@@ -406,11 +405,7 @@ fn wiener_filter(noisy: &mut [f32], guide: &[f32], sigma: f32) -> f32 {
         *n *= coef;
         sum += coef * coef;
     }
-    if sum > 0.0 {
-        1.0 / sum
-    } else {
-        1.0
-    }
+    if sum > 0.0 { 1.0 / sum } else { 1.0 }
 }
 
 #[derive(Clone, Copy)]
@@ -432,8 +427,11 @@ fn block_matching_joint(
     out_buf: &mut [(usize, usize)],
 ) -> usize {
     const MAX_CANDIDATES: usize = 1024;
-    let mut candidates: [Match; MAX_CANDIDATES] =
-        [Match { dist: f32::MAX, x: 0, y: 0 }; MAX_CANDIDATES];
+    let mut candidates: [Match; MAX_CANDIDATES] = [Match {
+        dist: f32::MAX,
+        x: 0,
+        y: 0,
+    }; MAX_CANDIDATES];
     let mut cand_count = 0;
 
     let threshold = if is_step_1 {
@@ -826,4 +824,3 @@ fn gaussian_blur_1ch(data: &[f32], width: usize, height: usize, sigma: f32) -> V
 
     out
 }
-

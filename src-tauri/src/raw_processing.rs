@@ -1,5 +1,5 @@
 use crate::image_processing::apply_orientation;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rawler::{
     decoders::{Orientation, RawDecodeParams},
@@ -8,8 +8,8 @@ use rawler::{
     rawsource::RawSource,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 pub fn develop_raw_image(
@@ -30,7 +30,10 @@ pub fn develop_raw_image(
 }
 
 fn is_linear_raw_format(raw_image: &RawImage) -> bool {
-    matches!(raw_image.photometric, RawPhotometricInterpretation::LinearRaw)
+    matches!(
+        raw_image.photometric,
+        RawPhotometricInterpretation::LinearRaw
+    )
 }
 
 #[inline]
@@ -222,7 +225,11 @@ fn develop_internal(
     Ok((dynamic_image, orientation))
 }
 
-pub fn get_fast_demosaic_scale_factor(file_bytes: &[u8], decoded_width: u32, decoded_height: u32) -> f32 {
+pub fn get_fast_demosaic_scale_factor(
+    file_bytes: &[u8],
+    decoded_width: u32,
+    decoded_height: u32,
+) -> f32 {
     let source = RawSource::new_from_slice(file_bytes);
     if let Ok(decoder) = rawler::get_decoder(&source) {
         if let Ok(raw_img) = decoder.raw_image(&source, &RawDecodeParams::default(), true) {

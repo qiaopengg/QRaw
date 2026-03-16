@@ -22,7 +22,8 @@ jobs:
           rust-src-dir: src-tauri
 
       - name: Check formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        working-directory: src-tauri
+        run: cargo fmt -p RapidRAW -- --check
 
   clippy:
     name: cargo clippy
@@ -48,4 +49,5 @@ jobs:
             librsvg2-dev
 
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -W clippy::all
+        working-directory: src-tauri
+        run: cargo clippy -p RapidRAW --all-targets -- -W clippy::all

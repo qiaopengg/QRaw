@@ -72,7 +72,9 @@ const FilmstripThumbnail = memo(
     const colorLabel = COLOR_LABELS.find((c: Color) => c.name === colorTag);
     const isVirtualCopy = path.includes('?vc=');
 
-    const filename = path.split(/[\\/]/).pop() || '';
+    const cleanPath = path.split('?')[0];
+    const filename = cleanPath.split(/[\\/]/).pop() || '';
+
     const truncatedTitle =
       filename.length > 40 ? filename.substring(0, 20) + '...' + filename.substring(filename.length - 17) : filename;
 
@@ -227,7 +229,10 @@ const FilmstripThumbnail = memo(
         )}
         {isVirtualCopy && (
           <div className="absolute bottom-1 right-1 z-10">
-            <div className="bg-bg-primary/70 text-white text-[9px] font-bold px-1 py-0.5 rounded-full backdrop-blur-sm">
+            <div
+              data-tooltip="Virtual Copy"
+              className="bg-bg-primary/70 text-white text-[10px] font-bold px-1 py-0.5 rounded-full backdrop-blur-sm"
+            >
               VC
             </div>
           </div>

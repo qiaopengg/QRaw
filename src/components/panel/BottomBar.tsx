@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Star, Copy, ClipboardPaste, RotateCcw, ChevronUp, ChevronDown, Check, Save, Settings } from 'lucide-react';
 import clsx from 'clsx';
+import { motion, AnimatePresence } from 'framer-motion';
 import Filmstrip from './Filmstrip';
 import { GLOBAL_KEYS, ImageFile, SelectedImage, ThumbnailAspectRatio } from '../ui/AppProperties';
 
@@ -266,21 +267,71 @@ export default function BottomBar({
           <div className="h-5 w-px bg-surface"></div>
           <div className="flex items-center gap-2">
             <button
-              className="w-8 h-8 flex items-center justify-center rounded-md text-text-secondary hover:bg-surface hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+              className="relative w-8 h-8 flex items-center justify-center rounded-md text-text-secondary hover:bg-surface hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
               disabled={isCopyDisabled}
               onClick={onCopy}
               data-tooltip="Copy Settings"
             >
-              {isCopied ? <Check size={18} className="text-green-500 animate-pop-in" /> : <Copy size={18} />}
+              <AnimatePresence mode="wait" initial={false}>
+                {isCopied ? (
+                  <motion.div
+                    key="copied"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute"
+                  >
+                    <Check size={18} className="text-green-500" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="copy"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute"
+                  >
+                    <Copy size={18} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </button>
+
             <button
-              className="w-8 h-8 flex items-center justify-center rounded-md text-text-secondary hover:bg-surface hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+              className="relative w-8 h-8 flex items-center justify-center rounded-md text-text-secondary hover:bg-surface hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
               disabled={isPasteDisabled}
               onClick={onPaste}
               data-tooltip="Paste Settings"
             >
-              {isPasted ? <Check size={18} className="text-green-500 animate-pop-in" /> : <ClipboardPaste size={18} />}
+              <AnimatePresence mode="wait" initial={false}>
+                {isPasted ? (
+                  <motion.div
+                    key="pasted"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute"
+                  >
+                    <Check size={18} className="text-green-500" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="paste"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute"
+                  >
+                    <ClipboardPaste size={18} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </button>
+
             <button
               className="w-8 h-8 flex items-center justify-center rounded-md text-text-secondary hover:bg-surface hover:text-text-primary transition-colors"
               onClick={onOpenCopyPasteSettings}

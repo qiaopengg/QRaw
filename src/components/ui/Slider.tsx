@@ -36,6 +36,8 @@ const Slider = ({
   const [isLabelHovered, setIsLabelHovered] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastUpTime = useRef(0);
+  const fillPercentage = max !== min ? ((displayValue - min) / (max - min)) * 100 : 0;
+  const defaultPercentage = max !== min ? ((defaultValue - min) / (max - min)) * 100 : 0;
 
   useEffect(() => {
     onDragStateChange(isDragging);
@@ -285,6 +287,13 @@ const Slider = ({
           className={`absolute top-1/2 left-0 w-full h-1.5 -translate-y-1/4 rounded-full pointer-events-none ${
             trackClassName || 'bg-card-active'
           }`}
+        />
+        <div
+          className="absolute top-1/2 h-1.5 -translate-y-1/4 rounded-full pointer-events-none bg-accent/25"
+          style={{
+            left: `${Math.min(fillPercentage, defaultPercentage)}%`,
+            width: `${Math.abs(fillPercentage - defaultPercentage)}%`,
+          }}
         />
         <input
           className={`absolute top-1/2 left-0 w-full h-1.5 appearance-none bg-transparent cursor-pointer m-0 p-0 slider-input z-10 ${

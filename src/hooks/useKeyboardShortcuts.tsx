@@ -4,6 +4,7 @@ import { ImageFile, Panel, SelectedImage } from '../components/ui/AppProperties'
 interface KeyboardShortcutsProps {
   activeAiPatchContainerId?: string | null;
   activeAiSubMaskId: string | null;
+  osPlatform: string;
   activeMaskContainerId: string | null;
   activeMaskId: string | null;
   activeRightPanel: Panel | null;
@@ -56,6 +57,7 @@ export const useKeyboardShortcuts = ({
   activeMaskContainerId,
   activeMaskId,
   activeRightPanel,
+  osPlatform,
   canRedo,
   canUndo,
   copiedFilePaths,
@@ -218,7 +220,7 @@ export const useKeyboardShortcuts = ({
           event.preventDefault();
           handleRightPanelSelect(Panel.Export);
         }
-        if (key === 'w' && !isCtrl) {
+        if (key === 'a' && !isCtrl) {
           event.preventDefault();
           setIsWaveformVisible((prev: boolean) => !prev);
         }
@@ -322,13 +324,22 @@ export const useKeyboardShortcuts = ({
         handleRate(parseInt(key, 10));
       }
 
-      if (key === 'delete') {
+      // On macOS the physical ⌫ key sends Backspace, not Delete.
+      // File deletion follows macOS convention: Cmd + Delete (i.e. Cmd + Backspace).
+      // Non-destructive mask/patch deletion uses plain Backspace on macOS.
+      // On all other platforms the existing plain Delete behaviour is preserved.
+      const isMacOS = osPlatform === 'macos';
+      const isDeletePressed = isMacOS ? key === 'backspace' : key === 'delete';
+
+      if (isDeletePressed) {
         event.preventDefault();
         if (activeMaskContainerId) {
           handleDeleteMaskContainer(activeMaskContainerId);
         } else if (activeAiPatchContainerId) {
           handleDeleteAiPatch(activeAiPatchContainerId);
-        } else {
+        } else if (!isMacOS || isCtrl) {
+          // macOS: Cmd modifier required for (destructive) file deletion
+          // Other platforms: plain Delete triggers file deletion
           handleDeleteSelected();
         }
       }
@@ -414,6 +425,7 @@ export const useKeyboardShortcuts = ({
     activeMaskContainerId,
     activeMaskId,
     activeRightPanel,
+    osPlatform,
     canRedo,
     canUndo,
     copiedFilePaths,

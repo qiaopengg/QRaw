@@ -16,6 +16,7 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma};
+use log;
 use num_cpus;
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
@@ -25,27 +26,30 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 use walkdir::WalkDir;
-use log;
 
 use crate::AppState;
+use crate::calculate_geometry_hash;
+use crate::exif_processing;
 use crate::formats::{is_raw_file, is_supported_image_file};
 use crate::gpu_processing;
 use crate::image_loader;
 use crate::image_processing::GpuContext;
 use crate::image_processing::{
-    Crop, ImageMetadata, apply_coarse_rotation, apply_crop, apply_flip, apply_rotation, apply_geometry_warp,
-    auto_results_to_json, get_all_adjustments_from_json, perform_auto_analysis, apply_cpu_default_raw_processing,
+    Crop, ImageMetadata, apply_coarse_rotation, apply_cpu_default_raw_processing, apply_crop,
+    apply_flip, apply_geometry_warp, apply_rotation, auto_results_to_json,
+    get_all_adjustments_from_json, perform_auto_analysis,
 };
 use crate::mask_generation::MaskDefinition;
 use crate::preset_converter;
 use crate::tagging::COLOR_TAG_PREFIX;
-use crate::calculate_geometry_hash;
-use crate::exif_processing;
 
 const THUMBNAIL_WIDTH: u32 = 640;
 
 fn resolve_thumbnail_cache_dir(app_handle: &AppHandle) -> std::result::Result<PathBuf, String> {
-    let cache_dir = app_handle.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let cache_dir = app_handle
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?;
     let thumb_cache_dir = cache_dir.join("thumbnails");
     if !thumb_cache_dir.exists() {
         fs::create_dir_all(&thumb_cache_dir).map_err(|e| e.to_string())?;
@@ -162,13 +166,47 @@ pub enum PasteMode {
 
 fn default_included_adjustments() -> HashSet<String> {
     [
-        "blacks", "brightness", "clarity", "centré", "chromaticAberrationBlueYellow",
-        "chromaticAberrationRedCyan", "colorCalibration", "colorGrading", "colorNoiseReduction",
-        "contrast", "curves", "dehaze", "exposure", "grainAmount", "grainRoughness", "grainSize",
-        "highlights", "hsl", "lutIntensity", "lutName", "lutPath", "lutSize", "lumaNoiseReduction",
-        "saturation", "sectionVisibility", "shadows", "sharpness", "showClipping", "structure", "temperature",
-        "tint", "toneMapper", "vibrance", "vignetteAmount", "vignetteFeather", "vignetteMidpoint",
-        "flareAmount", "glowAmount", "halationAmount", "vignetteRoundness", "whites",
+        "blacks",
+        "brightness",
+        "clarity",
+        "centré",
+        "chromaticAberrationBlueYellow",
+        "chromaticAberrationRedCyan",
+        "colorCalibration",
+        "colorGrading",
+        "colorNoiseReduction",
+        "contrast",
+        "curves",
+        "dehaze",
+        "exposure",
+        "grainAmount",
+        "grainRoughness",
+        "grainSize",
+        "highlights",
+        "hsl",
+        "lutIntensity",
+        "lutName",
+        "lutPath",
+        "lutSize",
+        "lumaNoiseReduction",
+        "saturation",
+        "sectionVisibility",
+        "shadows",
+        "sharpness",
+        "showClipping",
+        "structure",
+        "temperature",
+        "tint",
+        "toneMapper",
+        "vibrance",
+        "vignetteAmount",
+        "vignetteFeather",
+        "vignetteMidpoint",
+        "flareAmount",
+        "glowAmount",
+        "halationAmount",
+        "vignetteRoundness",
+        "whites",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -181,7 +219,7 @@ pub struct CopyPasteSettings {
     pub mode: PasteMode,
     #[serde(default = "default_included_adjustments")]
     pub included_adjustments: HashSet<String>,
-    #[serde(default)] 
+    #[serde(default)]
     pub known_adjustments: HashSet<String>,
 }
 
@@ -190,7 +228,7 @@ impl Default for CopyPasteSettings {
         Self {
             mode: PasteMode::Merge,
             included_adjustments: default_included_adjustments(),
-            known_adjustments: default_included_adjustments(), 
+            known_adjustments: default_included_adjustments(),
         }
     }
 }
@@ -354,6 +392,12 @@ pub struct AppSettings {
     pub enable_xmp_sync: Option<bool>,
     #[serde(default)]
     pub create_xmp_if_missing: Option<bool>,
+    #[serde(default)]
+    pub is_waveform_visible: Option<bool>,
+    #[serde(default)]
+    pub waveform_height: Option<u32>,
+    #[serde(default)]
+    pub active_waveform_channel: Option<String>,
 }
 
 fn default_adjustment_visibility() -> HashMap<String, bool> {
@@ -417,6 +461,9 @@ impl Default for AppSettings {
             linear_raw_mode: default_linear_raw_mode(),
             enable_xmp_sync: Some(true),
             create_xmp_if_missing: Some(false),
+            is_waveform_visible: Some(false),
+            waveform_height: Some(220),
+            active_waveform_channel: Some("luma".to_string()),
         }
     }
 }
@@ -441,12 +488,11 @@ pub struct ImportSettings {
 }
 
 pub fn parse_virtual_path(virtual_path: &str) -> (PathBuf, PathBuf) {
-    let (source_path_str, copy_id) =
-        if let Some((base, id)) = virtual_path.rsplit_once("?vc=") {
-            (base.to_string(), Some(id.to_string()))
-        } else {
-            (virtual_path.to_string(), None)
-        };
+    let (source_path_str, copy_id) = if let Some((base, id)) = virtual_path.rsplit_once("?vc=") {
+        (base.to_string(), Some(id.to_string()))
+    } else {
+        (virtual_path.to_string(), None)
+    };
 
     let source_path = PathBuf::from(source_path_str);
 
@@ -544,7 +590,9 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let sidecar_versions = sidecars_by_source.entry(path_str.clone()).or_insert_with(|| vec![None]);
+        let sidecar_versions = sidecars_by_source
+            .entry(path_str.clone())
+            .or_insert_with(|| vec![None]);
 
         for copy_id_opt in sidecar_versions {
             let (virtual_path, sidecar_path, is_virtual_copy) = match copy_id_opt {
@@ -563,9 +611,13 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                 let mut metadata = if sidecar_path.exists() {
                     if let Ok(content) = fs::read_to_string(&sidecar_path) {
                         serde_json::from_str::<ImageMetadata>(&content).unwrap_or_default()
-                    } else { ImageMetadata::default() }
-                } else { ImageMetadata::default() };
-    
+                    } else {
+                        ImageMetadata::default()
+                    }
+                } else {
+                    ImageMetadata::default()
+                };
+
                 let source_path_buf = PathBuf::from(&path_str);
                 if enable_xmp_sync {
                     if sync_metadata_from_xmp(&source_path_buf, &mut metadata) {
@@ -574,13 +626,13 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                         }
                     }
                 }
-    
+
                 let edited = metadata.adjustments.as_object().map_or(false, |a| {
                     a.keys().len() > 1 || (a.keys().len() == 1 && !a.contains_key("rating"))
                 });
                 (edited, metadata.tags)
             };
-    
+
             result_list.push(ImageFile {
                 path: virtual_path,
                 modified,
@@ -596,7 +648,10 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
 }
 
 #[tauri::command]
-pub fn list_images_recursive(path: String, app_handle: AppHandle) -> Result<Vec<ImageFile>, String> {
+pub fn list_images_recursive(
+    path: String,
+    app_handle: AppHandle,
+) -> Result<Vec<ImageFile>, String> {
     let settings = load_settings(app_handle).unwrap_or_default();
     let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
 
@@ -612,7 +667,7 @@ pub fn list_images_recursive(path: String, app_handle: AppHandle) -> Result<Vec<
         if !entry_path.is_file() {
             continue;
         }
-        
+
         let file_name = entry_path.file_name().unwrap_or_default().to_string_lossy();
 
         if is_supported_image_file(&entry_path.to_string_lossy().as_ref()) {
@@ -651,7 +706,9 @@ pub fn list_images_recursive(path: String, app_handle: AppHandle) -> Result<Vec<
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let sidecar_versions = sidecars_by_source.entry(path_str.clone()).or_insert_with(|| vec![None]);
+        let sidecar_versions = sidecars_by_source
+            .entry(path_str.clone())
+            .or_insert_with(|| vec![None]);
 
         for copy_id_opt in sidecar_versions {
             let (virtual_path, sidecar_path, is_virtual_copy) = match copy_id_opt {
@@ -670,9 +727,13 @@ pub fn list_images_recursive(path: String, app_handle: AppHandle) -> Result<Vec<
                 let mut metadata = if sidecar_path.exists() {
                     if let Ok(content) = fs::read_to_string(&sidecar_path) {
                         serde_json::from_str::<ImageMetadata>(&content).unwrap_or_default()
-                    } else { ImageMetadata::default() }
-                } else { ImageMetadata::default() };
-    
+                    } else {
+                        ImageMetadata::default()
+                    }
+                } else {
+                    ImageMetadata::default()
+                };
+
                 let source_path_buf = PathBuf::from(&path_str);
                 if enable_xmp_sync {
                     if sync_metadata_from_xmp(&source_path_buf, &mut metadata) {
@@ -681,13 +742,13 @@ pub fn list_images_recursive(path: String, app_handle: AppHandle) -> Result<Vec<
                         }
                     }
                 }
-    
+
                 let edited = metadata.adjustments.as_object().map_or(false, |a| {
                     a.keys().len() > 1 || (a.keys().len() == 1 && !a.contains_key("rating"))
                 });
                 (edited, metadata.tags)
             };
-    
+
             result_list.push(ImageFile {
                 path: virtual_path,
                 modified,
@@ -754,7 +815,6 @@ fn scan_dir_and_count(path: &Path) -> Result<(Vec<FolderNode>, usize), std::io::
                 is_dir: true,
                 image_count: total_child_count,
             });
-
         } else if file_type.is_file() {
             if is_supported_image_file(&current_path) {
                 current_dir_image_count += 1;
@@ -885,7 +945,8 @@ pub fn generate_thumbnail_data(
             let (processing_base, total_scale) = if let Some(hit) = cached_base {
                 hit
             } else {
-                let settings = crate::file_management::load_settings(app_handle.clone()).unwrap_or_default();
+                let settings =
+                    crate::file_management::load_settings(app_handle.clone()).unwrap_or_default();
                 let highlight_compression = settings.raw_highlight_compression.unwrap_or(2.5);
                 let linear_mode = settings.linear_raw_mode;
                 let mut raw_scale_factor = 1.0;
@@ -893,8 +954,8 @@ pub fn generate_thumbnail_data(
                 let composite_image = if let Some(img) = preloaded_image {
                     image_loader::composite_patches_on_image(img, &adjustments)?
                 } else {
-                    let mmap_guard; 
-                    let vec_guard; 
+                    let mmap_guard;
+                    let vec_guard;
 
                     let file_slice: &[u8] = match read_file_mapped(&source_path) {
                         Ok(mmap) => {
@@ -906,7 +967,11 @@ pub fn generate_thumbnail_data(
                                 log::warn!("Fallback read for {}: {}", source_path_str, e);
                             }
                             let bytes = fs::read(&source_path).map_err(|io_err| {
-                                anyhow::anyhow!("Fallback read failed for {}: {}", source_path_str, io_err)
+                                anyhow::anyhow!(
+                                    "Fallback read failed for {}: {}",
+                                    source_path_str,
+                                    io_err
+                                )
                             })?;
                             vec_guard = Some(bytes);
                             vec_guard.as_ref().unwrap()
@@ -925,53 +990,63 @@ pub fn generate_thumbnail_data(
 
                     if is_raw {
                         raw_scale_factor = crate::raw_processing::get_fast_demosaic_scale_factor(
-                            file_slice, 
-                            img.width(), 
-                            img.height()
+                            file_slice,
+                            img.width(),
+                            img.height(),
                         );
                     }
                     img
                 };
 
                 let warped_image = apply_geometry_warp(&composite_image, &meta.adjustments);
-                let orientation_steps = meta.adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
+                let orientation_steps =
+                    meta.adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
                 let coarse_rotated_image = apply_coarse_rotation(warped_image, orientation_steps);
-                
+
                 let (full_w, full_h) = coarse_rotated_image.dimensions();
 
-                let (base, gpu_scale) = if full_w > THUMBNAIL_PROCESSING_DIM || full_h > THUMBNAIL_PROCESSING_DIM {
-                    let base = crate::image_processing::downscale_f32_image(
-                        &coarse_rotated_image,
-                        THUMBNAIL_PROCESSING_DIM,
-                        THUMBNAIL_PROCESSING_DIM,
-                    );
-                    let scale = if full_w > 0 {
-                        base.width() as f32 / full_w as f32
+                let (base, gpu_scale) =
+                    if full_w > THUMBNAIL_PROCESSING_DIM || full_h > THUMBNAIL_PROCESSING_DIM {
+                        let base = crate::image_processing::downscale_f32_image(
+                            &coarse_rotated_image,
+                            THUMBNAIL_PROCESSING_DIM,
+                            THUMBNAIL_PROCESSING_DIM,
+                        );
+                        let scale = if full_w > 0 {
+                            base.width() as f32 / full_w as f32
+                        } else {
+                            1.0
+                        };
+                        (base, scale)
                     } else {
-                        1.0
+                        (coarse_rotated_image.clone(), 1.0)
                     };
-                    (base, scale)
-                } else {
-                    (coarse_rotated_image.clone(), 1.0)
-                };
 
                 let total_scale = gpu_scale * raw_scale_factor;
 
                 let mut cache = state.thumbnail_geometry_cache.lock().unwrap();
-                if cache.len() > 30 { cache.clear(); }
-                cache.insert(path_str.to_string(), (geometry_hash, base.clone(), total_scale));
+                if cache.len() > 30 {
+                    cache.clear();
+                }
+                cache.insert(
+                    path_str.to_string(),
+                    (geometry_hash, base.clone(), total_scale),
+                );
 
                 (base, total_scale)
             };
 
             let rotation_degrees = meta.adjustments["rotation"].as_f64().unwrap_or(0.0) as f32;
-            let flip_horizontal = meta.adjustments["flipHorizontal"].as_bool().unwrap_or(false);
+            let flip_horizontal = meta.adjustments["flipHorizontal"]
+                .as_bool()
+                .unwrap_or(false);
             let flip_vertical = meta.adjustments["flipVertical"].as_bool().unwrap_or(false);
 
             let flipped_image = apply_flip(processing_base, flip_horizontal, flip_vertical);
             let rotated_image = apply_rotation(&flipped_image, rotation_degrees);
 
-            let crop_data: Option<Crop> = serde_json::from_value(meta.adjustments["crop"].clone()).ok();
+            let crop_data: Option<Crop> =
+                serde_json::from_value(meta.adjustments["crop"].clone()).ok();
             let scaled_crop_json = if let Some(c) = &crop_data {
                 serde_json::to_value(Crop {
                     x: c.x * total_scale as f64,
@@ -1057,7 +1132,7 @@ pub fn generate_thumbnail_data(
     let mut final_image = if let Some(img) = preloaded_image {
         image_loader::composite_patches_on_image(img, &adjustments)?
     } else {
-         match read_file_mapped(&source_path) {
+        match read_file_mapped(&source_path) {
             Ok(mmap) => image_loader::load_and_composite(
                 &mmap,
                 &source_path_str,
@@ -1331,7 +1406,10 @@ pub fn rename_folder(path: String, new_name: String) -> Result<(), String> {
 #[tauri::command]
 pub fn delete_folder(path: String) -> Result<(), String> {
     if let Err(trash_error) = trash::delete(&path) {
-        log::warn!("Failed to move folder to trash: {}. Falling back to permanent delete.", trash_error);
+        log::warn!(
+            "Failed to move folder to trash: {}. Falling back to permanent delete.",
+            trash_error
+        );
         fs::remove_dir_all(&path).map_err(|e| e.to_string())
     } else {
         Ok(())
@@ -1387,8 +1465,13 @@ pub fn duplicate_file(path: String) -> Result<(), String> {
 fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, String> {
     let mut associated_files = vec![source_image_path.to_path_buf()];
 
-    let parent_dir = source_image_path.parent().ok_or("Could not determine parent directory")?;
-    let source_filename = source_image_path.file_name().ok_or("Could not get source filename")?.to_string_lossy();
+    let parent_dir = source_image_path
+        .parent()
+        .ok_or("Could not determine parent directory")?;
+    let source_filename = source_image_path
+        .file_name()
+        .ok_or("Could not get source filename")?
+        .to_string_lossy();
 
     let primary_sidecar_name = format!("{}.rrdata", source_filename);
     let virtual_copy_prefix = format!("{}.", source_filename);
@@ -1403,8 +1486,10 @@ fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, S
             let entry_os_filename = entry.file_name();
             let entry_filename = entry_os_filename.to_string_lossy();
 
-            if entry_filename == primary_sidecar_name || 
-               (entry_filename.starts_with(&virtual_copy_prefix) && entry_filename.ends_with(".rrdata")) {
+            if entry_filename == primary_sidecar_name
+                || (entry_filename.starts_with(&virtual_copy_prefix)
+                    && entry_filename.ends_with(".rrdata"))
+            {
                 associated_files.push(entry_path);
             }
         }
@@ -1417,7 +1502,10 @@ fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, S
 pub fn copy_files(source_paths: Vec<String>, destination_folder: String) -> Result<(), String> {
     let dest_path = Path::new(&destination_folder);
     if !dest_path.is_dir() {
-        return Err(format!("Destination is not a folder: {}", destination_folder));
+        return Err(format!(
+            "Destination is not a folder: {}",
+            destination_folder
+        ));
     }
 
     let unique_source_images: HashSet<PathBuf> = source_paths
@@ -1428,10 +1516,18 @@ pub fn copy_files(source_paths: Vec<String>, destination_folder: String) -> Resu
     for source_image_path in unique_source_images {
         let all_files_to_copy = find_all_associated_files(&source_image_path)?;
 
-        let source_parent = source_image_path.parent().ok_or("Could not get parent directory")?;
+        let source_parent = source_image_path
+            .parent()
+            .ok_or("Could not get parent directory")?;
         if source_parent == dest_path {
-            let stem = source_image_path.file_stem().and_then(|s| s.to_str()).ok_or("Could not get file stem")?;
-            let extension = source_image_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let stem = source_image_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or("Could not get file stem")?;
+            let extension = source_image_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
 
             let mut counter = 1;
             let new_base_path = loop {
@@ -1447,7 +1543,8 @@ pub fn copy_files(source_paths: Vec<String>, destination_folder: String) -> Resu
             for original_file in all_files_to_copy {
                 let original_full_filename = original_file.file_name().unwrap().to_string_lossy();
                 let source_base_filename = source_image_path.file_name().unwrap().to_string_lossy();
-                let new_dest_filename = original_full_filename.replacen(&*source_base_filename, &*new_filename, 1);
+                let new_dest_filename =
+                    original_full_filename.replacen(&*source_base_filename, &*new_filename, 1);
                 let final_dest_path = dest_path.join(new_dest_filename);
 
                 fs::copy(&original_file, &final_dest_path).map_err(|e| e.to_string())?;
@@ -1468,7 +1565,10 @@ pub fn copy_files(source_paths: Vec<String>, destination_folder: String) -> Resu
 pub fn move_files(source_paths: Vec<String>, destination_folder: String) -> Result<(), String> {
     let dest_path = Path::new(&destination_folder);
     if !dest_path.is_dir() {
-        return Err(format!("Destination is not a folder: {}", destination_folder));
+        return Err(format!(
+            "Destination is not a folder: {}",
+            destination_folder
+        ));
     }
 
     let unique_source_images: HashSet<PathBuf> = source_paths
@@ -1479,7 +1579,9 @@ pub fn move_files(source_paths: Vec<String>, destination_folder: String) -> Resu
     let mut all_files_to_trash = Vec::new();
 
     for source_image_path in unique_source_images {
-        let source_parent = source_image_path.parent().ok_or("Could not get parent directory")?;
+        let source_parent = source_image_path
+            .parent()
+            .ok_or("Could not get parent directory")?;
         if source_parent == dest_path {
             return Err("Cannot move files into the same folder they are already in.".to_string());
         }
@@ -1490,7 +1592,10 @@ pub fn move_files(source_paths: Vec<String>, destination_folder: String) -> Resu
             if let Some(file_name) = file_to_move.file_name() {
                 let dest_file_path = dest_path.join(file_name);
                 if dest_file_path.exists() {
-                    return Err(format!("File already exists at destination: {}", dest_file_path.display()));
+                    return Err(format!(
+                        "File already exists at destination: {}",
+                        dest_file_path.display()
+                    ));
                 }
             }
         }
@@ -1506,10 +1611,15 @@ pub fn move_files(source_paths: Vec<String>, destination_folder: String) -> Resu
 
     if !all_files_to_trash.is_empty() {
         if let Err(trash_error) = trash::delete_all(&all_files_to_trash) {
-            log::warn!("Failed to move source files to trash: {}. Falling back to permanent delete.", trash_error);
+            log::warn!(
+                "Failed to move source files to trash: {}. Falling back to permanent delete.",
+                trash_error
+            );
             for path in all_files_to_trash {
                 if path.is_file() {
-                    fs::remove_file(&path).map_err(|e| format!("Failed to delete source file {}: {}", path.display(), e))?;
+                    fs::remove_file(&path).map_err(|e| {
+                        format!("Failed to delete source file {}: {}", path.display(), e)
+                    })?;
                 }
             }
         }
@@ -1870,7 +1980,7 @@ pub fn apply_auto_adjustments_to_paths(
             if let Ok(json_string) = serde_json::to_string_pretty(&existing_metadata) {
                 let _ = std::fs::write(&sidecar_path, json_string);
             }
-            
+
             if enable_xmp_sync {
                 sync_metadata_to_xmp(&source_path, &existing_metadata, create_xmp_if_missing);
             }
@@ -1930,7 +2040,11 @@ pub fn apply_auto_adjustments_to_paths(
 }
 
 #[tauri::command]
-pub fn set_color_label_for_paths(paths: Vec<String>, color: Option<String>, app_handle: AppHandle) -> Result<(), String> {
+pub fn set_color_label_for_paths(
+    paths: Vec<String>,
+    color: Option<String>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
     let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
     let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
@@ -1987,7 +2101,7 @@ pub fn load_metadata(path: String, app_handle: AppHandle) -> Result<ImageMetadat
     } else {
         ImageMetadata::default()
     };
-    
+
     if enable_xmp_sync {
         if sync_metadata_from_xmp(&source_path, &mut metadata) {
             if let Ok(json) = serde_json::to_string_pretty(&metadata) {
@@ -1995,7 +2109,7 @@ pub fn load_metadata(path: String, app_handle: AppHandle) -> Result<ImageMetadat
             }
         }
     }
-    
+
     Ok(metadata)
 }
 
@@ -2070,7 +2184,10 @@ pub fn load_settings(app_handle: AppHandle) -> Result<AppSettings, String> {
             .collect();
 
         if !new_features.is_empty() {
-            settings.copy_paste_settings.included_adjustments.extend(new_features);
+            settings
+                .copy_paste_settings
+                .included_adjustments
+                .extend(new_features);
             settings.copy_paste_settings.known_adjustments = all_current_keys;
             settings_modified = true;
         }
@@ -2366,7 +2483,11 @@ pub fn delete_files_from_disk(paths: Vec<String>) -> Result<(), String> {
                         }
                     }
                     Err(e) => {
-                        log::warn!("Could not find associated files for {}: {}", source_path.display(), e);
+                        log::warn!(
+                            "Could not find associated files for {}: {}",
+                            source_path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -2379,12 +2500,17 @@ pub fn delete_files_from_disk(paths: Vec<String>) -> Result<(), String> {
 
     let final_paths_to_delete: Vec<PathBuf> = files_to_trash.into_iter().collect();
     if let Err(trash_error) = trash::delete_all(&final_paths_to_delete) {
-        log::warn!("Failed to move files to trash: {}. Falling back to permanent delete.", trash_error);
+        log::warn!(
+            "Failed to move files to trash: {}. Falling back to permanent delete.",
+            trash_error
+        );
         for path in final_paths_to_delete {
             if path.is_file() {
-                fs::remove_file(&path).map_err(|e| format!("Failed to delete file {}: {}", path.display(), e))?;
+                fs::remove_file(&path)
+                    .map_err(|e| format!("Failed to delete file {}: {}", path.display(), e))?;
             } else if path.is_dir() {
-                fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete directory {}: {}", path.display(), e))?;
+                fs::remove_dir_all(&path)
+                    .map_err(|e| format!("Failed to delete directory {}: {}", path.display(), e))?;
             }
         }
     }
@@ -2448,10 +2574,14 @@ pub fn delete_files_with_associated(paths: Vec<String>) -> Result<(), String> {
 
     let final_paths_to_delete: Vec<PathBuf> = files_to_trash.into_iter().collect();
     if let Err(trash_error) = trash::delete_all(&final_paths_to_delete) {
-        log::warn!("Failed to move files to trash: {}. Falling back to permanent delete.", trash_error);
+        log::warn!(
+            "Failed to move files to trash: {}. Falling back to permanent delete.",
+            trash_error
+        );
         for path in final_paths_to_delete {
             if path.is_file() {
-                fs::remove_file(&path).map_err(|e| format!("Failed to delete file {}: {}", path.display(), e))?;
+                fs::remove_file(&path)
+                    .map_err(|e| format!("Failed to delete file {}: {}", path.display(), e))?;
             }
         }
     }
@@ -2600,12 +2730,20 @@ pub async fn import_files(
 
                 if settings.delete_after_import {
                     if let Err(trash_error) = trash::delete(&source_path) {
-                        log::warn!("Failed to trash source file {}: {}. Deleting permanently.", source_path.display(), trash_error);
+                        log::warn!(
+                            "Failed to trash source file {}: {}. Deleting permanently.",
+                            source_path.display(),
+                            trash_error
+                        );
                         fs::remove_file(&source_path).map_err(|e| e.to_string())?;
                     }
                     if source_sidecar.exists() {
                         if let Err(trash_error) = trash::delete(&source_sidecar) {
-                            log::warn!("Failed to trash source sidecar {}: {}. Deleting permanently.", source_sidecar.display(), trash_error);
+                            log::warn!(
+                                "Failed to trash source sidecar {}: {}. Deleting permanently.",
+                                source_sidecar.display(),
+                                trash_error
+                            );
                             fs::remove_file(&source_sidecar).map_err(|e| e.to_string())?;
                         }
                     }
@@ -2676,8 +2814,13 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
             return Err(format!("File not found: {}", path_str));
         }
 
-        let parent = original_path.parent().ok_or("Could not get parent directory")?;
-        let extension = original_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let parent = original_path
+            .parent()
+            .ok_or("Could not get parent directory")?;
+        let extension = original_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
 
         let file_date = exif_processing::get_creation_date_from_path(&original_path);
 
@@ -2703,7 +2846,9 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
 
     let mut sidecar_operations: HashMap<PathBuf, PathBuf> = HashMap::new();
     for (original_path, new_path) in &operations {
-        let parent = original_path.parent().ok_or("Could not get parent directory")?;
+        let parent = original_path
+            .parent()
+            .ok_or("Could not get parent directory")?;
         let original_filename_str = original_path.file_name().unwrap().to_string_lossy();
         let new_filename_str = new_path.file_name().unwrap().to_string_lossy();
 
@@ -2713,13 +2858,16 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
                 let entry_os_filename = entry.file_name();
                 let entry_filename = entry_os_filename.to_string_lossy();
 
-                if entry_filename.starts_with(&format!("{}.", original_filename_str)) && entry_filename.ends_with(".rrdata") {
-                    let new_sidecar_filename = entry_filename.replacen(&*original_filename_str, &*new_filename_str, 1);
+                if entry_filename.starts_with(&format!("{}.", original_filename_str))
+                    && entry_filename.ends_with(".rrdata")
+                {
+                    let new_sidecar_filename =
+                        entry_filename.replacen(&*original_filename_str, &*new_filename_str, 1);
                     let new_sidecar_path = parent.join(new_sidecar_filename);
                     sidecar_operations.insert(entry_path, new_sidecar_path);
                 } else if entry_filename == format!("{}.rrdata", original_filename_str) {
-                     let new_sidecar_path = new_path.with_extension("rrdata");
-                     sidecar_operations.insert(entry_path, new_sidecar_path);
+                    let new_sidecar_path = new_path.with_extension("rrdata");
+                    sidecar_operations.insert(entry_path, new_sidecar_path);
                 }
             }
         }
@@ -2727,9 +2875,16 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
     operations.extend(sidecar_operations);
 
     for (old_path, new_path) in operations {
-        fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename {} to {}: {}", old_path.display(), new_path.display(), e))?;
+        fs::rename(&old_path, &new_path).map_err(|e| {
+            format!(
+                "Failed to rename {} to {}: {}",
+                old_path.display(),
+                new_path.display(),
+                e
+            )
+        })?;
         if is_supported_image_file(&new_path.to_string_lossy().as_ref()) {
-             final_new_paths.push(new_path.to_string_lossy().into_owned());
+            final_new_paths.push(new_path.to_string_lossy().into_owned());
         }
     }
 
@@ -2834,7 +2989,7 @@ pub fn sync_metadata_from_xmp(source_path: &Path, metadata: &mut ImageMetadata) 
 
             let xmp_label = extract_xmp_label(&content);
             let xmp_tags = extract_xmp_tags(&content);
-            
+
             let mut current_tags = metadata.tags.clone().unwrap_or_default();
             let original_len = current_tags.len();
             let had_no_tags = metadata.tags.is_none();
@@ -2865,7 +3020,7 @@ pub fn sync_metadata_from_xmp(source_path: &Path, metadata: &mut ImageMetadata) 
 pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create_if_missing: bool) {
     let xmp_path = source_path.with_extension("xmp");
     let xmp_path_upper = source_path.with_extension("XMP");
-    
+
     let mut actual_xmp = if xmp_path.exists() {
         Some(xmp_path.clone())
     } else if xmp_path_upper.exists() {
@@ -2901,9 +3056,13 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
             let re_rating_tag = Regex::new(r#"<xmp:Rating\s*>[^<]*</xmp:Rating>"#).unwrap();
 
             if re_rating_attr.is_match(&content) {
-                content = re_rating_attr.replace(&content, format!("xmp:Rating=\"{}\"", rating_str)).to_string();
+                content = re_rating_attr
+                    .replace(&content, format!("xmp:Rating=\"{}\"", rating_str))
+                    .to_string();
             } else if re_rating_tag.is_match(&content) {
-                content = re_rating_tag.replace(&content, format!("<xmp:Rating>{}</xmp:Rating>", rating_str)).to_string();
+                content = re_rating_tag
+                    .replace(&content, format!("<xmp:Rating>{}</xmp:Rating>", rating_str))
+                    .to_string();
             } else if let Some(last_index) = content.rfind("</rdf:Description>") {
                 let (start, end) = content.split_at(last_index);
                 content = format!("{} <xmp:Rating>{}</xmp:Rating>\n{}", start, rating_str, end);
@@ -2932,9 +3091,13 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
                 let re_label_tag = Regex::new(r#"<xmp:Label\s*>[^<]*</xmp:Label>"#).unwrap();
 
                 if re_label_attr.is_match(&content) {
-                    content = re_label_attr.replace(&content, format!("xmp:Label=\"{}\"", lbl)).to_string();
+                    content = re_label_attr
+                        .replace(&content, format!("xmp:Label=\"{}\"", lbl))
+                        .to_string();
                 } else if re_label_tag.is_match(&content) {
-                    content = re_label_tag.replace(&content, format!("<xmp:Label>{}</xmp:Label>", lbl)).to_string();
+                    content = re_label_tag
+                        .replace(&content, format!("<xmp:Label>{}</xmp:Label>", lbl))
+                        .to_string();
                 } else if let Some(last_index) = content.rfind("</rdf:Description>") {
                     let (start, end) = content.split_at(last_index);
                     content = format!("{} <xmp:Label>{}</xmp:Label>\n{}", start, lbl, end);
@@ -2946,7 +3109,8 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
                 content = re_label_tag.replace_all(&content, "").to_string();
             }
 
-            let re_subject = Regex::new(r#"(?s)<dc:subject>\s*<rdf:Bag>.*?</rdf:Bag>\s*</dc:subject>"#).unwrap();
+            let re_subject =
+                Regex::new(r#"(?s)<dc:subject>\s*<rdf:Bag>.*?</rdf:Bag>\s*</dc:subject>"#).unwrap();
             if normal_tags.is_empty() {
                 content = re_subject.replace_all(&content, "").to_string();
             } else {
@@ -2955,7 +3119,7 @@ pub fn sync_metadata_to_xmp(source_path: &Path, metadata: &ImageMetadata, create
                     bag.push_str(&format!("     <rdf:li>{}</rdf:li>\n", t));
                 }
                 bag.push_str("    </rdf:Bag>\n   </dc:subject>");
-                
+
                 if re_subject.is_match(&content) {
                     content = re_subject.replace(&content, bag).to_string();
                 } else if let Some(last_index) = content.rfind("</rdf:Description>") {
