@@ -988,7 +988,7 @@ fn process_preview_job(
         }
         if !is_interactive {
             if let Ok(waveform_data) =
-                image_processing::calculate_waveform_from_image(&final_processed_image)
+                image_processing::calculate_waveform_from_image(&final_processed_image, None)
             {
                 let _ = app_handle.emit("waveform-update", waveform_data);
             }

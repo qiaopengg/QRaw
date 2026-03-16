@@ -2486,6 +2486,32 @@ pub fn calculate_waveform_from_image(
     })
 }
 
+#[tauri::command]
+pub fn generate_histogram(state: tauri::State<AppState>) -> Result<HistogramData, String> {
+    let image = state
+        .original_image
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("No image loaded for histogram")?
+        .image
+        .clone();
+    calculate_histogram_from_image(&image)
+}
+
+#[tauri::command]
+pub fn generate_waveform(state: tauri::State<AppState>) -> Result<WaveformData, String> {
+    let image = state
+        .original_image
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("No image loaded for waveform")?
+        .image
+        .clone();
+    calculate_waveform_from_image(&image, None)
+}
+
 pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
     let analysis_preview = downscale_f32_image(image, 1024, 1024);
     let rgb_image = analysis_preview.to_rgb8();
