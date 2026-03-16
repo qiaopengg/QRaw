@@ -96,6 +96,148 @@ struct WindowState {
     fullscreen: bool,
 }
 
+const DEFAULT_WINDOW_WIDTH: u32 = 1440;
+const DEFAULT_WINDOW_HEIGHT: u32 = 900;
+const MIN_WINDOW_WIDTH: u32 = 1100;
+const MIN_WINDOW_HEIGHT: u32 = 700;
+
+fn monitor_bounds(
+    window: &tauri::WebviewWindow,
+    state: &WindowState,
+) -> Option<(i32, i32, u32, u32)> {
+    let saved_center_x = state.x.saturating_add((state.width / 2) as i32);
+    let saved_center_y = state.y.saturating_add((state.height / 2) as i32);
+
+    if let Ok(monitors) = window.available_monitors() {
+        if let Some(matched) = monitors.iter().find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            saved_center_x >= pos.x
+                && saved_center_x < pos.x.saturating_add(size.width as i32)
+                && saved_center_y >= pos.y
+                && saved_center_y < pos.y.saturating_add(size.height as i32)
+        }) {
+            let pos = matched.position();
+            let size = matched.size();
+            return Some((pos.x, pos.y, size.width, size.height));
+        }
+    }
+
+    if let Some(monitor) = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok().and_then(|m| m.into_iter().next()))
+    {
+        let pos = monitor.position();
+        let size = monitor.size();
+        return Some((pos.x, pos.y, size.width, size.height));
+    }
+
+    None
+}
+
+fn normalize_window_state_with_bounds(
+    saved: WindowState,
+    bounds: Option<(i32, i32, u32, u32)>,
+) -> WindowState {
+    let mut normalized = saved;
+    let mut should_center = false;
+
+    if normalized.width < MIN_WINDOW_WIDTH || normalized.height < MIN_WINDOW_HEIGHT {
+        normalized.width = DEFAULT_WINDOW_WIDTH;
+        normalized.height = DEFAULT_WINDOW_HEIGHT;
+        should_center = true;
+    }
+
+    if let Some((monitor_x, monitor_y, monitor_w, monitor_h)) = bounds {
+        normalized.width = normalized.width.min(monitor_w.max(MIN_WINDOW_WIDTH));
+        normalized.height = normalized.height.min(monitor_h.max(MIN_WINDOW_HEIGHT));
+
+        let min_x = monitor_x;
+        let max_x = monitor_x
+            .saturating_add(monitor_w as i32)
+            .saturating_sub(normalized.width as i32);
+        let min_y = monitor_y;
+        let max_y = monitor_y
+            .saturating_add(monitor_h as i32)
+            .saturating_sub(normalized.height as i32);
+
+        let center_x = monitor_x + (monitor_w as i32 - normalized.width as i32) / 2;
+        let center_y = monitor_y + (monitor_h as i32 - normalized.height as i32) / 2;
+
+        let out_of_bounds = normalized.x < min_x
+            || normalized.x > max_x.max(min_x)
+            || normalized.y < min_y
+            || normalized.y > max_y.max(min_y);
+
+        if should_center || out_of_bounds {
+            normalized.x = center_x;
+            normalized.y = center_y;
+        } else {
+            normalized.x = normalized.x.clamp(min_x, max_x.max(min_x));
+            normalized.y = normalized.y.clamp(min_y, max_y.max(min_y));
+        }
+    } else if should_center {
+        normalized.x = 0;
+        normalized.y = 0;
+    }
+
+    normalized
+}
+
+fn normalize_window_state(window: &tauri::WebviewWindow, saved: WindowState) -> WindowState {
+    let bounds = monitor_bounds(window, &saved);
+    normalize_window_state_with_bounds(saved, bounds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(width: u32, height: u32, x: i32, y: i32) -> WindowState {
+        WindowState {
+            width,
+            height,
+            x,
+            y,
+            maximized: false,
+            fullscreen: false,
+        }
+    }
+
+    #[test]
+    fn recenters_when_position_is_offscreen() {
+        let saved = state(1440, 900, -440, 8192);
+        let normalized = normalize_window_state_with_bounds(saved, Some((0, 0, 2560, 1440)));
+        assert_eq!(normalized.x, 560);
+        assert_eq!(normalized.y, 270);
+        assert_eq!(normalized.width, 1440);
+        assert_eq!(normalized.height, 900);
+    }
+
+    #[test]
+    fn resets_small_dimensions_to_defaults() {
+        let saved = state(500, 400, 100, 100);
+        let normalized = normalize_window_state_with_bounds(saved, Some((0, 0, 2560, 1440)));
+        assert_eq!(normalized.width, DEFAULT_WINDOW_WIDTH);
+        assert_eq!(normalized.height, DEFAULT_WINDOW_HEIGHT);
+        assert_eq!(normalized.x, 560);
+        assert_eq!(normalized.y, 270);
+    }
+
+    #[test]
+    fn clamps_too_large_window_to_monitor_size() {
+        let saved = state(5760, 3600, 10, 10);
+        let normalized = normalize_window_state_with_bounds(saved, Some((0, 0, 1920, 1080)));
+        assert_eq!(normalized.width, 1920);
+        assert_eq!(normalized.height, 1080);
+        assert_eq!(normalized.x, 0);
+        assert_eq!(normalized.y, 0);
+    }
+}
+
 #[derive(Clone)]
 pub struct LoadedImage {
     path: String,
@@ -3842,17 +3984,24 @@ fn main() {
                 let path = config_dir.join("window_state.json");
                 if let Ok(contents) = std::fs::read_to_string(&path) {
                     if let Ok(state) = serde_json::from_str::<WindowState>(&contents) {
-                        if state.width >= 1100 && state.height >= 700 {
-                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(state.width, state.height)));
-                            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(state.x, state.y)));
-                        } else {
-                            log::warn!("Saved window state had unreasonable dimensions ({}x{}), using default size and centering.", state.width, state.height);
-                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(1440, 900)));
-                            let _ = window.center();
-                        }
-                    } else { let _ = window.center(); }
-                } else { let _ = window.center(); }
-            } else { let _ = window.center(); }
+                        let normalized = normalize_window_state(&window, state);
+                        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
+                            normalized.width,
+                            normalized.height,
+                        )));
+                        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+                            normalized.x,
+                            normalized.y,
+                        )));
+                    } else {
+                        let _ = window.center();
+                    }
+                } else {
+                    let _ = window.center();
+                }
+            } else {
+                let _ = window.center();
+            }
 
             let window_failsafe = window.clone();
             tauri::async_runtime::spawn(async move {
