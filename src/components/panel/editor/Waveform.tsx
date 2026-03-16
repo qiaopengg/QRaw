@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type RefObject } from 'react';
 import Draggable from 'react-draggable';
 import { X, Waves } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -8,130 +8,63 @@ import { DisplayMode } from '../../../utils/adjustments';
 import Text from '../../ui/Text';
 import { TextVariants } from '../../../types/typography';
 
-interface LumaWaveformProps {
-  color: Array<number>;
-  data: Array<number>;
-  height: number;
-  maxVal: number;
-  width: number;
-}
-
-interface MaxValues {
-  blue: number;
-  green: number;
-  height: number;
-  luma: number;
-  red: number;
-  width: number;
-}
-
-interface RgbWaveformProps {
-  blueData: Array<number>;
-  greenData: Array<number>;
-  height: number;
-  maxVals: MaxValues;
-  redData: Array<number>;
-  width: number;
-}
-
 interface WaveformProps {
   onClose(): void;
   waveformData: WaveformData;
 }
 
-const LumaWaveformDisplay = ({ data, width, height, maxVal, color }: LumaWaveformProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const modeButtons = [
+  { mode: DisplayMode.Luma, label: 'L' },
+  { mode: DisplayMode.Rgb, label: 'RGB' },
+  { mode: DisplayMode.Parade, label: 'P' },
+  { mode: DisplayMode.Vectorscope, label: 'V' },
+];
 
+const useRawRgbaCanvas = (
+  canvasRef: RefObject<HTMLCanvasElement | null>,
+  base64Data: string,
+  width: number,
+  height: number,
+) => {
   useEffect(() => {
-    if (!data || !canvasRef.current || !width || !height) {
+    if (!base64Data || !canvasRef.current || !width || !height) {
       return;
     }
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvasRef.current.getContext('2d');
     if (!ctx) {
       return;
     }
-    ctx.clearRect(0, 0, width, height);
 
-    const imageData = ctx.createImageData(width, height);
-    const pixels = imageData.data;
-
-    const scale = maxVal > 0 ? 255 / Math.log(1 + maxVal) : 0;
-
-    for (let i = 0; i < data.length; i++) {
-      if (data[i] > 0) {
-        const intensity = Math.log(1 + data[i]) * scale;
-        const pixelIndex = i * 4;
-
-        pixels[pixelIndex] = color[0];
-        pixels[pixelIndex + 1] = color[1];
-        pixels[pixelIndex + 2] = color[2];
-        pixels[pixelIndex + 3] = intensity;
-      }
+    const binary = atob(base64Data);
+    const bytes = new Uint8ClampedArray(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
+    const imageData = new ImageData(bytes, width, height);
     ctx.putImageData(imageData, 0, 0);
-  }, [data, width, height, maxVal, color]);
-
-  return <canvas ref={canvasRef} width={width} height={height} className="absolute inset-0" />;
-};
-
-const RgbWaveformDisplay = ({ redData, greenData, blueData, width, height, maxVals }: RgbWaveformProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if (!redData || !canvasRef.current || !width || !height) {
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-    ctx.clearRect(0, 0, width, height);
-
-    const imageData = ctx.createImageData(width, height);
-    const pixels = imageData.data;
-
-    const scaleR = maxVals.red > 0 ? 255 / Math.log(1 + maxVals.red) : 0;
-    const scaleG = maxVals.green > 0 ? 255 / Math.log(1 + maxVals.green) : 0;
-    const scaleB = maxVals.blue > 0 ? 255 / Math.log(1 + maxVals.blue) : 0;
-
-    for (let i = 0; i < redData.length; i++) {
-      const pixelIndex = i * 4;
-      const r = redData[i] > 0 ? Math.log(1 + redData[i]) * scaleR : 0;
-      const g = greenData[i] > 0 ? Math.log(1 + greenData[i]) * scaleG : 0;
-      const b = blueData[i] > 0 ? Math.log(1 + blueData[i]) * scaleB : 0;
-
-      pixels[pixelIndex] = r;
-      pixels[pixelIndex + 1] = g;
-      pixels[pixelIndex + 2] = b;
-      pixels[pixelIndex + 3] = Math.max(r, g, b);
-    }
-    ctx.putImageData(imageData, 0, 0);
-  }, [redData, greenData, blueData, width, height, maxVals]);
-
-  return <canvas ref={canvasRef} width={width} height={height} className="absolute inset-0" />;
+  }, [canvasRef, base64Data, width, height]);
 };
 
 export default function Waveform({ waveformData, onClose }: WaveformProps) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>(DisplayMode.Rgb);
   const nodeRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const { t } = useTranslation();
 
-  const { red, green, blue, luma, width, height } = waveformData || {};
+  const width = waveformData?.width || 256;
+  const height = waveformData?.height || 256;
 
-  const maxVals: MaxValues = waveformData
-    ? {
-        height: waveformData.height,
-        width: waveformData.width,
-        luma: Math.max(...(luma || [])),
-        red: Math.max(...(red || [])),
-        green: Math.max(...(green || [])),
-        blue: Math.max(...(blue || [])),
-      }
-    : { height: 0, width: 0, luma: 0, red: 0, green: 0, blue: 0 };
+  const activeData =
+    displayMode === DisplayMode.Luma
+      ? waveformData?.luma
+      : displayMode === DisplayMode.Parade
+        ? waveformData?.parade
+        : displayMode === DisplayMode.Vectorscope
+          ? waveformData?.vectorscope
+          : waveformData?.rgb;
+
+  useRawRgbaCanvas(canvasRef, activeData || '', width, height);
 
   const baseButtonClass =
     'flex-grow text-center px-2 py-1 text-xs rounded-lg font-medium transition-colors duration-150';
@@ -161,100 +94,33 @@ export default function Waveform({ waveformData, onClose }: WaveformProps) {
               <X size={16} />
             </button>
           </div>
-          {waveformData && (
-            <div className="p-2 pt-0">
-              <div className="relative w-[256px] h-[256px] bg-black/50 rounded">
-                {displayMode === DisplayMode.Rgb && (
-                  <RgbWaveformDisplay
-                    blueData={blue}
-                    greenData={green}
-                    height={height}
-                    maxVals={maxVals}
-                    redData={red}
-                    width={width}
-                  />
-                )}
-                {displayMode === DisplayMode.Luma && (
-                  <LumaWaveformDisplay
-                    color={[255, 255, 255]}
-                    data={luma}
-                    height={height}
-                    maxVal={maxVals.luma}
-                    width={width}
-                  />
-                )}
-                {displayMode === DisplayMode.Red && (
-                  <LumaWaveformDisplay
-                    color={[255, 0, 0]}
-                    data={red}
-                    height={height}
-                    maxVal={maxVals.red}
-                    width={width}
-                  />
-                )}
-                {displayMode === DisplayMode.Green && (
-                  <LumaWaveformDisplay
-                    color={[0, 255, 0]}
-                    data={green}
-                    height={height}
-                    maxVal={maxVals.green}
-                    width={width}
-                  />
-                )}
-                {displayMode === DisplayMode.Blue && (
-                  <LumaWaveformDisplay
-                    color={[0, 0, 255]}
-                    data={blue}
-                    height={height}
-                    maxVal={maxVals.blue}
-                    width={width}
-                  />
-                )}
-              </div>
-              <div className="flex justify-center gap-1 mt-2 p-1 bg-bg-primary rounded-lg">
-                <button
-                  onClick={() => setDisplayMode(DisplayMode.Luma)}
-                  className={`${baseButtonClass} ${
-                    displayMode === DisplayMode.Luma ? 'bg-accent text-button-text' : inactiveButtonClass
-                  }`}
-                >
-                  {t('waveform.luma')}
-                </button>
-                <button
-                  onClick={() => setDisplayMode(DisplayMode.Rgb)}
-                  className={`${baseButtonClass} ${
-                    displayMode === DisplayMode.Rgb ? 'bg-accent text-button-text' : inactiveButtonClass
-                  }`}
-                >
-                  {t('waveform.rgb')}
-                </button>
-                <button
-                  onClick={() => setDisplayMode(DisplayMode.Red)}
-                  className={`${baseButtonClass} ${
-                    displayMode === DisplayMode.Red ? 'bg-red-500 text-white' : inactiveButtonClass
-                  }`}
-                >
-                  R
-                </button>
-                <button
-                  onClick={() => setDisplayMode(DisplayMode.Green)}
-                  className={`${baseButtonClass} ${
-                    displayMode === DisplayMode.Green ? 'bg-green-500 text-white' : inactiveButtonClass
-                  }`}
-                >
-                  G
-                </button>
-                <button
-                  onClick={() => setDisplayMode(DisplayMode.Blue)}
-                  className={`${baseButtonClass} ${
-                    displayMode === DisplayMode.Blue ? 'bg-blue-500 text-white' : inactiveButtonClass
-                  }`}
-                >
-                  B
-                </button>
-              </div>
+
+          <div className="p-2 pt-0">
+            <div className="relative w-[256px] h-[256px] bg-black/60 rounded overflow-hidden">
+              {!!activeData && (
+                <canvas
+                  ref={canvasRef}
+                  width={width}
+                  height={height}
+                  className="absolute inset-0 w-full h-full"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              )}
             </div>
-          )}
+            <div className="flex justify-center gap-1 mt-2 p-1 bg-bg-primary rounded-lg">
+              {modeButtons.map((item) => (
+                <button
+                  key={item.mode}
+                  onClick={() => setDisplayMode(item.mode)}
+                  className={`${baseButtonClass} ${
+                    displayMode === item.mode ? 'bg-accent text-button-text' : inactiveButtonClass
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </motion.div>
       </div>
     </Draggable>

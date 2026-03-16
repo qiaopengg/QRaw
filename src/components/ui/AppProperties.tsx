@@ -286,12 +286,11 @@ export interface UiVisibility {
 }
 
 export interface WaveformData {
-  [index: string]: Array<number> | number;
-  blue: Array<number>;
-  green: Array<number>;
+  luma: string;
+  parade: string;
+  rgb: string;
+  vectorscope: string;
   height: number;
-  luma: Array<number>;
-  red: Array<number>;
   width: number;
 }
 

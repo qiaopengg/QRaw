@@ -766,7 +766,7 @@ export default function Editor({
         activeSubMask?.type === Mask.QuickEraser ||
         activeSubMask?.parameters?.isInitialDraw));
 
-  const waveFormData: WaveformData = waveform || { blue: [], green: [], height: 0, luma: [], red: [], width: 0 };
+  const waveFormData: WaveformData = waveform || { rgb: '', luma: '', parade: '', vectorscope: '', height: 256, width: 256 };
   const isZoomActionActive = !isCropping && !isMasking && !isAiEditing && !isWbPickerActive;
   const isMaxZoom = transformState.scale >= transformConfig.maxScale - 0.5;
 

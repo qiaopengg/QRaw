@@ -28,6 +28,14 @@ pub struct StyleFeatures {
     pub highlight_ratio: f64,
     pub shadow_ratio: f64,
     pub contrast_spread: f64,
+    pub p10_luminance: f64,
+    pub p50_luminance: f64,
+    pub p90_luminance: f64,
+    pub p99_luminance: f64,
+    pub clipped_highlight_ratio: f64,
+    pub waveform_low_band: f64,
+    pub waveform_mid_band: f64,
+    pub waveform_high_band: f64,
     pub rb_ratio: f64,
     pub gb_ratio: f64,
     pub mean_saturation: f64,
@@ -59,7 +67,11 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     if total_pixels == 0.0 {
         return StyleFeatures {
             mean_luminance: 0.0, highlight_ratio: 0.0, shadow_ratio: 0.0,
-            contrast_spread: 0.0, rb_ratio: 1.0, gb_ratio: 1.0,
+            contrast_spread: 0.0,
+            p10_luminance: 0.0, p50_luminance: 0.0, p90_luminance: 0.0, p99_luminance: 0.0,
+            clipped_highlight_ratio: 0.0,
+            waveform_low_band: 0.0, waveform_mid_band: 0.0, waveform_high_band: 0.0,
+            rb_ratio: 1.0, gb_ratio: 1.0,
             mean_saturation: 0.0, saturation_spread: 0.0,
             laplacian_variance: 0.0, vignette_diff: 0.0,
         };
@@ -81,8 +93,11 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let mut sum_sat: f64 = 0.0;
     let mut highlight_count: f64 = 0.0;
     let mut shadow_count: f64 = 0.0;
+    let mut clipped_highlight_count: f64 = 0.0;
     let mut lum_values: Vec<f64> = Vec::with_capacity(a_total as usize);
     let mut sat_values: Vec<f64> = Vec::with_capacity(a_total as usize);
+    let waveform_bins = 32usize;
+    let mut waveform_bin_values: Vec<Vec<f64>> = (0..waveform_bins).map(|_| Vec::new()).collect();
 
     // 暗角检测用
     let cx = aw as f64 / 2.0;
@@ -109,6 +124,7 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
 
             if lum > 0.8 { highlight_count += 1.0; }
             if lum < 0.2 { shadow_count += 1.0; }
+            if lum > 0.98 { clipped_highlight_count += 1.0; }
 
             // HSL saturation
             let max_c = r.max(g).max(b);
@@ -133,6 +149,12 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
                 edge_lum_sum += lum;
                 edge_count += 1.0;
             }
+
+            let mut bin_idx = ((x as f64 / aw as f64) * waveform_bins as f64).floor() as usize;
+            if bin_idx >= waveform_bins {
+                bin_idx = waveform_bins - 1;
+            }
+            waveform_bin_values[bin_idx].push(lum);
         }
     }
 
@@ -146,6 +168,42 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     // 饱和度标准差
     let sat_variance: f64 = sat_values.iter().map(|s| (s - mean_sat).powi(2)).sum::<f64>() / a_total;
     let saturation_spread = sat_variance.sqrt();
+
+    let mut lum_sorted = lum_values.clone();
+    lum_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let quantile = |q: f64| -> f64 {
+        if lum_sorted.is_empty() {
+            return 0.0;
+        }
+        let idx = ((lum_sorted.len() - 1) as f64 * q).round() as usize;
+        lum_sorted[idx.min(lum_sorted.len() - 1)]
+    };
+    let p10 = quantile(0.10);
+    let p50 = quantile(0.50);
+    let p90 = quantile(0.90);
+    let p99 = quantile(0.99);
+
+    let mut low_sum = 0.0;
+    let mut mid_sum = 0.0;
+    let mut high_sum = 0.0;
+    let mut band_count = 0.0;
+    for mut bin in waveform_bin_values {
+        if bin.is_empty() {
+            continue;
+        }
+        bin.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let get_q = |q: f64| -> f64 {
+            let idx = ((bin.len() - 1) as f64 * q).round() as usize;
+            bin[idx.min(bin.len() - 1)]
+        };
+        low_sum += get_q(0.10);
+        mid_sum += get_q(0.50);
+        high_sum += get_q(0.90);
+        band_count += 1.0;
+    }
+    let waveform_low_band = if band_count > 0.0 { low_sum / band_count } else { p10 };
+    let waveform_mid_band = if band_count > 0.0 { mid_sum / band_count } else { p50 };
+    let waveform_high_band = if band_count > 0.0 { high_sum / band_count } else { p90 };
 
     // R/B 和 G/B 通道比值（色温/色调）
     let mean_r = sum_r / a_total;
@@ -168,6 +226,14 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
         highlight_ratio: highlight_count / a_total,
         shadow_ratio: shadow_count / a_total,
         contrast_spread,
+        p10_luminance: p10,
+        p50_luminance: p50,
+        p90_luminance: p90,
+        p99_luminance: p99,
+        clipped_highlight_ratio: clipped_highlight_count / a_total,
+        waveform_low_band,
+        waveform_mid_band,
+        waveform_high_band,
         rb_ratio,
         gb_ratio,
         mean_saturation: mean_sat,
@@ -203,6 +269,16 @@ fn compute_laplacian_variance(gray: &image::GrayImage, w: u32, h: u32) -> f64 {
     (sum_sq / count) - mean * mean
 }
 
+fn classify_tonal_style(feat: &StyleFeatures) -> &'static str {
+    if feat.p50_luminance > 0.62 && feat.p10_luminance > 0.35 {
+        "高调"
+    } else if feat.p50_luminance < 0.40 && feat.p90_luminance < 0.72 {
+        "低调"
+    } else {
+        "中间调"
+    }
+}
+
 /// 将两组特征的差异映射为滑块调整参数（优化版：更精准的感知映射）
 fn map_features_to_adjustments(
     ref_feat: &StyleFeatures,
@@ -217,15 +293,10 @@ fn map_features_to_adjustments(
 
     let clamp = |v: f64, min: f64, max: f64| -> f64 { v.max(min).min(max) };
 
-    // ===== 保守系数设计原则 =====
-    // RAW 预览 vs JPEG 参考图天然存在巨大差异（RAW 未处理，JPEG 已调色）
-    // 因此所有系数必须非常保守，宁可调不够也不能调过头
-    // 每个参数都有两级钳位：delta 钳位 + 最终值钳位
-
-    // 1. 曝光 (exposure): 线性映射，保守系数
-    let lum_diff = ref_feat.mean_luminance - cur_feat.mean_luminance;
-    if lum_diff.abs() > 0.05 {
-        let exposure_delta = clamp(lum_diff * 1.0, -0.8, 0.8);
+    // ===== 阶段一：先匹配影调区间（直方图/波形）=====
+    let waveform_mid_diff = ref_feat.waveform_mid_band - cur_feat.waveform_mid_band;
+    if waveform_mid_diff.abs() > 0.02 {
+        let exposure_delta = clamp(waveform_mid_diff * 1.2, -0.45, 0.45);
         let cur_exposure = get_current("exposure", 0.0);
         let new_exposure = clamp(cur_exposure + exposure_delta, -2.0, 2.0);
         suggestions.push(StyleTransferSuggestion {
@@ -233,14 +304,15 @@ fn map_features_to_adjustments(
             value: (new_exposure * 100.0).round() / 100.0,
             label: "曝光".to_string(),
             min: -5.0, max: 5.0,
-            reason: format!("参考图亮度{}", if lum_diff > 0.0 { "更高" } else { "更低" }),
+            reason: "先对齐波形中间带，建立基础亮度区间".to_string(),
         });
     }
 
-    // 2. 对比度 (contrast): 保守映射
-    let contrast_diff = ref_feat.contrast_spread - cur_feat.contrast_spread;
-    if contrast_diff.abs() > 0.02 {
-        let contrast_delta = clamp(contrast_diff * 100.0, -30.0, 30.0);
+    let spread_ref = ref_feat.waveform_high_band - ref_feat.waveform_low_band;
+    let spread_cur = cur_feat.waveform_high_band - cur_feat.waveform_low_band;
+    let spread_diff = spread_ref - spread_cur;
+    if spread_diff.abs() > 0.03 {
+        let contrast_delta = clamp(spread_diff * 90.0, -24.0, 24.0);
         let cur_contrast = get_current("contrast", 0.0);
         let new_contrast = clamp(cur_contrast + contrast_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
@@ -248,14 +320,14 @@ fn map_features_to_adjustments(
             value: new_contrast.round(),
             label: "对比度".to_string(),
             min: -100.0, max: 100.0,
-            reason: format!("参考图对比度{}", if contrast_diff > 0.0 { "更强" } else { "更弱" }),
+            reason: "按波形上下带间距匹配影调对比".to_string(),
         });
     }
 
-    // 3. 高光 (highlights): 保守映射
-    let hl_diff = ref_feat.highlight_ratio - cur_feat.highlight_ratio;
-    if hl_diff.abs() > 0.05 {
-        let hl_delta = clamp(hl_diff * 80.0, -30.0, 30.0);
+    let high_band_diff = ref_feat.waveform_high_band - cur_feat.waveform_high_band;
+    let clip_diff = ref_feat.clipped_highlight_ratio - cur_feat.clipped_highlight_ratio;
+    if high_band_diff.abs() > 0.025 || clip_diff.abs() > 0.01 {
+        let hl_delta = clamp(high_band_diff * 65.0 - clip_diff * 120.0, -28.0, 20.0);
         let cur_hl = get_current("highlights", 0.0);
         let new_hl = clamp(cur_hl + hl_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
@@ -263,14 +335,13 @@ fn map_features_to_adjustments(
             value: new_hl.round(),
             label: "高光".to_string(),
             min: -100.0, max: 100.0,
-            reason: format!("参考图高光区域{}", if hl_diff > 0.0 { "更多" } else { "更少" }),
+            reason: "约束高光上沿，避免波形顶部挤压和过曝".to_string(),
         });
     }
 
-    // 4. 阴影 (shadows): 保守映射
-    let sh_diff = ref_feat.shadow_ratio - cur_feat.shadow_ratio;
-    if sh_diff.abs() > 0.05 {
-        let sh_delta = clamp(-sh_diff * 80.0, -30.0, 30.0);
+    let low_band_diff = ref_feat.waveform_low_band - cur_feat.waveform_low_band;
+    if low_band_diff.abs() > 0.025 {
+        let sh_delta = clamp(low_band_diff * 70.0, -22.0, 22.0);
         let cur_sh = get_current("shadows", 0.0);
         let new_sh = clamp(cur_sh + sh_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
@@ -278,11 +349,39 @@ fn map_features_to_adjustments(
             value: new_sh.round(),
             label: "阴影".to_string(),
             min: -100.0, max: 100.0,
-            reason: format!("参考图暗部{}", if sh_diff > 0.0 { "更深" } else { "更浅" }),
+            reason: "对齐波形低部区间，控制暗部密度".to_string(),
         });
     }
 
-    // 5. 色温 (temperature): 保守映射
+    let p99_diff = ref_feat.p99_luminance - cur_feat.p99_luminance;
+    if p99_diff.abs() > 0.02 || clip_diff.abs() > 0.01 {
+        let whites_delta = clamp(p99_diff * 80.0 - clip_diff * 140.0, -18.0, 14.0);
+        let cur_whites = get_current("whites", 0.0);
+        let new_whites = clamp(cur_whites + whites_delta, -45.0, 45.0);
+        suggestions.push(StyleTransferSuggestion {
+            key: "whites".to_string(),
+            value: new_whites.round(),
+            label: "白色色阶".to_string(),
+            min: -100.0, max: 100.0,
+            reason: "通过 99 分位亮度匹配白场上限".to_string(),
+        });
+    }
+
+    let p10_diff = ref_feat.p10_luminance - cur_feat.p10_luminance;
+    if p10_diff.abs() > 0.02 {
+        let blacks_delta = clamp(p10_diff * 70.0, -15.0, 15.0);
+        let cur_blacks = get_current("blacks", 0.0);
+        let new_blacks = clamp(cur_blacks + blacks_delta, -45.0, 45.0);
+        suggestions.push(StyleTransferSuggestion {
+            key: "blacks".to_string(),
+            value: new_blacks.round(),
+            label: "黑色色阶".to_string(),
+            min: -100.0, max: 100.0,
+            reason: "通过 10 分位亮度匹配黑场下限".to_string(),
+        });
+    }
+
+    // ===== 阶段二：影调收敛后再匹配色彩风格 =====
     let temp_diff = ref_feat.rb_ratio - cur_feat.rb_ratio;
     if temp_diff.abs() > 0.03 {
         let temp_delta = clamp(temp_diff * 30.0, -30.0, 30.0);
@@ -372,27 +471,26 @@ fn map_features_to_adjustments(
         });
     }
 
-    // ===== 总体亮度安全检查 =====
-    // 防止 exposure + highlights + shadows 同方向叠加导致白图/黑图
-    // 基于 delta（变化量）计算综合亮度影响，而非最终绝对值
+    // ===== 亮度安全检查 =====
     let mut brightness_impact: f64 = 0.0;
     for s in &suggestions {
         let cur = get_current(&s.key, 0.0);
         let delta = s.value - cur;
         match s.key.as_str() {
-            "exposure" => brightness_impact += delta * 40.0, // exposure 1.0 EV ≈ 40 亮度单位
+            "exposure" => brightness_impact += delta * 42.0,
             "highlights" => brightness_impact += delta * 0.3,
             "shadows" => brightness_impact += delta * 0.3,
             "contrast" => brightness_impact += delta * 0.1,
+            "whites" => brightness_impact += delta * 0.32,
+            "blacks" => brightness_impact += delta * 0.22,
             _ => {}
         }
     }
-    // 如果综合亮度变化影响超过 60，按比例缩减所有亮度相关参数的 delta
     if brightness_impact.abs() > 60.0 {
         let scale = 60.0 / brightness_impact.abs();
         for s in &mut suggestions {
             match s.key.as_str() {
-                "exposure" | "highlights" | "shadows" | "contrast" => {
+                "exposure" | "highlights" | "shadows" | "contrast" | "whites" | "blacks" => {
                     let cur = get_current(&s.key, 0.0);
                     let delta = s.value - cur;
                     s.value = cur + delta * scale;
@@ -403,6 +501,38 @@ fn map_features_to_adjustments(
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    // ===== 过曝硬保护 =====
+    let predicted_p99 = cur_feat.p99_luminance
+        + suggestions.iter().fold(0.0, |acc, s| {
+            let cur = get_current(&s.key, 0.0);
+            let delta = s.value - cur;
+            acc + match s.key.as_str() {
+                "exposure" => delta * 0.18,
+                "highlights" => delta * 0.0020,
+                "whites" => delta * 0.0023,
+                "contrast" => delta * 0.0010,
+                _ => 0.0,
+            }
+        });
+    let target_p99_cap = if classify_tonal_style(ref_feat) == "高调" {
+        0.985
+    } else {
+        0.965
+    };
+    if predicted_p99 > target_p99_cap {
+        for s in &mut suggestions {
+            if s.key == "exposure" {
+                s.value = (s.value - 0.15).max(-2.5);
+            }
+            if s.key == "highlights" {
+                s.value = (s.value - 8.0).max(-80.0);
+            }
+            if s.key == "whites" {
+                s.value = (s.value - 10.0).max(-80.0);
             }
         }
     }
@@ -466,6 +596,7 @@ pub async fn analyze_style_transfer(
 
 /// 将特征向量格式化为 LLM 可读的文本描述
 fn describe_features(feat: &StyleFeatures, label: &str) -> String {
+    let tonal_style = classify_tonal_style(feat);
     let brightness_desc = if feat.mean_luminance > 0.6 {
         "偏亮"
     } else if feat.mean_luminance < 0.4 {
@@ -501,14 +632,19 @@ fn describe_features(feat: &StyleFeatures, label: &str) -> String {
     };
 
     format!(
-        "【{}】亮度={:.2}（{}），高光占比={:.1}%，阴影占比={:.1}%，对比度={:.3}（{}），\
+        "【{}】风格影调={}；亮度={:.2}（{}），高光占比={:.1}%，阴影占比={:.1}%，对比度={:.3}（{}），\
+         P10/P50/P90/P99={:.2}/{:.2}/{:.2}/{:.2}，波形低/中/高带={:.2}/{:.2}/{:.2}，过曝像素={:.2}%，\
          R/B比={:.3}（{}），饱和度={:.3}（{}），饱和度分布={:.3}，\
          纹理方差={:.1}，暗角差={:.3}（{}）",
         label,
+        tonal_style,
         feat.mean_luminance, brightness_desc,
         feat.highlight_ratio * 100.0,
         feat.shadow_ratio * 100.0,
         feat.contrast_spread, contrast_desc,
+        feat.p10_luminance, feat.p50_luminance, feat.p90_luminance, feat.p99_luminance,
+        feat.waveform_low_band, feat.waveform_mid_band, feat.waveform_high_band,
+        feat.clipped_highlight_ratio * 100.0,
         feat.rb_ratio, temp_desc,
         feat.mean_saturation, sat_desc,
         feat.saturation_spread,
@@ -554,12 +690,12 @@ fn build_style_transfer_prompt(
 ```
 
 ## 你的任务
-1. 理解参考图的整体风格（如：复古胶片、清新日系、电影感、高对比黑白等）
-2. 基于统计数据和算法建议，给出优化后的调整参数
-3. 你可以修正算法建议的值（算法是纯数学映射，可能不够精准），也可以补充算法未覆盖的参数
+1. 先判断参考图与当前图的风格影调类型（高调/低调/中间调），并优先做“影调区间匹配”
+2. 影调匹配顺序必须是：exposure/highlights/shadows/whites/blacks/contrast（先波形和亮度分位，再颜色）
+3. 只有在影调区间接近后，才调整 temperature/tint/saturation/vibrance 等色彩参数
 4. value 是最终绝对值，不是增量
-5. 重要：参数值必须合理，避免极端值。大多数参数应在 ±50 以内，除非参考图风格确实极端
-6. 优先调整色温、饱和度、对比度等对风格影响最大的参数
+5. 重要：绝不允许为了追色而导致过曝。控制 P99 与过曝像素比例，不要让高光大面积贴顶
+6. 参数值必须合理，避免极端值。大多数参数应在 ±50 以内，除非参考图风格确实极端
 7. 如果两张图差异不大，只做微调（±5~15），不要过度调整
 
 ## 参数范围
