@@ -176,6 +176,9 @@ export interface AppSettings {
   llmEndpoint?: string;
   llmApiKey?: string;
   llmModel?: string;
+  styleTransferStrength?: number;
+  styleTransferHighlightGuard?: number;
+  styleTransferSkinProtect?: number;
 }
 
 export interface BrushSettings {

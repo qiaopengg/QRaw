@@ -2,6 +2,28 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::Emitter;
+use crate::style_transfer::{
+    DynamicConstraintClampRecord,
+    DynamicConstraintDebugInfo,
+    build_dynamic_constraint_window_from_image,
+    clamp_value_with_dynamic_window,
+};
+
+const DEFAULT_TEXT_MODEL: &str = "qwen3.5:9b";
+
+fn resolve_text_model(llm_model: Option<String>) -> String {
+    match llm_model {
+        Some(model) => {
+            let trimmed = model.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
+                DEFAULT_TEXT_MODEL.to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        None => DEFAULT_TEXT_MODEL.to_string(),
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChatMessage {
@@ -23,6 +45,10 @@ pub struct AdjustmentSuggestion {
 pub struct ChatAdjustResponse {
     pub understanding: String,
     pub adjustments: Vec<AdjustmentSuggestion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_debug: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraint_debug: Option<Value>,
 }
 
 /// 流式推送的事件载荷
@@ -36,8 +62,9 @@ pub struct StreamChunkPayload {
     pub result: Option<ChatAdjustResponse>,
 }
 
-fn build_system_prompt(current_adjustments: &Value) -> String {
+fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -> String {
     let adj_str = serde_json::to_string_pretty(current_adjustments).unwrap_or_default();
+    let constraint_str = serde_json::to_string_pretty(constraint_window).unwrap_or_default();
 
     format!(
         r#"你是一位专业摄影师助手，帮助用户通过自然语言调整照片参数。
@@ -93,6 +120,11 @@ fn build_system_prompt(current_adjustments: &Value) -> String {
 {adj_str}
 ```
 
+## 当前图像动态约束窗口（必须遵守）
+```json
+{constraint_str}
+```
+
 ## 输出格式（严格 JSON，禁止输出任何其他文字）
 {{
   "understanding": "用一句话描述你对用户意图的理解",
@@ -115,8 +147,10 @@ fn build_system_prompt(current_adjustments: &Value) -> String {
 - 其他参数绝对值不得超过 80（即 -80 ~ 80）
 - 用户说"太亮/太暗/太过了"时，只做小幅调整（exposure ±0.3~0.8，其他参数 ±10~30）
 - 绝对禁止把 exposure 设为 3.0 以上或 -3.0 以下
-- 如果用户的描述模糊，宁可保守调整也不要激进"#,
-        adj_str = adj_str
+- 如果用户的描述模糊，宁可保守调整也不要激进
+- 输出值必须落在动态约束窗口 bands 对应的 hard_min/hard_max 内"#,
+        adj_str = adj_str,
+        constraint_str = constraint_str
     )
 }
 
@@ -187,6 +221,7 @@ pub async fn chat_adjust(
     llm_endpoint: String,
     llm_api_key: Option<String>,
     llm_model: Option<String>,
+    current_image_path: Option<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<ChatAdjustResponse, String> {
     let client = Client::builder()
@@ -194,8 +229,12 @@ pub async fn chat_adjust(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let model = llm_model.unwrap_or_else(|| "qwen3.5:9b".to_string());
-    let system_prompt = build_system_prompt(&current_adjustments);
+    let model = resolve_text_model(llm_model);
+    let constraint_window =
+        build_dynamic_constraint_window_from_image(current_image_path.as_deref(), &current_adjustments);
+    let constraint_window_value = serde_json::to_value(&constraint_window)
+        .map_err(|e| format!("动态约束序列化失败: {}", e))?;
+    let system_prompt = build_system_prompt(&current_adjustments, &constraint_window_value);
 
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
@@ -323,13 +362,32 @@ pub async fn chat_adjust(
     let mut parsed: ChatAdjustResponse = serde_json::from_str(&json_str)
         .map_err(|e| format!("解析 JSON 失败: {}，原始内容: {}", e, &full_content[..full_content.len().min(500)]))?;
 
-    // 安全钳位：防止 LLM 返回极端值导致白图/黑图
+    let mut clamps = Vec::new();
     for adj in &mut parsed.adjustments {
-        match adj.key.as_str() {
-            "exposure" => adj.value = adj.value.max(-2.5).min(2.5),
-            _ => adj.value = adj.value.max(-80.0).min(80.0),
+        let original = adj.value;
+        let (clamped, reason) = clamp_value_with_dynamic_window(&adj.key, adj.value, &constraint_window);
+        adj.value = clamped;
+        if let Some(reason_text) = reason {
+            clamps.push(DynamicConstraintClampRecord {
+                key: adj.key.clone(),
+                label: adj.label.clone(),
+                original,
+                clamped,
+                reason: reason_text,
+            });
+            if adj.reason.is_empty() {
+                adj.reason = "动态约束已调整".to_string();
+            } else {
+                adj.reason = format!("{}；动态约束已调整", adj.reason);
+            }
         }
     }
+    let constraint_debug = DynamicConstraintDebugInfo {
+        window: constraint_window.clone(),
+        clamp_count: clamps.len(),
+        clamps,
+    };
+    parsed.constraint_debug = serde_json::to_value(&constraint_debug).ok();
 
     // 推送完成事件
     let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {

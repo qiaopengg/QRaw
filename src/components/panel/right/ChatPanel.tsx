@@ -20,10 +20,12 @@ import { Invokes } from '../../ui/AppProperties';
 import { Adjustments } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
 
-const DEFAULT_MODEL = 'qwen3.5:9b';
+const DEFAULT_MODEL = 'auto';
 
 const PRESET_MODELS = [
+  { label: 'auto（自动路由）⭐', value: 'auto', desc: '自然语言修图→qwen3.5:9b，风格迁移→qwen2.5vl:7b' },
   { label: 'qwen3.5:9b ⭐', value: 'qwen3.5:9b', desc: '推荐 · 最强中文理解 · 需16GB内存' },
+  { label: 'qwen2.5vl:7b', value: 'qwen2.5vl:7b', desc: '视觉理解 · 适合风格迁移' },
   { label: 'qwen3.5:4b', value: 'qwen3.5:4b', desc: '轻量 · 8GB内存可用' },
   { label: 'qwen3.5:14b', value: 'qwen3.5:14b', desc: '高性能 · 需24GB内存' },
   { label: 'qwen2.5:7b', value: 'qwen2.5:7b', desc: '上一代 · 稳定可靠' },
@@ -43,6 +45,90 @@ interface AdjustmentSuggestion {
 interface ChatAdjustResponse {
   understanding: string;
   adjustments: AdjustmentSuggestion[];
+  style_debug?: StyleDebugInfo;
+  constraint_debug?: ConstraintDebugInfo;
+}
+
+interface StyleErrorBreakdown {
+  tonal: number;
+  color: number;
+  skin: number;
+  highlight_penalty: number;
+  total: number;
+}
+
+interface StyleDebugInfo {
+  before: StyleErrorBreakdown;
+  after: StyleErrorBreakdown;
+  proximity_before: StyleProximityScore;
+  proximity_after: StyleProximityScore;
+  improvement_ratio: number;
+  dominant_error: string;
+  auto_refine_rounds: number;
+  suggested_actions: StyleDebugAction[];
+  blocked_reasons: string[];
+  blocked_items?: StyleConstraintBlockItem[];
+  constraint_debug?: ConstraintDebugInfo;
+}
+
+interface StyleProximityScore {
+  tonal: number;
+  color: number;
+  skin: number;
+  highlight: number;
+  overall: number;
+}
+
+interface StyleDebugAction {
+  key: string;
+  label: string;
+  recommended_delta: number;
+  priority: number;
+  reason: string;
+}
+
+interface StyleConstraintAction {
+  key: string;
+  label: string;
+  delta: number;
+}
+
+interface StyleConstraintBlockItem {
+  category: string;
+  label: string;
+  reason: string;
+  hit_count: number;
+  severity: number;
+  actions: StyleConstraintAction[];
+}
+
+interface ConstraintBand {
+  hard_min: number;
+  hard_max: number;
+  soft_min: number;
+  soft_max: number;
+}
+
+interface ConstraintWindow {
+  source: string;
+  highlight_risk: number;
+  shadow_risk: number;
+  saturation_risk: number;
+  bands: Record<string, ConstraintBand>;
+}
+
+interface ConstraintClampRecord {
+  key: string;
+  label: string;
+  original: number;
+  clamped: number;
+  reason: string;
+}
+
+interface ConstraintDebugInfo {
+  window: ConstraintWindow;
+  clamp_count: number;
+  clamps: ConstraintClampRecord[];
 }
 
 interface ChatMessage {
@@ -52,6 +138,8 @@ interface ChatMessage {
   thinkingContent?: string;
   adjustments?: AdjustmentSuggestion[];
   appliedValues?: Record<string, number>;
+  styleDebug?: StyleDebugInfo;
+  constraintDebug?: ConstraintDebugInfo;
 }
 
 interface StreamChunkPayload {
@@ -71,6 +159,9 @@ interface ChatPanelProps {
   llmEndpoint?: string;
   llmApiKey?: string;
   llmModel?: string;
+  styleTransferStrength?: number;
+  styleTransferHighlightGuard?: number;
+  styleTransferSkinProtect?: number;
   currentImagePath?: string | null;
 }
 
@@ -95,6 +186,12 @@ function getSimpleAdjustments(adj: Adjustments): Record<string, number> {
     sharpness: adj.sharpness,
     vignetteAmount: adj.vignetteAmount,
   };
+}
+
+function clampAdjustmentValue(key: string, value: number): number {
+  if (key === 'exposure') return Math.max(-2.5, Math.min(2.5, Number(value.toFixed(2))));
+  if (key === 'sharpness') return Math.max(0, Math.min(100, Math.round(value)));
+  return Math.max(-80, Math.min(80, Math.round(value)));
 }
 
 // 检测 Ollama 是否在线
@@ -151,6 +248,9 @@ export default function ChatPanel({
   llmEndpoint,
   llmApiKey,
   llmModel,
+  styleTransferStrength,
+  styleTransferHighlightGuard,
+  styleTransferSkinProtect,
   currentImagePath,
 }: ChatPanelProps) {
   const { t } = useTranslation();
@@ -221,6 +321,29 @@ export default function ChatPanel({
     [setAdjustments],
   );
 
+  const applyConstraintActions = useCallback(
+    (msgId: string, actions: StyleConstraintAction[]) => {
+      if (!actions.length) return;
+      const patch: Record<string, number> = {};
+      setAdjustments((prev) => {
+        const next = { ...prev };
+        actions.forEach((action) => {
+          const current = Number(next[action.key as keyof Adjustments] ?? 0);
+          const updated = clampAdjustmentValue(action.key, current + action.delta);
+          (next as Record<string, number>)[action.key] = updated;
+          patch[action.key] = updated;
+        });
+        return next;
+      });
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === msgId ? { ...msg, appliedValues: { ...(msg.appliedValues || {}), ...patch } } : msg,
+        ),
+      );
+    },
+    [setAdjustments],
+  );
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || isLoading) return;
@@ -282,6 +405,8 @@ export default function ChatPanel({
                   content: result.understanding,
                   adjustments: result.adjustments,
                   appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                  styleDebug: result.style_debug,
+                  constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                 }
               : msg,
           ),
@@ -298,6 +423,7 @@ export default function ChatPanel({
         llmEndpoint: endpoint,
         llmApiKey: llmApiKey || null,
         llmModel: activeModel || null,
+        currentImagePath: currentImagePath || null,
       });
     } catch (e) {
       setError(String(e));
@@ -307,7 +433,7 @@ export default function ChatPanel({
       unlisten();
       setIsLoading(false);
     }
-  }, [input, isLoading, messages, adjustments, endpoint, llmApiKey, activeModel, setAdjustments]);
+  }, [input, isLoading, messages, adjustments, endpoint, llmApiKey, activeModel, currentImagePath, setAdjustments]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -391,6 +517,8 @@ export default function ChatPanel({
                     content: result.understanding,
                     adjustments: result.adjustments,
                     appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                    styleDebug: result.style_debug,
+                    constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                   }
                 : msg,
             ),
@@ -408,12 +536,18 @@ export default function ChatPanel({
             llmEndpoint: endpoint,
             llmApiKey: llmApiKey || null,
             llmModel: activeModel || null,
+            styleStrength: styleTransferStrength ?? 1.0,
+            highlightGuardStrength: styleTransferHighlightGuard ?? 1.0,
+            skinProtectStrength: styleTransferSkinProtect ?? 1.0,
           });
         } else {
           const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
             referencePath: refPath,
             currentImagePath: currentImagePath,
             currentAdjustments: simpleAdj,
+            styleStrength: styleTransferStrength ?? 1.0,
+            highlightGuardStrength: styleTransferHighlightGuard ?? 1.0,
+            skinProtectStrength: styleTransferSkinProtect ?? 1.0,
           });
 
           // 纯算法版没有流式，直接更新
@@ -432,6 +566,8 @@ export default function ChatPanel({
                     adjustments: result.adjustments,
                     appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
                     thinkingContent: '',
+                    styleDebug: result.style_debug,
+                    constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                   }
                 : msg,
             ),
@@ -445,7 +581,20 @@ export default function ChatPanel({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, currentImagePath, adjustments, setAdjustments, t, ollamaStatus, endpoint, llmApiKey, activeModel]);
+  }, [
+    isLoading,
+    currentImagePath,
+    adjustments,
+    setAdjustments,
+    t,
+    ollamaStatus,
+    endpoint,
+    llmApiKey,
+    activeModel,
+    styleTransferStrength,
+    styleTransferHighlightGuard,
+    styleTransferSkinProtect,
+  ]);
 
   // 离线引导页
   if (ollamaStatus === 'offline') {
@@ -498,7 +647,10 @@ export default function ChatPanel({
             </div>
             <p className="text-[11px] text-text-secondary ml-7">{t('chat.step2Desc')}</p>
             <div className="ml-7 bg-bg-primary rounded-lg p-2.5 border border-surface">
-              <code className="text-[11px] text-green-400 font-mono">ollama pull {DEFAULT_MODEL}</code>
+              <div className="space-y-1">
+                <code className="block text-[11px] text-green-400 font-mono">ollama pull qwen3.5:9b</code>
+                <code className="block text-[11px] text-green-400 font-mono">ollama pull qwen2.5vl:7b</code>
+              </div>
             </div>
             <p className="text-[10px] text-text-secondary opacity-60 ml-7">{t('chat.step2Note')}</p>
           </div>
@@ -673,6 +825,121 @@ export default function ChatPanel({
               </div>
               {msg.adjustments && msg.adjustments.length > 0 && (
                 <div className="w-full bg-surface/50 rounded-lg p-2 space-y-2 border border-surface">
+                  {msg.styleDebug && (
+                    <div className="rounded border border-surface bg-bg-primary/60 px-2 py-1.5 space-y-1">
+                      <div className="flex items-center justify-between text-[9px] text-text-secondary">
+                        <span>误差分解</span>
+                        <span>
+                          收敛 {(msg.styleDebug.improvement_ratio * 100).toFixed(1)}% · 当前短板{' '}
+                          {msg.styleDebug.dominant_error}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-text-secondary/70">
+                        自动二次微调 {msg.styleDebug.auto_refine_rounds} 轮
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-secondary/80">
+                        <span>
+                          接近度总分 {msg.styleDebug.proximity_before.overall.toFixed(1)} →{' '}
+                          {msg.styleDebug.proximity_after.overall.toFixed(1)}
+                        </span>
+                        <span>
+                          影调 {msg.styleDebug.proximity_before.tonal.toFixed(1)} →{' '}
+                          {msg.styleDebug.proximity_after.tonal.toFixed(1)}
+                        </span>
+                        <span>
+                          色彩 {msg.styleDebug.proximity_before.color.toFixed(1)} →{' '}
+                          {msg.styleDebug.proximity_after.color.toFixed(1)}
+                        </span>
+                        <span>
+                          肤色 {msg.styleDebug.proximity_before.skin.toFixed(1)} →{' '}
+                          {msg.styleDebug.proximity_after.skin.toFixed(1)}
+                        </span>
+                        <span>
+                          高光安全 {msg.styleDebug.proximity_before.highlight.toFixed(1)} →{' '}
+                          {msg.styleDebug.proximity_after.highlight.toFixed(1)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-secondary/80">
+                        <span>
+                          影调 {msg.styleDebug.before.tonal.toFixed(2)} → {msg.styleDebug.after.tonal.toFixed(2)}
+                        </span>
+                        <span>
+                          色彩 {msg.styleDebug.before.color.toFixed(2)} → {msg.styleDebug.after.color.toFixed(2)}
+                        </span>
+                        <span>
+                          肤色 {msg.styleDebug.before.skin.toFixed(2)} → {msg.styleDebug.after.skin.toFixed(2)}
+                        </span>
+                        <span>
+                          过曝 {msg.styleDebug.before.highlight_penalty.toFixed(2)} →{' '}
+                          {msg.styleDebug.after.highlight_penalty.toFixed(2)}
+                        </span>
+                      </div>
+                      {msg.styleDebug.suggested_actions.length > 0 && (
+                        <div className="space-y-0.5">
+                          {msg.styleDebug.suggested_actions.map((action) => (
+                            <div key={action.key} className="text-[9px] text-text-secondary/75">
+                              {action.label} {action.recommended_delta >= 0 ? '+' : ''}
+                              {action.recommended_delta.toFixed(action.key === 'exposure' ? 2 : 1)} · {action.reason}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(msg.styleDebug.blocked_items ?? []).length > 0 && (
+                        <div className="space-y-1">
+                          {(msg.styleDebug.blocked_items ?? []).map((item) => (
+                            <div
+                              key={`${item.category}-${item.reason}`}
+                              className="rounded border border-amber-400/20 px-1.5 py-1"
+                            >
+                              <div className="flex items-center justify-between text-[9px]">
+                                <span className="text-amber-300/90">
+                                  {item.label} · 命中 {item.hit_count} 次 · 强度 {item.severity.toFixed(2)}
+                                </span>
+                                <button
+                                  onClick={() => applyConstraintActions(msg.id, item.actions)}
+                                  className="text-blue-300 hover:text-blue-200 transition-colors"
+                                >
+                                  一键微调
+                                </button>
+                              </div>
+                              <div className="text-[9px] text-amber-300/80">受限原因：{item.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(msg.styleDebug.blocked_items ?? []).length === 0 &&
+                        msg.styleDebug.blocked_reasons.length > 0 && (
+                          <div className="space-y-0.5">
+                            {msg.styleDebug.blocked_reasons.map((reason, idx) => (
+                              <div key={`${reason}-${idx}`} className="text-[9px] text-amber-300/80">
+                                受限原因：{reason}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                    </div>
+                  )}
+                  {msg.constraintDebug && (
+                    <div className="rounded border border-surface bg-bg-primary/60 px-2 py-1.5 space-y-1">
+                      <div className="flex items-center justify-between text-[9px] text-text-secondary">
+                        <span>动态约束</span>
+                        <span>
+                          来源 {msg.constraintDebug.window.source} · 命中 {msg.constraintDebug.clamp_count} 项
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-[9px] text-text-secondary/80">
+                        <span>高光风险 {msg.constraintDebug.window.highlight_risk.toFixed(2)}</span>
+                        <span>阴影风险 {msg.constraintDebug.window.shadow_risk.toFixed(2)}</span>
+                        <span>饱和风险 {msg.constraintDebug.window.saturation_risk.toFixed(2)}</span>
+                      </div>
+                      {msg.constraintDebug.clamps.slice(0, 3).map((clamp) => (
+                        <div key={`${clamp.key}-${clamp.original}`} className="text-[9px] text-text-secondary/75">
+                          {clamp.label} {clamp.original.toFixed(clamp.key === 'exposure' ? 2 : 1)} →{' '}
+                          {clamp.clamped.toFixed(clamp.key === 'exposure' ? 2 : 1)} · {clamp.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-text-secondary">{t('chat.suggestions')}</span>
                     <button

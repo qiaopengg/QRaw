@@ -321,7 +321,16 @@ export default function SettingsPanel({
   const [aiConnectorAddress, setAiConnectorAddress] = useState<string>(appSettings?.aiConnectorAddress || '');
   const [llmEndpoint, setLlmEndpoint] = useState<string>(appSettings?.llmEndpoint || 'http://localhost:11434');
   const [llmApiKey, setLlmApiKey] = useState<string>(appSettings?.llmApiKey || '');
-  const [llmModel, setLlmModel] = useState<string>(appSettings?.llmModel || 'qwen3.5:9b');
+  const [llmModel, setLlmModel] = useState<string>(appSettings?.llmModel || 'auto');
+  const [styleTransferStrength, setStyleTransferStrength] = useState<string>(
+    (appSettings?.styleTransferStrength ?? 1.0).toString(),
+  );
+  const [styleTransferHighlightGuard, setStyleTransferHighlightGuard] = useState<string>(
+    (appSettings?.styleTransferHighlightGuard ?? 1.0).toString(),
+  );
+  const [styleTransferSkinProtect, setStyleTransferSkinProtect] = useState<string>(
+    (appSettings?.styleTransferSkinProtect ?? 1.0).toString(),
+  );
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
@@ -1600,6 +1609,64 @@ export default function SettingsPanel({
                         type="password"
                       />
                     </SettingItem>
+                    <SettingItem label="风格迁移强度" description="0.5~2.0，越高越接近参考风格">
+                      <Input
+                        value={styleTransferStrength}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStyleTransferStrength(e.target.value)}
+                        onBlur={() => {
+                          const parsed = Number.parseFloat(styleTransferStrength);
+                          const clamped = Number.isFinite(parsed) ? Math.max(0.5, Math.min(2.0, parsed)) : 1.0;
+                          setStyleTransferStrength(clamped.toFixed(2).replace(/\.00$/, ''));
+                          onSettingsChange({
+                            ...appSettings,
+                            styleTransferStrength: clamped,
+                          });
+                        }}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder="1.0"
+                        type="text"
+                      />
+                    </SettingItem>
+                    <SettingItem label="高光保护强度" description="0.5~2.0，越高越不容易过曝">
+                      <Input
+                        value={styleTransferHighlightGuard}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setStyleTransferHighlightGuard(e.target.value)
+                        }
+                        onBlur={() => {
+                          const parsed = Number.parseFloat(styleTransferHighlightGuard);
+                          const clamped = Number.isFinite(parsed) ? Math.max(0.5, Math.min(2.0, parsed)) : 1.0;
+                          setStyleTransferHighlightGuard(clamped.toFixed(2).replace(/\.00$/, ''));
+                          onSettingsChange({
+                            ...appSettings,
+                            styleTransferHighlightGuard: clamped,
+                          });
+                        }}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder="1.0"
+                        type="text"
+                      />
+                    </SettingItem>
+                    <SettingItem label="肤色保护强度" description="0.5~2.0，越高越保护人像肤色">
+                      <Input
+                        value={styleTransferSkinProtect}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setStyleTransferSkinProtect(e.target.value)
+                        }
+                        onBlur={() => {
+                          const parsed = Number.parseFloat(styleTransferSkinProtect);
+                          const clamped = Number.isFinite(parsed) ? Math.max(0.5, Math.min(2.0, parsed)) : 1.0;
+                          setStyleTransferSkinProtect(clamped.toFixed(2).replace(/\.00$/, ''));
+                          onSettingsChange({
+                            ...appSettings,
+                            styleTransferSkinProtect: clamped,
+                          });
+                        }}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.stopPropagation()}
+                        placeholder="1.0"
+                        type="text"
+                      />
+                    </SettingItem>
                   </div>
                 </div>
 
@@ -1614,8 +1681,8 @@ export default function SettingsPanel({
                       description={
                         <Text as="span" variant={TextVariants.small}>
                           This will delete all{' '}
-                          <code className="bg-bg-primary px-1 rounded text-text-primary">.qcr</code> files
-                          (containing your edits) within the current base folder:
+                          <code className="bg-bg-primary px-1 rounded text-text-primary">.qcr</code> files (containing
+                          your edits) within the current base folder:
                           <span className="block font-mono bg-bg-primary p-2 rounded mt-2 break-all border border-border-color">
                             {effectiveRootPath || t('settings.noFolderSelected')}
                           </span>

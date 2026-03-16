@@ -4956,6 +4956,9 @@ function App() {
                             llmEndpoint={appSettings?.llmEndpoint}
                             llmApiKey={appSettings?.llmApiKey}
                             llmModel={appSettings?.llmModel}
+                            styleTransferStrength={appSettings?.styleTransferStrength}
+                            styleTransferHighlightGuard={appSettings?.styleTransferHighlightGuard}
+                            styleTransferSkinProtect={appSettings?.styleTransferSkinProtect}
                             currentImagePath={selectedImage?.path ?? null}
                           />
                         )}
