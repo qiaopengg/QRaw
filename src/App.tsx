@@ -3,6 +3,7 @@ import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { platform } from '@tauri-apps/plugin-os';
 import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import debounce from 'lodash.debounce';
@@ -228,6 +229,7 @@ function App() {
   const { t } = useTranslation();
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [activeView, setActiveView] = useState('library');
+  const [osPlatform, setOsPlatform] = useState('');
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [isInstantTransition, setIsInstantTransition] = useState(false);
   const [isLayoutReady, setIsLayoutReady] = useState(false);
@@ -249,6 +251,13 @@ function App() {
   useEffect(() => {
     selectedImagePathRef.current = selectedImage?.path ?? null;
   }, [selectedImage?.path]);
+  useEffect(() => {
+    try {
+      setOsPlatform(platform());
+    } catch (e) {
+      console.error('Failed to get platform:', e);
+    }
+  }, []);
   const [multiSelectedPaths, setMultiSelectedPaths] = useState<Array<string>>([]);
   const [libraryActivePath, setLibraryActivePath] = useState<string | null>(null);
   const [libraryActiveAdjustments, setLibraryActiveAdjustments] = useState<Adjustments>(INITIAL_ADJUSTMENTS);
@@ -2726,6 +2735,7 @@ function App() {
     isModalOpen: isAnyModalOpen,
     activeAiPatchContainerId,
     activeAiSubMaskId,
+    osPlatform,
     activeMaskContainerId,
     activeMaskId,
     activeRightPanel,
@@ -3212,7 +3222,12 @@ function App() {
 
   const handleOpenFolder = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false, defaultPath: await homeDir() });
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: await homeDir(),
+        title: t('library.openFolder'),
+      });
       if (typeof selected === 'string') {
         setRootPath(selected);
         await handleSelectSubfolder(selected, true);
