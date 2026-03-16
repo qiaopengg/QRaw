@@ -496,7 +496,7 @@ pub fn clear_ai_tags(root_path: String) -> Result<usize, String> {
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rrdata") {
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("qcr") {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content) {
                     if let Some(tags) = &mut metadata.tags {
@@ -535,7 +535,7 @@ pub fn clear_all_tags(root_path: String) -> Result<usize, String> {
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rrdata") {
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("qcr") {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content) {
                     if let Some(tags) = &mut metadata.tags {

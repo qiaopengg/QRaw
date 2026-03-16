@@ -2535,12 +2535,21 @@ function App() {
       dragIdleTimer.current = setTimeout(() => {
         currentResRef.current = targetRes;
         applyAdjustments(adjustments, false, targetRes);
-        debouncedSave(selectedImage.path, adjustments);
+        const prev = prevAdjustmentsRef.current;
+        const isSameImage = prev?.path === selectedImage.path;
+        const hasChanges =
+          isSameImage &&
+          (Object.keys(adjustments) as Array<keyof Adjustments>).some(
+            (key) => JSON.stringify(adjustments[key]) !== JSON.stringify(prev.adjustments[key]),
+          );
+
+        if (hasChanges) {
+          debouncedSave(selectedImage.path, adjustments);
+        }
 
         const otherPaths = multiSelectedPaths.filter((p) => p !== selectedImage.path);
         if (otherPaths.length > 0) {
-          const prev = prevAdjustmentsRef.current;
-          if (prev && prev.path === selectedImage.path) {
+          if (isSameImage && prev) {
             const delta: Partial<Adjustments> = {};
             for (const key of Object.keys(adjustments) as Array<keyof Adjustments>) {
               if (JSON.stringify(adjustments[key]) !== JSON.stringify(prev.adjustments[key])) {

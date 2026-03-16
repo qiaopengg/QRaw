@@ -59,7 +59,7 @@ Inherited from RapidRAW — see the [upstream README](https://github.com/CyberTi
 - **GPU-Accelerated:** Full 32-bit image processing pipeline written in WGSL.
 - **Masking:** Layer-based masking with AI subject, sky and foreground detection.
 - **Full RAW Support:** Wide range of RAW camera formats via rawler.
-- **Non-Destructive Workflow:** All edits stored in `.rrdata` sidecar files.
+- **Non-Destructive Workflow:** All edits stored in `.qcr` sidecar files.
 - **Lens Correction:** Automatic distortion, TCA, and vignette correction via Lensfun.
 - **Professional Adjustments:** Tone mapping (AgX), curves, color grading, HSL, noise reduction, and more.
 

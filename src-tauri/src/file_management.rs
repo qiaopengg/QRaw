@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -498,7 +498,7 @@ pub fn parse_virtual_path(virtual_path: &str) -> (PathBuf, PathBuf) {
 
     let sidecar_filename = if let Some(id) = copy_id {
         format!(
-            "{}.{}.rrdata",
+            "{}.{}.qcr",
             source_path
                 .file_name()
                 .unwrap_or_default()
@@ -507,7 +507,7 @@ pub fn parse_virtual_path(virtual_path: &str) -> (PathBuf, PathBuf) {
         )
     } else {
         format!(
-            "{}.rrdata",
+            "{}.qcr",
             source_path
                 .file_name()
                 .unwrap_or_default()
@@ -551,8 +551,8 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
     let mut image_files = HashMap::new();
     let mut sidecars_by_source = HashMap::new();
 
-    let sidecar_re = Regex::new(r"^(.*)\.([a-f0-9]{6})\.rrdata$").unwrap();
-    let original_sidecar_re = Regex::new(r"^(.*)\.rrdata$").unwrap();
+    let sidecar_re = Regex::new(r"^(.*)\.([a-f0-9]{6})\.qcr$").unwrap();
+    let original_sidecar_re = Regex::new(r"^(.*)\.qcr$").unwrap();
 
     for entry in entries.filter_map(Result::ok) {
         let entry_path = entry.path();
@@ -561,7 +561,7 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
         if is_supported_image_file(&entry_path.to_string_lossy().as_ref()) {
             let path_str = entry_path.to_string_lossy().into_owned();
             image_files.insert(path_str, entry_path.clone());
-        } else if file_name.ends_with(".rrdata") {
+        } else if file_name.ends_with(".qcr") {
             if let Some(caps) = sidecar_re.captures(&file_name) {
                 let source_filename = caps.get(1).map_or("", |m| m.as_str());
                 let copy_id = caps.get(2).map_or("", |m| m.as_str());
@@ -659,8 +659,8 @@ pub fn list_images_recursive(
     let mut image_files = HashMap::new();
     let mut sidecars_by_source = HashMap::new();
 
-    let sidecar_re = Regex::new(r"^(.*)\.([a-f0-9]{6})\.rrdata$").unwrap();
-    let original_sidecar_re = Regex::new(r"^(.*)\.rrdata$").unwrap();
+    let sidecar_re = Regex::new(r"^(.*)\.([a-f0-9]{6})\.qcr$").unwrap();
+    let original_sidecar_re = Regex::new(r"^(.*)\.qcr$").unwrap();
 
     for entry in WalkDir::new(root_path).into_iter().filter_map(Result::ok) {
         let entry_path = entry.path();
@@ -673,7 +673,7 @@ pub fn list_images_recursive(
         if is_supported_image_file(&entry_path.to_string_lossy().as_ref()) {
             let path_str = entry_path.to_string_lossy().into_owned();
             image_files.insert(path_str, entry_path.to_path_buf());
-        } else if file_name.ends_with(".rrdata") {
+        } else if file_name.ends_with(".qcr") {
             if let Some(caps) = sidecar_re.captures(&file_name) {
                 let source_filename = caps.get(1).map_or("", |m| m.as_str());
                 let copy_id = caps.get(2).map_or("", |m| m.as_str());
@@ -1473,7 +1473,7 @@ fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, S
         .ok_or("Could not get source filename")?
         .to_string_lossy();
 
-    let primary_sidecar_name = format!("{}.rrdata", source_filename);
+    let primary_sidecar_name = format!("{}.qcr", source_filename);
     let virtual_copy_prefix = format!("{}.", source_filename);
 
     if let Ok(entries) = fs::read_dir(parent_dir) {
@@ -1488,7 +1488,7 @@ fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, S
 
             if entry_filename == primary_sidecar_name
                 || (entry_filename.starts_with(&virtual_copy_prefix)
-                    && entry_filename.ends_with(".rrdata"))
+                    && entry_filename.ends_with(".qcr"))
             {
                 associated_files.push(entry_path);
             }
@@ -1651,7 +1651,13 @@ pub fn save_metadata_and_update_thumbnail(
     metadata.adjustments = adjustments;
 
     let json_string = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
-    std::fs::write(&sidecar_path, json_string).map_err(|e| e.to_string())?;
+    std::fs::write(&sidecar_path, json_string).map_err(|e| match e.kind() {
+        ErrorKind::PermissionDenied => format!(
+            "无法写入编辑数据文件: {}（权限不足，可能是文件夹只读或未授权）",
+            sidecar_path.display()
+        ),
+        _ => format!("写入编辑数据文件失败: {} ({})", sidecar_path.display(), e),
+    })?;
 
     if let Ok(settings) = load_settings(app_handle.clone()) {
         if settings.enable_xmp_sync.unwrap_or(false) {
@@ -2206,7 +2212,13 @@ pub fn load_settings(app_handle: AppHandle) -> Result<AppSettings, String> {
 pub fn save_settings(settings: AppSettings, app_handle: AppHandle) -> Result<(), String> {
     let path = get_settings_path(&app_handle)?;
     let json_string = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(path, json_string).map_err(|e| e.to_string())
+    fs::write(&path, json_string).map_err(|e| match e.kind() {
+        ErrorKind::PermissionDenied => format!(
+            "无法写入设置文件: {}（权限不足，请检查应用目录权限）",
+            path.display()
+        ),
+        _ => format!("写入设置文件失败: {} ({})", path.display(), e),
+    })
 }
 
 #[tauri::command]
@@ -2394,7 +2406,7 @@ pub fn clear_all_sidecars(root_path: String) -> Result<usize, String> {
         let path = entry.path();
         if path.is_file() {
             if let Some(extension) = path.extension() {
-                if extension == "rrdata" {
+                if extension == "qcr" {
                     if fs::remove_file(path).is_ok() {
                         deleted_count += 1;
                     } else {
@@ -2558,7 +2570,7 @@ pub fn delete_files_with_associated(paths: Vec<String>) -> Result<(), String> {
                 if let Some(base_stem) = entry_filename_str.split('.').next() {
                     if stems_to_delete.contains(base_stem) {
                         if is_supported_image_file(&entry_filename_str.as_ref())
-                            || entry_filename_str.ends_with(".rrdata")
+                            || entry_filename_str.ends_with(".qcr")
                         {
                             files_to_trash.insert(entry_path);
                         }
@@ -2859,14 +2871,14 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
                 let entry_filename = entry_os_filename.to_string_lossy();
 
                 if entry_filename.starts_with(&format!("{}.", original_filename_str))
-                    && entry_filename.ends_with(".rrdata")
+                    && entry_filename.ends_with(".qcr")
                 {
                     let new_sidecar_filename =
                         entry_filename.replacen(&*original_filename_str, &*new_filename_str, 1);
                     let new_sidecar_path = parent.join(new_sidecar_filename);
                     sidecar_operations.insert(entry_path, new_sidecar_path);
-                } else if entry_filename == format!("{}.rrdata", original_filename_str) {
-                    let new_sidecar_path = new_path.with_extension("rrdata");
+                } else if entry_filename == format!("{}.qcr", original_filename_str) {
+                    let new_sidecar_path = new_path.with_extension("qcr");
                     sidecar_operations.insert(entry_path, new_sidecar_path);
                 }
             }

@@ -1614,7 +1614,7 @@ export default function SettingsPanel({
                       description={
                         <Text as="span" variant={TextVariants.small}>
                           This will delete all{' '}
-                          <code className="bg-bg-primary px-1 rounded text-text-primary">.rrdata</code> files
+                          <code className="bg-bg-primary px-1 rounded text-text-primary">.qcr</code> files
                           (containing your edits) within the current base folder:
                           <span className="block font-mono bg-bg-primary p-2 rounded mt-2 break-all border border-border-color">
                             {effectiveRootPath || t('settings.noFolderSelected')}
