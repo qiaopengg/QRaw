@@ -278,6 +278,12 @@ struct PreviewJob {
     responder: tokio::sync::oneshot::Sender<Vec<u8>>,
 }
 
+struct AnalyticsJob {
+    path: String,
+    image: Arc<DynamicImage>,
+    compute_waveform: bool,
+    active_waveform_channel: Option<String>,
+}
 pub struct AppState {
     window_setup_complete: AtomicBool,
     original_image: Mutex<Option<LoadedImage>>,
@@ -296,6 +302,7 @@ pub struct AppState {
     initial_file_path: Mutex<Option<String>>,
     thumbnail_cancellation_token: Arc<AtomicBool>,
     preview_worker_tx: Mutex<Option<Sender<PreviewJob>>>,
+    analytics_worker_tx: Mutex<Option<Sender<AnalyticsJob>>>,
     pub mask_cache: Mutex<HashMap<u64, GrayImage>>,
     pub patch_cache: Mutex<HashMap<String, serde_json::Value>>,
     pub geometry_cache: Mutex<HashMap<u64, DynamicImage>>,
@@ -1122,17 +1129,15 @@ fn process_preview_job(
 
     if let Ok(final_processed_image) = final_processed_image_result {
         if !(is_interactive && pixel_roi.is_some()) {
-            if let Ok(histogram_data) =
-                image_processing::calculate_histogram_from_image(&final_processed_image)
-            {
-                let _ = app_handle.emit("histogram-update", histogram_data);
-            }
-        }
-        if !is_interactive {
-            if let Ok(waveform_data) =
-                image_processing::calculate_waveform_from_image(&final_processed_image, None)
-            {
-                let _ = app_handle.emit("waveform-update", waveform_data);
+            let analytics_job = AnalyticsJob {
+                path: loaded_image.path.clone(),
+                image: Arc::new(final_processed_image.clone()),
+                compute_waveform: !is_interactive,
+                active_waveform_channel: None,
+            };
+
+            if let Some(tx) = state.analytics_worker_tx.lock().unwrap().as_ref() {
+                let _ = tx.send(analytics_job);
             }
         }
         if is_interactive && pixel_roi.is_some() {
@@ -1200,6 +1205,39 @@ fn process_preview_job(
     Err("Processing failed".to_string())
 }
 
+fn start_analytics_worker(app_handle: tauri::AppHandle) {
+    let state = app_handle.state::<AppState>();
+    let (tx, rx): (Sender<AnalyticsJob>, Receiver<AnalyticsJob>) = mpsc::channel();
+    *state.analytics_worker_tx.lock().unwrap() = Some(tx);
+
+    std::thread::spawn(move || {
+        while let Ok(mut job) = rx.recv() {
+            while let Ok(latest) = rx.try_recv() {
+                job = latest;
+            }
+
+            if let Ok(histogram_data) = image_processing::calculate_histogram_from_image(&job.image)
+            {
+                let _ = app_handle.emit(
+                    "histogram-update",
+                    serde_json::json!({ "path": job.path, "data": histogram_data }),
+                );
+            }
+
+            if job.compute_waveform {
+                if let Ok(waveform_data) = image_processing::calculate_waveform_from_image(
+                    &job.image,
+                    job.active_waveform_channel.as_deref(),
+                ) {
+                    let _ = app_handle.emit(
+                        "waveform-update",
+                        serde_json::json!({ "path": job.path, "data": waveform_data }),
+                    );
+                }
+            }
+        }
+    });
+}
 fn start_preview_worker(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<AppState>();
     let (tx, rx): (Sender<PreviewJob>, Receiver<PreviewJob>) = mpsc::channel();
@@ -3951,6 +3989,7 @@ fn main() {
             }
 
             start_preview_worker(app_handle.clone());
+            start_analytics_worker(app_handle.clone());
 
             let window_cfg = app.config().app.windows.get(0).unwrap().clone();
             let transparent = settings.transparent.unwrap_or(window_cfg.transparent);
@@ -4107,6 +4146,7 @@ fn main() {
             initial_file_path: Mutex::new(None),
             thumbnail_cancellation_token: Arc::new(AtomicBool::new(false)),
             preview_worker_tx: Mutex::new(None),
+            analytics_worker_tx: Mutex::new(None),
             mask_cache: Mutex::new(HashMap::new()),
             patch_cache: Mutex::new(HashMap::new()),
             geometry_cache: Mutex::new(HashMap::new()),

@@ -8,6 +8,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import debounce from 'lodash.debounce';
 import { ClerkProvider } from '@clerk/clerk-react';
+import { ImageLRUCache, ImageCacheEntry } from './utils/ImageLRUCache';
 import { ToastContainer, toast, Slide } from 'react-toastify';
 import clsx from 'clsx';
 import {
@@ -304,50 +305,22 @@ function App() {
   const [activeAiSubMaskId, setActiveAiSubMaskId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [displaySize, setDisplaySize] = useState<ImageDimensions>({ width: 0, height: 0 });
-  const [_previewSize, setPreviewSize] = useState<ImageDimensions>({ width: 0, height: 0 });
+  const [previewSize, setPreviewSize] = useState<ImageDimensions>({ width: 0, height: 0 });
   const [baseRenderSize, setBaseRenderSize] = useState<ImageDimensions>({ width: 0, height: 0 });
   const baseRenderSizeRef = useRef<
     (ImageDimensions & { offsetX?: number; offsetY?: number; containerWidth?: number; containerHeight?: number }) | null
   >(null);
   const [originalSize, setOriginalSize] = useState<ImageDimensions>({ width: 0, height: 0 });
-  const [isLoadingFullRes, _setIsLoadingFullRes] = useState(false);
+  const [_isLoadingFullRes, _setIsLoadingFullRes] = useState(false);
   const [isRotationActive, setIsRotationActive] = useState(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('thirds');
   const [overlayRotation, setOverlayRotation] = useState(0);
   const [transformedOriginalUrl, setTransformedOriginalUrl] = useState<string | null>(null);
   const patchesSentToBackend = useRef<Set<string>>(new Set());
-
-  const handleDisplaySizeChange = useCallback(
-    (
-      size: ImageDimensions & {
-        scale?: number;
-        offsetX?: number;
-        offsetY?: number;
-        containerWidth?: number;
-        containerHeight?: number;
-      },
-    ) => {
-      setDisplaySize({ width: size.width, height: size.height });
-
-      if (size.scale) {
-        const baseWidth = size.width / size.scale;
-        const baseHeight = size.height / size.scale;
-        const newSize = {
-          width: baseWidth,
-          height: baseHeight,
-          offsetX: size.offsetX || 0,
-          offsetY: size.offsetY || 0,
-          containerWidth: size.containerWidth || 0,
-          containerHeight: size.containerHeight || 0,
-        };
-        baseRenderSizeRef.current = newSize;
-        setBaseRenderSize(newSize as ImageDimensions);
-      }
-    },
-    [],
-  );
-
   const [_initialFitScale, setInitialFitScale] = useState<number | null>(null);
+  const imageCacheRef = useRef(new ImageLRUCache(20));
+  const isBackendReadyRef = useRef(true);
+  const cachedEditStateRef = useRef<ImageCacheEntry | null>(null);
   const [renderedRightPanel, setRenderedRightPanel] = useState<Panel | null>(activeRightPanel);
   const [collapsibleSectionsState, setCollapsibleSectionsState] = useState<CollapsibleSectionsState>({
     basic: true,
@@ -1246,6 +1219,62 @@ function App() {
     return list;
   }, [imageList, sortCriteria, imageRatings, filterCriteria, supportedTypes, searchCriteria, appSettings]);
 
+  useEffect(() => {
+    if (selectedImage?.path && selectedImage.isReady && finalPreviewUrl) {
+      cachedEditStateRef.current = {
+        adjustments,
+        histogram,
+        waveform,
+        finalPreviewUrl,
+        uncroppedPreviewUrl: uncroppedAdjustedPreviewUrl,
+        selectedImage,
+        originalSize,
+        previewSize,
+      };
+    } else {
+      cachedEditStateRef.current = null;
+    }
+  }, [
+    selectedImage,
+    adjustments,
+    histogram,
+    waveform,
+    finalPreviewUrl,
+    uncroppedAdjustedPreviewUrl,
+    originalSize,
+    previewSize,
+  ]);
+
+  const handleDisplaySizeChange = useCallback(
+    (
+      size: ImageDimensions & {
+        scale?: number;
+        offsetX?: number;
+        offsetY?: number;
+        containerWidth?: number;
+        containerHeight?: number;
+      },
+    ) => {
+      setDisplaySize({ width: size.width, height: size.height });
+
+      if (size.scale) {
+        const baseWidth = size.width / size.scale;
+        const baseHeight = size.height / size.scale;
+        const newSize = {
+          width: baseWidth,
+          height: baseHeight,
+          offsetX: size.offsetX || 0,
+          offsetY: size.offsetY || 0,
+          containerWidth: size.containerWidth || 0,
+          containerHeight: size.containerHeight || 0,
+        };
+        baseRenderSizeRef.current = newSize;
+        setBaseRenderSize({ width: baseWidth, height: baseHeight });
+      }
+    },
+    [],
+  );
+
   const calculateROI = useCallback(() => {
     if (!transformWrapperRef.current) return null;
     const state = transformWrapperRef.current.instance.transformState;
@@ -1301,6 +1330,7 @@ function App() {
   const applyAdjustments = useCallback(
     async (currentAdjustments: Adjustments, dragging: boolean = false, targetRes?: number) => {
       if (!selectedImage?.isReady) return;
+      if (!isBackendReadyRef.current) return;
       const currentPath = selectedImage.path;
 
       const payload = JSON.parse(JSON.stringify(currentAdjustments));
@@ -1357,9 +1387,25 @@ function App() {
           const blob = new Blob([buffer], { type: 'image/jpeg' });
           const url = URL.createObjectURL(blob);
 
+          if (!dragging) {
+            try {
+              const img = new Image();
+              img.src = url;
+              await img.decode();
+            } catch {
+              void 0;
+            }
+            if (currentPath !== selectedImagePathRef.current || jobId < latestRenderedJobIdRef.current) {
+              URL.revokeObjectURL(url);
+              return;
+            }
+          }
+
           setFinalPreviewUrl((prevUrl) => {
             if (prevUrl && prevUrl.startsWith('blob:')) {
-              setTimeout(() => URL.revokeObjectURL(prevUrl), 200);
+              if (!imageCacheRef.current.isProtected(prevUrl)) {
+                setTimeout(() => URL.revokeObjectURL(prevUrl), 250);
+              }
             }
             return url;
           });
@@ -1386,7 +1432,7 @@ function App() {
   );
 
   useEffect(() => {
-    if (activeRightPanel === Panel.Crop && selectedImage?.isReady) {
+    if (activeRightPanel === Panel.Crop && selectedImage?.isReady && isBackendReadyRef.current) {
       generateUncroppedPreview(adjustments);
     }
   }, [adjustments, activeRightPanel, selectedImage?.isReady, generateUncroppedPreview]);
@@ -1774,6 +1820,7 @@ function App() {
       setSearchCriteria({ tags: [], text: '', mode: 'OR' });
       setLibraryScrollTop(0);
       setThumbnails({});
+      imageCacheRef.current.clear();
       try {
         setCurrentFolderPath(path);
         setActiveView('library');
@@ -1996,6 +2043,13 @@ function App() {
   }, []);
 
   const handleBackToLibrary = useCallback(() => {
+    if (selectedImage?.path && cachedEditStateRef.current) {
+      imageCacheRef.current.set(selectedImage.path, cachedEditStateRef.current);
+    }
+    if (transformWrapperRef.current) {
+      transformWrapperRef.current.resetTransform(0);
+    }
+    setZoom(1);
     const lastActivePath = selectedImage?.path ?? null;
     setSelectedImage(null);
     setFinalPreviewUrl(null);
@@ -2012,15 +2066,95 @@ function App() {
     setSlideDirection(1);
     setLiveAdjustments(INITIAL_ADJUSTMENTS);
     resetAdjustmentsHistory(INITIAL_ADJUSTMENTS);
-  }, [selectedImage?.path]);
+    isBackendReadyRef.current = true;
+  }, [selectedImage?.path, resetAdjustmentsHistory]);
 
   const handleImageSelect = useCallback(
     (path: string) => {
-      if (selectedImage?.path === path) {
+      if (selectedImage?.path === path) return;
+
+      debouncedSave.cancel();
+
+      if (selectedImage?.path && cachedEditStateRef.current) {
+        imageCacheRef.current.set(selectedImage.path, cachedEditStateRef.current);
+      }
+
+      patchesSentToBackend.current.clear();
+
+      setMultiSelectedPaths([path]);
+      setLibraryActivePath(null);
+      setError(null);
+      setShowOriginal(false);
+      setActiveMaskId(null);
+      setActiveMaskContainerId(null);
+      setActiveAiPatchContainerId(null);
+      setActiveAiSubMaskId(null);
+      setIsWbPickerActive(false);
+      setTransformedOriginalUrl(null);
+      setIsLibraryExportPanelVisible(false);
+
+      const cached = imageCacheRef.current.get(path);
+
+      if (cached?.finalPreviewUrl && cached.selectedImage?.isReady) {
+        setSelectedImage({
+          ...cached.selectedImage,
+          thumbnailUrl: thumbnails[path] || cached.selectedImage.thumbnailUrl,
+        });
+        setOriginalSize(cached.originalSize);
+        setPreviewSize(cached.previewSize);
+
+        setLiveAdjustments(cached.adjustments);
+        resetAdjustmentsHistory(cached.adjustments);
+        prevAdjustmentsRef.current = { path, adjustments: cached.adjustments };
+
+        setHistogram(cached.histogram);
+        setWaveform(cached.waveform);
+        setFinalPreviewUrl(cached.finalPreviewUrl);
+        setUncroppedAdjustedPreviewUrl(cached.uncroppedPreviewUrl);
+        setIsViewLoading(false);
+
+        latestRenderedJobIdRef.current = previewJobIdRef.current;
+        isBackendReadyRef.current = false;
+        currentResRef.current = Infinity;
+
+        invoke('load_image', { path })
+          .then((result) => {
+            const _result = result as { width: number; height: number };
+            if (selectedImagePathRef.current !== path) return;
+            isBackendReadyRef.current = true;
+            currentResRef.current = 0;
+            setOriginalSize({ width: _result.width, height: _result.height });
+          })
+          .catch((err: unknown) => {
+            if (String(err).includes('cancelled')) return;
+            console.error('Background load_image failed on cache hit:', err);
+            isBackendReadyRef.current = true;
+            currentResRef.current = 0;
+          });
+
+        invoke(Invokes.LoadMetadata, { path })
+          .then((rawMetadata) => {
+            const metadata = rawMetadata as { adjustments?: Adjustments & { is_null?: boolean } };
+            if (selectedImagePathRef.current !== path) return;
+            let freshAdjustments: Adjustments;
+            if (metadata.adjustments && !metadata.adjustments.is_null) {
+              freshAdjustments = normalizeLoadedAdjustments(metadata.adjustments);
+            } else {
+              freshAdjustments = { ...INITIAL_ADJUSTMENTS };
+            }
+            if (!isSliderDragging && JSON.stringify(cached.adjustments) !== JSON.stringify(freshAdjustments)) {
+              setLiveAdjustments(freshAdjustments);
+              resetAdjustmentsHistory(freshAdjustments);
+              prevAdjustmentsRef.current = { path, adjustments: freshAdjustments };
+              imageCacheRef.current.set(path, { ...cached, adjustments: freshAdjustments });
+            }
+          })
+          .catch((err) => console.error('Failed background metadata sync on cache hit:', err));
+
         return;
       }
-      debouncedSave.cancel();
-      patchesSentToBackend.current.clear();
+
+      isBackendReadyRef.current = true;
 
       setSelectedImage({
         exif: null,
@@ -2035,36 +2169,20 @@ function App() {
       });
       setOriginalSize({ width: 0, height: 0 });
       setPreviewSize({ width: 0, height: 0 });
-      setMultiSelectedPaths([path]);
-      setLibraryActivePath(null);
       setIsViewLoading(true);
-      setError(null);
       setHistogram(null);
       setFinalPreviewUrl(null);
+      setWaveform(null);
       setUncroppedAdjustedPreviewUrl(null);
-      setTransformedOriginalUrl(null);
-      setShowOriginal(false);
-      setActiveMaskId(null);
-      setActiveMaskContainerId(null);
-      setActiveAiPatchContainerId(null);
-      setActiveAiSubMaskId(null);
-      setIsWbPickerActive(false);
-
-      if (transformWrapperRef.current) {
-        transformWrapperRef.current.resetTransform(0);
-      }
-
-      setZoom(1);
-      setIsLibraryExportPanelVisible(false);
 
       setFinalPreviewUrl((prev) => {
-        if (prev?.startsWith('blob:')) {
+        if (prev?.startsWith('blob:') && !imageCacheRef.current.isProtected(prev)) {
           setTimeout(() => URL.revokeObjectURL(prev), 250);
         }
         return null;
       });
     },
-    [selectedImage?.path, applyAdjustments, debouncedSave, thumbnails],
+    [selectedImage?.path, debouncedSave, thumbnails, resetAdjustmentsHistory],
   );
 
   const executeDelete = useCallback(
@@ -2247,6 +2365,8 @@ function App() {
         return;
       }
 
+      pathsToUpdate.forEach((p) => imageCacheRef.current.delete(p));
+
       if (selectedImage && pathsToUpdate.includes(selectedImage.path)) {
         const newAdjustments = { ...adjustments, ...adjustmentsToApply };
         setAdjustments(newAdjustments);
@@ -2267,6 +2387,7 @@ function App() {
     if (!selectedImage?.isReady) {
       return;
     }
+    imageCacheRef.current.delete(selectedImage.path);
     try {
       const autoAdjustments: Adjustments = await invoke(Invokes.CalculateAutoAdjustments);
       setAdjustments((prev: Adjustments) => {
@@ -2557,6 +2678,7 @@ function App() {
               }
             }
             if (Object.keys(delta).length > 0) {
+              otherPaths.forEach((p) => imageCacheRef.current.delete(p));
               invoke(Invokes.ApplyAdjustmentsToPaths, { paths: otherPaths, adjustments: delta }).catch((err) => {
                 console.error('Failed to apply adjustments to multi-selection:', err);
               });
@@ -2797,20 +2919,32 @@ function App() {
           setUncroppedAdjustedPreviewUrl(event.payload);
         }
       }),
-      listen('histogram-update', (event: { payload: ChannelConfig }) => {
-        if (isEffectActive) {
-          setHistogram(event.payload);
+      listen('histogram-update', (event: { payload: unknown }) => {
+        if (!isEffectActive) return;
+        const payload = event.payload;
+        if (payload && typeof payload === 'object' && 'path' in payload) {
+          const wrapped = payload as { path?: string; data?: ChannelConfig };
+          if (wrapped.path && wrapped.path !== selectedImagePathRef.current) return;
+          setHistogram(wrapped.data ?? null);
+          return;
         }
+        setHistogram((payload as ChannelConfig) ?? null);
       }),
       listen('open-with-file', (event: { payload: string }) => {
         if (isEffectActive) {
           setInitialFileToOpen(event.payload as string);
         }
       }),
-      listen('waveform-update', (event: { payload: WaveformData }) => {
-        if (isEffectActive) {
-          setWaveform(event.payload);
+      listen('waveform-update', (event: { payload: unknown }) => {
+        if (!isEffectActive) return;
+        const payload = event.payload;
+        if (payload && typeof payload === 'object' && 'path' in payload) {
+          const wrapped = payload as { path?: string; data?: WaveformData };
+          if (wrapped.path && wrapped.path !== selectedImagePathRef.current) return;
+          setWaveform(wrapped.data ?? null);
+          return;
         }
+        setWaveform((payload as WaveformData) ?? null);
       }),
       listen('thumbnail-generated', (event: { payload: { path: string; data: string; rating?: number } }) => {
         if (isEffectActive) {
@@ -3631,6 +3765,7 @@ function App() {
         return;
       }
 
+      pathsToReset.forEach((p) => imageCacheRef.current.delete(p));
       debouncedSetHistory.cancel();
 
       invoke(Invokes.ResetAdjustmentsForPaths, { paths: pathsToReset })
@@ -3990,6 +4125,7 @@ function App() {
 
     const handleApplyAutoAdjustmentsToSelection = () => {
       if (finalSelection.length === 0) return;
+      finalSelection.forEach((p) => imageCacheRef.current.delete(p));
 
       invoke(Invokes.ApplyAutoAdjustmentsToPaths, { paths: finalSelection })
         .then(async () => {
@@ -4020,6 +4156,7 @@ function App() {
     };
 
     const onExportClick = () => {
+      setMultiSelectedPaths(finalSelection);
       if (selectedImage) {
         if (selectedImage.path !== path) {
           handleImageSelect(path);
@@ -4084,7 +4221,7 @@ function App() {
         disabled: copiedAdjustments === null,
         icon: ClipboardPaste,
         label: pasteLabel,
-        onClick: handlePasteAdjustments,
+        onClick: () => handlePasteAdjustments(finalSelection),
       },
       {
         label: t('app.productivity'),
@@ -4739,8 +4876,6 @@ function App() {
               onInitialFitScale={setInitialFitScale}
               onZoomChange={handleZoomChange}
               originalSize={originalSize}
-              baseRenderSize={baseRenderSize}
-              isLoadingFullRes={isLoadingFullRes}
               isRotationActive={isRotationActive}
               overlayMode={overlayMode}
               overlayRotation={overlayRotation}
