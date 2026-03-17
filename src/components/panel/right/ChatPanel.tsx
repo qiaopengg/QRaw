@@ -15,8 +15,9 @@ import {
   ImagePlus,
   Brain,
   ChevronRight,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { Invokes } from '../../ui/AppProperties';
+import { AppSettings, Invokes } from '../../ui/AppProperties';
 import { Adjustments } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
 
@@ -68,7 +69,19 @@ interface StyleDebugInfo {
   suggested_actions: StyleDebugAction[];
   blocked_reasons: string[];
   blocked_items?: StyleConstraintBlockItem[];
+  scene_profile?: StyleSceneProfileDebug;
   constraint_debug?: ConstraintDebugInfo;
+}
+
+interface StyleSceneProfileDebug {
+  reference_tonal_style: string;
+  current_tonal_style: string;
+  tonal_gain: number;
+  highlight_gain: number;
+  shadow_gain: number;
+  chroma_limit: number;
+  chroma_guard_floor: number;
+  color_residual_gain: number;
 }
 
 interface StyleProximityScore {
@@ -162,10 +175,20 @@ interface ChatPanelProps {
   styleTransferStrength?: number;
   styleTransferHighlightGuard?: number;
   styleTransferSkinProtect?: number;
+  appSettings?: AppSettings | null;
+  onSettingsChange?(settings: AppSettings): void;
   currentImagePath?: string | null;
 }
 
 type OllamaStatus = 'checking' | 'online' | 'offline';
+
+function clampStyleTransferConfig(value: number): number {
+  return Math.max(0.5, Math.min(2.0, value));
+}
+
+function formatStyleTransferConfig(value: number): string {
+  return value.toFixed(2).replace(/\.00$/, '');
+}
 
 function getSimpleAdjustments(adj: Adjustments): Record<string, number> {
   return {
@@ -251,6 +274,8 @@ export default function ChatPanel({
   styleTransferStrength,
   styleTransferHighlightGuard,
   styleTransferSkinProtect,
+  appSettings,
+  onSettingsChange,
   currentImagePath,
 }: ChatPanelProps) {
   const { t } = useTranslation();
@@ -265,8 +290,52 @@ export default function ChatPanel({
   const endpoint = llmEndpoint || 'http://localhost:11434';
   const [activeModel, setActiveModel] = useState(llmModel || DEFAULT_MODEL);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [tuningMenuOpen, setTuningMenuOpen] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const tuningMenuRef = useRef<HTMLDivElement>(null);
+  const [styleStrengthInput, setStyleStrengthInput] = useState(formatStyleTransferConfig(styleTransferStrength ?? 1.0));
+  const [highlightGuardInput, setHighlightGuardInput] = useState(
+    formatStyleTransferConfig(styleTransferHighlightGuard ?? 1.0),
+  );
+  const [skinProtectInput, setSkinProtectInput] = useState(formatStyleTransferConfig(styleTransferSkinProtect ?? 1.0));
+
+  const saveStyleTransferConfig = useCallback(
+    (key: 'styleTransferStrength' | 'styleTransferHighlightGuard' | 'styleTransferSkinProtect', raw: string) => {
+      const parsed = Number.parseFloat(raw);
+      const clamped = Number.isFinite(parsed) ? clampStyleTransferConfig(parsed) : 1.0;
+      if (onSettingsChange && appSettings) {
+        onSettingsChange({
+          ...appSettings,
+          [key]: clamped,
+        });
+      }
+      return formatStyleTransferConfig(clamped);
+    },
+    [appSettings, onSettingsChange],
+  );
+
+  const getEffectiveStyleTransferTuning = useCallback(() => {
+    const parseOrDefault = (raw: string, fallback: number) => {
+      const parsed = Number.parseFloat(raw);
+      if (Number.isFinite(parsed)) {
+        return clampStyleTransferConfig(parsed);
+      }
+      return clampStyleTransferConfig(fallback);
+    };
+    return {
+      styleStrength: parseOrDefault(styleStrengthInput, styleTransferStrength ?? 1.0),
+      highlightGuardStrength: parseOrDefault(highlightGuardInput, styleTransferHighlightGuard ?? 1.0),
+      skinProtectStrength: parseOrDefault(skinProtectInput, styleTransferSkinProtect ?? 1.0),
+    };
+  }, [
+    styleStrengthInput,
+    highlightGuardInput,
+    skinProtectInput,
+    styleTransferStrength,
+    styleTransferHighlightGuard,
+    styleTransferSkinProtect,
+  ]);
 
   // 检测 Ollama 状态
   const checkStatus = useCallback(async () => {
@@ -279,11 +348,26 @@ export default function ChatPanel({
     checkStatus();
   }, [checkStatus]);
 
+  useEffect(() => {
+    setStyleStrengthInput(formatStyleTransferConfig(styleTransferStrength ?? 1.0));
+  }, [styleTransferStrength]);
+
+  useEffect(() => {
+    setHighlightGuardInput(formatStyleTransferConfig(styleTransferHighlightGuard ?? 1.0));
+  }, [styleTransferHighlightGuard]);
+
+  useEffect(() => {
+    setSkinProtectInput(formatStyleTransferConfig(styleTransferSkinProtect ?? 1.0));
+  }, [styleTransferSkinProtect]);
+
   // 点击外部关闭模型菜单
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
         setModelMenuOpen(false);
+      }
+      if (tuningMenuRef.current && !tuningMenuRef.current.contains(e.target as Node)) {
+        setTuningMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -486,6 +570,7 @@ export default function ChatPanel({
       setMessages((prev) => [...prev, userMsg, streamMsg]);
 
       const simpleAdj = getSimpleAdjustments(adjustments);
+      const tuning = getEffectiveStyleTransferTuning();
 
       // 监听风格迁移流式事件
       const unlisten = await listen<StreamChunkPayload>('style-transfer-stream', (event) => {
@@ -536,18 +621,18 @@ export default function ChatPanel({
             llmEndpoint: endpoint,
             llmApiKey: llmApiKey || null,
             llmModel: activeModel || null,
-            styleStrength: styleTransferStrength ?? 1.0,
-            highlightGuardStrength: styleTransferHighlightGuard ?? 1.0,
-            skinProtectStrength: styleTransferSkinProtect ?? 1.0,
+            styleStrength: tuning.styleStrength,
+            highlightGuardStrength: tuning.highlightGuardStrength,
+            skinProtectStrength: tuning.skinProtectStrength,
           });
         } else {
           const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
             referencePath: refPath,
             currentImagePath: currentImagePath,
             currentAdjustments: simpleAdj,
-            styleStrength: styleTransferStrength ?? 1.0,
-            highlightGuardStrength: styleTransferHighlightGuard ?? 1.0,
-            skinProtectStrength: styleTransferSkinProtect ?? 1.0,
+            styleStrength: tuning.styleStrength,
+            highlightGuardStrength: tuning.highlightGuardStrength,
+            skinProtectStrength: tuning.skinProtectStrength,
           });
 
           // 纯算法版没有流式，直接更新
@@ -591,9 +676,7 @@ export default function ChatPanel({
     endpoint,
     llmApiKey,
     activeModel,
-    styleTransferStrength,
-    styleTransferHighlightGuard,
-    styleTransferSkinProtect,
+    getEffectiveStyleTransferTuning,
   ]);
 
   // 离线引导页
@@ -770,6 +853,68 @@ export default function ChatPanel({
               </div>
             )}
           </div>
+          <div className="relative" ref={tuningMenuRef}>
+            <button
+              onClick={() => setTuningMenuOpen((v) => !v)}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
+              title="风格迁移参数"
+            >
+              <SlidersHorizontal size={10} />
+              <span>迁移参数</span>
+              <ChevronDown size={10} className={`transition-transform ${tuningMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {tuningMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 w-56 bg-surface/95 backdrop-blur-md rounded-lg shadow-xl p-2 z-50 border border-surface space-y-2">
+                <label className="space-y-1 block">
+                  <span className="text-[9px] text-text-secondary/85">迁移强度</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={styleStrengthInput}
+                    onChange={(e) => setStyleStrengthInput(e.target.value)}
+                    onBlur={() =>
+                      setStyleStrengthInput(saveStyleTransferConfig('styleTransferStrength', styleStrengthInput))
+                    }
+                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
+                  />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-[9px] text-text-secondary/85">高光保护</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={highlightGuardInput}
+                    onChange={(e) => setHighlightGuardInput(e.target.value)}
+                    onBlur={() =>
+                      setHighlightGuardInput(
+                        saveStyleTransferConfig('styleTransferHighlightGuard', highlightGuardInput),
+                      )
+                    }
+                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
+                  />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-[9px] text-text-secondary/85">肤色保护</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={skinProtectInput}
+                    onChange={(e) => setSkinProtectInput(e.target.value)}
+                    onBlur={() =>
+                      setSkinProtectInput(saveStyleTransferConfig('styleTransferSkinProtect', skinProtectInput))
+                    }
+                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
           {messages.length > 0 && (
             <button
               onClick={clearHistory}
@@ -837,6 +982,22 @@ export default function ChatPanel({
                       <div className="text-[9px] text-text-secondary/70">
                         自动二次微调 {msg.styleDebug.auto_refine_rounds} 轮
                       </div>
+                      {msg.styleDebug.scene_profile && (
+                        <div className="rounded border border-blue-400/20 px-1.5 py-1 space-y-0.5">
+                          <div className="text-[9px] text-blue-300/90">
+                            场景判定 {msg.styleDebug.scene_profile.reference_tonal_style} →{' '}
+                            {msg.styleDebug.scene_profile.current_tonal_style}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-[9px] text-text-secondary/80">
+                            <span>明暗 {msg.styleDebug.scene_profile.tonal_gain.toFixed(2)}</span>
+                            <span>高光 {msg.styleDebug.scene_profile.highlight_gain.toFixed(2)}</span>
+                            <span>阴影 {msg.styleDebug.scene_profile.shadow_gain.toFixed(2)}</span>
+                            <span>色彩上限 {msg.styleDebug.scene_profile.chroma_limit.toFixed(2)}</span>
+                            <span>色彩护栏 {msg.styleDebug.scene_profile.chroma_guard_floor.toFixed(2)}</span>
+                            <span>色准回正 {msg.styleDebug.scene_profile.color_residual_gain.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-secondary/80">
                         <span>
                           接近度总分 {msg.styleDebug.proximity_before.overall.toFixed(1)} →{' '}

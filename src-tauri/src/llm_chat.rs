@@ -364,6 +364,14 @@ pub async fn chat_adjust(
 
     let mut clamps = Vec::new();
     for adj in &mut parsed.adjustments {
+        if let Some(band) = constraint_window.bands.get(&adj.key) {
+            adj.min = adj.min.max(band.hard_min);
+            adj.max = adj.max.min(band.hard_max);
+            if adj.min > adj.max {
+                adj.min = band.hard_min;
+                adj.max = band.hard_max;
+            }
+        }
         let original = adj.value;
         let (clamped, reason) = clamp_value_with_dynamic_window(&adj.key, adj.value, &constraint_window);
         adj.value = clamped;

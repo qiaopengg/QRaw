@@ -4959,6 +4959,8 @@ function App() {
                             styleTransferStrength={appSettings?.styleTransferStrength}
                             styleTransferHighlightGuard={appSettings?.styleTransferHighlightGuard}
                             styleTransferSkinProtect={appSettings?.styleTransferSkinProtect}
+                            appSettings={appSettings}
+                            onSettingsChange={handleSettingsChange}
                             currentImagePath={selectedImage?.path ?? null}
                           />
                         )}
