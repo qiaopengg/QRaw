@@ -1,18 +1,20 @@
-use image::{DynamicImage, GenericImageView, Pixel};
+use crate::llm_chat::StreamChunkPayload;
 use image::codecs::jpeg::JpegEncoder;
+use image::{DynamicImage, GenericImageView, Pixel};
 use rawler::decoders::RawDecodeParams;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use tauri::Emitter;
-use crate::llm_chat::StreamChunkPayload;
 
 const DEFAULT_STYLE_TRANSFER_MODEL: &str = "qwen2.5vl:7b";
 const EARLY_EXIT_STYLE_DISTANCE_THRESHOLD: f64 = 0.22;
 const LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD: f64 = 0.68;
+const VISION_INPUT_MAX_EDGE: u32 = 1536;
+const VISION_INPUT_JPEG_QUALITY: u8 = 92;
 
 /// 智能加载图像：先尝试 image crate（支持 JPEG/PNG 等），失败则用 rawler 解码 RAW 文件
 /// 为风格分析优化：优先提取预览图（更快、更省内存），避免全尺寸 RAW 解码
@@ -54,15 +56,19 @@ fn is_vision_model(model_name: &str) -> bool {
 
 fn encode_image_for_vision_model(img: &DynamicImage) -> Result<String, String> {
     let (w, h) = img.dimensions();
-    let resized = if w > 1024 || h > 1024 {
-        img.resize(1024, 1024, image::imageops::FilterType::Triangle)
+    let resized = if w > VISION_INPUT_MAX_EDGE || h > VISION_INPUT_MAX_EDGE {
+        img.resize(
+            VISION_INPUT_MAX_EDGE,
+            VISION_INPUT_MAX_EDGE,
+            image::imageops::FilterType::Lanczos3,
+        )
     } else {
         img.clone()
     };
     let mut buffer = Vec::new();
     {
         let mut cursor = Cursor::new(&mut buffer);
-        let mut encoder = JpegEncoder::new_with_quality(&mut cursor, 88);
+        let mut encoder = JpegEncoder::new_with_quality(&mut cursor, VISION_INPUT_JPEG_QUALITY);
         encoder
             .encode_image(&resized)
             .map_err(|e| format!("编码视觉输入图片失败: {}", e))?;
@@ -97,6 +103,8 @@ pub struct StyleFeatures {
     pub skin_ratio: f64,
     pub skin_luminance_mean: f64,
     pub skin_rb_ratio: f64,
+    pub hue_mean: f64,
+    pub hue_spread: f64,
     pub laplacian_variance: f64,
     pub vignette_diff: f64,
 }
@@ -230,14 +238,18 @@ struct AlgorithmPipelineResult {
     style_debug: StyleTransferDebugInfo,
 }
 
-fn validate_style_transfer_paths(reference_path: &str, current_image_path: &str) -> Result<(), String> {
+fn validate_style_transfer_paths(
+    reference_path: &str,
+    current_image_path: &str,
+) -> Result<(), String> {
     if !Path::new(reference_path).exists() {
         return Err("参考图文件不存在".to_string());
     }
     if !Path::new(current_image_path).exists() {
         return Err("当前图片文件不存在".to_string());
     }
-    let ref_meta = std::fs::metadata(reference_path).map_err(|e| format!("无法读取参考图信息: {}", e))?;
+    let ref_meta =
+        std::fs::metadata(reference_path).map_err(|e| format!("无法读取参考图信息: {}", e))?;
     if ref_meta.len() > 100 * 1024 * 1024 {
         return Err("参考图文件过大（超过 100MB）".to_string());
     }
@@ -302,8 +314,11 @@ fn run_algorithm_pipeline(
         &mut adjustments,
         ctx.tuning,
     );
-    let constraint_debug = apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
-    let predicted_features = estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
+    apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+    let constraint_debug =
+        apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+    let predicted_features =
+        estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
     let style_debug = build_style_debug_info(
         &ctx.ref_features,
         &ctx.cur_features,
@@ -318,7 +333,9 @@ fn run_algorithm_pipeline(
     }
 }
 
-fn build_style_transfer_early_exit_response(ctx: &StyleTransferPreparedContext) -> StyleTransferResponse {
+fn build_style_transfer_early_exit_response(
+    ctx: &StyleTransferPreparedContext,
+) -> StyleTransferResponse {
     let style_debug = build_style_debug_info(
         &ctx.ref_features,
         &ctx.cur_features,
@@ -334,7 +351,9 @@ fn build_style_transfer_early_exit_response(ctx: &StyleTransferPreparedContext) 
     }
 }
 
-fn to_chat_adjustments(adjustments: &[StyleTransferSuggestion]) -> Vec<crate::llm_chat::AdjustmentSuggestion> {
+fn to_chat_adjustments(
+    adjustments: &[StyleTransferSuggestion],
+) -> Vec<crate::llm_chat::AdjustmentSuggestion> {
     adjustments
         .iter()
         .map(|s| crate::llm_chat::AdjustmentSuggestion {
@@ -348,7 +367,9 @@ fn to_chat_adjustments(adjustments: &[StyleTransferSuggestion]) -> Vec<crate::ll
         .collect()
 }
 
-fn to_chat_adjust_response(response: &StyleTransferResponse) -> crate::llm_chat::ChatAdjustResponse {
+fn to_chat_adjust_response(
+    response: &StyleTransferResponse,
+) -> crate::llm_chat::ChatAdjustResponse {
     crate::llm_chat::ChatAdjustResponse {
         understanding: response.understanding.clone(),
         adjustments: to_chat_adjustments(&response.adjustments),
@@ -365,11 +386,14 @@ fn to_chat_adjust_response(response: &StyleTransferResponse) -> crate::llm_chat:
 }
 
 fn emit_style_transfer_done(app_handle: &tauri::AppHandle, response: &StyleTransferResponse) {
-    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-        chunk_type: "done".to_string(),
-        text: String::new(),
-        result: Some(to_chat_adjust_response(response)),
-    });
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        StreamChunkPayload {
+            chunk_type: "done".to_string(),
+            text: String::new(),
+            result: Some(to_chat_adjust_response(response)),
+        },
+    );
 }
 
 fn build_algorithm_understanding(adjustment_count: usize, suffix: &str) -> String {
@@ -444,6 +468,28 @@ fn clamp01(v: f64) -> f64 {
     v.max(0.0).min(1.0)
 }
 
+fn style_intensity_score(ref_feat: &StyleFeatures, cur_feat: &StyleFeatures) -> f64 {
+    let tonal = (ref_feat.p50_luminance - cur_feat.p50_luminance).abs() * 2.0
+        + (ref_feat.waveform_high_band - cur_feat.waveform_high_band).abs() * 1.6;
+    let color = (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.7
+        + (ref_feat.rb_ratio - cur_feat.rb_ratio).abs() * 0.9
+        + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 0.9
+        + (ref_feat.hue_mean - cur_feat.hue_mean).abs() * 1.2;
+    clamp01((tonal + color) * 0.62)
+}
+
+fn soft_pull_ratio_for_key(key: &str) -> f64 {
+    match key {
+        "exposure" => 0.30,
+        "whites" | "highlights" => 0.34,
+        "shadows" | "blacks" => 0.38,
+        "contrast" => 0.40,
+        "temperature" | "tint" => 0.48,
+        "saturation" | "vibrance" => 0.52,
+        _ => 0.45,
+    }
+}
+
 fn build_constraint_band(hard_min: f64, hard_max: f64) -> DynamicConstraintBand {
     let span = (hard_max - hard_min).max(0.001);
     let margin = span * 0.12;
@@ -492,12 +538,16 @@ fn fallback_features_from_adjustments(current_adjustments: &Value) -> StyleFeatu
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
 
-    let mean_luma = (0.5 + exposure * 0.08 + brightness * 0.003).max(0.08).min(0.92);
+    let mean_luma = (0.5 + exposure * 0.08 + brightness * 0.003)
+        .max(0.08)
+        .min(0.92);
     let p10 = (mean_luma - 0.20 - contrast * 0.0012).max(0.01).min(0.65);
     let p50 = mean_luma.max(0.06).min(0.94);
     let p90 = (mean_luma + 0.22 + contrast * 0.0011).max(0.22).min(0.98);
     let p99 = (p90 + 0.06).max(0.40).min(0.995);
-    let sat = (0.32 + saturation * 0.0024 + vibrance * 0.0018).max(0.04).min(0.88);
+    let sat = (0.32 + saturation * 0.0024 + vibrance * 0.0018)
+        .max(0.04)
+        .min(0.88);
 
     StyleFeatures {
         mean_luminance: mean_luma,
@@ -522,6 +572,8 @@ fn fallback_features_from_adjustments(current_adjustments: &Value) -> StyleFeatu
         skin_ratio: 0.0,
         skin_luminance_mean: p50,
         skin_rb_ratio: 1.0,
+        hue_mean: 0.0,
+        hue_spread: 0.0,
         laplacian_variance: 220.0,
         vignette_diff: 0.0,
     }
@@ -583,9 +635,7 @@ fn build_dynamic_constraint_window_with_reference(
             + (-blacks_now).max(0.0) * 0.0020,
     );
     let saturation_risk = clamp01(
-        base_saturation_risk
-            + saturation_now.max(0.0) * 0.0024
-            + vibrance_now.max(0.0) * 0.0022,
+        base_saturation_risk + saturation_now.max(0.0) * 0.0024 + vibrance_now.max(0.0) * 0.0022,
     );
 
     let (tonal_lift_intent, tonal_drop_intent, saturation_lift_intent, saturation_drop_intent) =
@@ -611,41 +661,66 @@ fn build_dynamic_constraint_window_with_reference(
     };
     if let Some(ref_feat) = reference_feat {
         let highlight_lift_room = (ref_feat.p99_luminance - cur_feat.p99_luminance).max(0.0);
-        let clip_pressure = (cur_feat.clipped_highlight_ratio - ref_feat.clipped_highlight_ratio).max(0.0);
+        let clip_pressure =
+            (cur_feat.clipped_highlight_ratio - ref_feat.clipped_highlight_ratio).max(0.0);
         let relax = tonal_lift_intent * 0.20 + highlight_lift_room * 0.18 - clip_pressure * 3.5;
         highlight_risk = clamp01((highlight_risk - relax).max(0.0));
     }
+    let style_force = reference_feat
+        .map(|ref_feat| style_intensity_score(ref_feat, cur_feat))
+        .unwrap_or(0.0);
 
-    let exposure_min = -2.35 + shadow_risk * 1.20 + tonal_lift_intent * 0.18 - tonal_drop_intent * 0.40;
-    let exposure_max = 2.35 - highlight_risk * 1.45 + tonal_lift_intent * 0.62 - tonal_drop_intent * 0.20;
-    let (mut exposure_min, mut exposure_max) = normalize_hard_band(exposure_min, exposure_max, -2.35, 2.35);
+    let exposure_min =
+        -2.35 + shadow_risk * 1.20 + tonal_lift_intent * 0.16 - tonal_drop_intent * 0.45;
+    let exposure_headroom_relax = tonal_lift_intent
+        * (0.26
+            + (reference_feat
+                .map(|ref_feat| (ref_feat.p90_luminance - cur_feat.p90_luminance).max(0.0))
+                .unwrap_or(0.0)
+                * 0.75));
+    let exposure_max = 2.35 - highlight_risk * (1.45 - tonal_lift_intent * 0.42)
+        + tonal_lift_intent * 0.82
+        + exposure_headroom_relax
+        - tonal_drop_intent * 0.24;
+    let (mut exposure_min, mut exposure_max) =
+        normalize_hard_band(exposure_min, exposure_max, -2.35, 2.35);
     exposure_min = exposure_min.max(-2.4).min(2.4);
     exposure_max = exposure_max.max(-2.4).min(2.4);
 
-    let whites_max = 62.0 - highlight_risk * 58.0 + tonal_lift_intent * 24.0 - tonal_drop_intent * 8.0;
-    let highlights_max = 58.0 - highlight_risk * 52.0 + tonal_lift_intent * 20.0 - tonal_drop_intent * 8.0;
-    let shadows_min = -60.0 + shadow_risk * 48.0 + tonal_lift_intent * 12.0 - tonal_drop_intent * 16.0;
-    let blacks_min = -58.0 + shadow_risk * 46.0 + tonal_lift_intent * 10.0 - tonal_drop_intent * 14.0;
+    let whites_max =
+        62.0 - highlight_risk * 58.0 + tonal_lift_intent * 24.0 - tonal_drop_intent * 8.0;
+    let highlights_max =
+        58.0 - highlight_risk * 52.0 + tonal_lift_intent * 20.0 - tonal_drop_intent * 8.0;
+    let shadows_min =
+        -60.0 + shadow_risk * 48.0 + tonal_lift_intent * 12.0 - tonal_drop_intent * 16.0;
+    let blacks_min =
+        -58.0 + shadow_risk * 46.0 + tonal_lift_intent * 10.0 - tonal_drop_intent * 14.0;
 
-    let mut sat_cap =
-        78.0 - saturation_risk * 42.0 + saturation_lift_intent * 18.0 - saturation_drop_intent * 20.0;
-    let mut vib_cap =
-        80.0 - saturation_risk * 45.0 + saturation_lift_intent * 20.0 - saturation_drop_intent * 22.0;
+    let mut sat_cap = 78.0 - saturation_risk * 42.0 + saturation_lift_intent * 18.0
+        - saturation_drop_intent * 20.0;
+    let mut vib_cap = 80.0 - saturation_risk * 45.0 + saturation_lift_intent * 20.0
+        - saturation_drop_intent * 22.0;
     if cur_feat.skin_ratio > 0.02 {
         sat_cap -= 8.0;
         vib_cap -= 10.0;
     }
-    let sat_cap = sat_cap.max(22.0).min(82.0);
-    let vib_cap = vib_cap.max(20.0).min(82.0);
+    let sat_cap = (sat_cap + style_force * 10.0).max(22.0).min(88.0);
+    let vib_cap = (vib_cap + style_force * 11.0).max(20.0).min(90.0);
 
-    let mut temp_cap = 76.0 - highlight_risk * 12.0 + tonal_lift_intent * 4.0 + temp_shift_intent * 10.0;
-    let mut tint_cap = 72.0 - saturation_risk * 10.0 + saturation_lift_intent * 4.0 + tint_shift_intent * 10.0;
+    let mut temp_cap =
+        76.0 - highlight_risk * 12.0 + tonal_lift_intent * 4.0 + temp_shift_intent * 10.0;
+    let mut tint_cap =
+        72.0 - saturation_risk * 10.0 + saturation_lift_intent * 4.0 + tint_shift_intent * 10.0;
     if cur_feat.skin_ratio > 0.02 {
         temp_cap = temp_cap.min(58.0);
         tint_cap = tint_cap.min(52.0);
     }
+    temp_cap = (temp_cap + style_force * 8.0).min(68.0);
+    tint_cap = (tint_cap + style_force * 7.0).min(62.0);
 
-    let contrast_hard_max = (80.0 - highlight_risk * 10.0 - shadow_risk * 8.0 + tonal_drop_intent * 8.0)
+    let contrast_hard_max = ((80.0_f64 - highlight_risk * 10.0 - shadow_risk * 8.0
+        + tonal_drop_intent * 8.0)
+        + style_force * 8.0)
         .max(38.0)
         .min(80.0);
     let contrast_hard_min = (-80.0 + saturation_risk * 8.0 - tonal_drop_intent * 6.0)
@@ -653,7 +728,10 @@ fn build_dynamic_constraint_window_with_reference(
         .min(-20.0);
 
     let mut bands = HashMap::new();
-    bands.insert("exposure".to_string(), build_constraint_band(exposure_min, exposure_max));
+    bands.insert(
+        "exposure".to_string(),
+        build_constraint_band(exposure_min, exposure_max),
+    );
     bands.insert("brightness".to_string(), build_constraint_band(-80.0, 80.0));
     bands.insert(
         "contrast".to_string(),
@@ -667,20 +745,38 @@ fn build_dynamic_constraint_window_with_reference(
         "shadows".to_string(),
         build_constraint_band(shadows_min.max(-80.0).min(0.0), 80.0),
     );
-    bands.insert("whites".to_string(), build_constraint_band(-80.0, whites_max.max(6.0).min(80.0)));
+    bands.insert(
+        "whites".to_string(),
+        build_constraint_band(-80.0, whites_max.max(6.0).min(80.0)),
+    );
     bands.insert(
         "blacks".to_string(),
         build_constraint_band(blacks_min.max(-80.0).min(0.0), 80.0),
     );
-    bands.insert("saturation".to_string(), build_constraint_band(-80.0, sat_cap));
-    bands.insert("vibrance".to_string(), build_constraint_band(-80.0, vib_cap));
-    bands.insert("temperature".to_string(), build_constraint_band(-temp_cap, temp_cap));
-    bands.insert("tint".to_string(), build_constraint_band(-tint_cap, tint_cap));
+    bands.insert(
+        "saturation".to_string(),
+        build_constraint_band(-80.0, sat_cap),
+    );
+    bands.insert(
+        "vibrance".to_string(),
+        build_constraint_band(-80.0, vib_cap),
+    );
+    bands.insert(
+        "temperature".to_string(),
+        build_constraint_band(-temp_cap, temp_cap),
+    );
+    bands.insert(
+        "tint".to_string(),
+        build_constraint_band(-tint_cap, tint_cap),
+    );
     bands.insert("clarity".to_string(), build_constraint_band(-80.0, 80.0));
     bands.insert("dehaze".to_string(), build_constraint_band(-70.0, 80.0));
     bands.insert("structure".to_string(), build_constraint_band(-80.0, 80.0));
     bands.insert("sharpness".to_string(), build_constraint_band(0.0, 100.0));
-    bands.insert("vignetteAmount".to_string(), build_constraint_band(-80.0, 80.0));
+    bands.insert(
+        "vignetteAmount".to_string(),
+        build_constraint_band(-80.0, 80.0),
+    );
 
     DynamicConstraintWindow {
         source: source.to_string(),
@@ -735,13 +831,50 @@ fn clamp_reason_for_key(key: &str, window: &DynamicConstraintWindow) -> String {
     }
 }
 
+fn apply_soft_dynamic_constraints_to_style_suggestions(
+    suggestions: &mut Vec<StyleTransferSuggestion>,
+    window: &DynamicConstraintWindow,
+) {
+    for suggestion in suggestions.iter_mut() {
+        let Some(band) = window.bands.get(&suggestion.key) else {
+            continue;
+        };
+        let mut soft_adjusted = false;
+        let pull = soft_pull_ratio_for_key(&suggestion.key);
+        if suggestion.value < band.soft_min && suggestion.value > band.hard_min {
+            let dist = band.soft_min - suggestion.value;
+            suggestion.value =
+                format_adjustment_value(&suggestion.key, suggestion.value + dist * pull);
+            soft_adjusted = true;
+        } else if suggestion.value > band.soft_max && suggestion.value < band.hard_max {
+            let dist = suggestion.value - band.soft_max;
+            suggestion.value =
+                format_adjustment_value(&suggestion.key, suggestion.value - dist * pull);
+            soft_adjusted = true;
+        }
+        if soft_adjusted {
+            if suggestion.reason.is_empty() {
+                suggestion.reason = "动态软约束已平滑".to_string();
+            } else {
+                suggestion.reason = format!("{}；动态软约束已平滑", suggestion.reason);
+            }
+        }
+    }
+}
+
 pub fn clamp_value_with_dynamic_window(
     key: &str,
     value: f64,
     window: &DynamicConstraintWindow,
 ) -> (f64, Option<String>) {
     let Some(band) = window.bands.get(key) else {
-        let hard = if key == "exposure" { (-2.5, 2.5) } else if key == "sharpness" { (0.0, 100.0) } else { (-80.0, 80.0) };
+        let hard = if key == "exposure" {
+            (-2.5, 2.5)
+        } else if key == "sharpness" {
+            (0.0, 100.0)
+        } else {
+            (-80.0, 80.0)
+        };
         let clamped = value.max(hard.0).min(hard.1);
         if (clamped - value).abs() > 1e-6 {
             return (
@@ -769,7 +902,8 @@ pub fn apply_dynamic_constraints_to_style_suggestions(
     for suggestion in suggestions.iter_mut() {
         if let Some(band) = window.bands.get(&suggestion.key) {
             let original = suggestion.value;
-            let (clamped, reason) = clamp_value_with_dynamic_window(&suggestion.key, suggestion.value, window);
+            let (clamped, reason) =
+                clamp_value_with_dynamic_window(&suggestion.key, suggestion.value, window);
             suggestion.value = clamped;
             suggestion.min = suggestion.min.max(band.hard_min);
             suggestion.max = suggestion.max.min(band.hard_max);
@@ -793,7 +927,8 @@ pub fn apply_dynamic_constraints_to_style_suggestions(
             }
         } else {
             let original = suggestion.value;
-            let (clamped, reason) = clamp_value_with_dynamic_window(&suggestion.key, suggestion.value, window);
+            let (clamped, reason) =
+                clamp_value_with_dynamic_window(&suggestion.key, suggestion.value, window);
             suggestion.value = clamped;
             if let Some(reason_text) = reason {
                 clamps.push(DynamicConstraintClampRecord {
@@ -874,22 +1009,62 @@ fn infer_constraint_category(reason: &str) -> (&'static str, &'static str) {
 fn actions_for_constraint_category(category: &str) -> Vec<StyleConstraintAction> {
     match category {
         "highlight" => vec![
-            StyleConstraintAction { key: "highlights".to_string(), label: "高光".to_string(), delta: -6.0 },
-            StyleConstraintAction { key: "whites".to_string(), label: "白色色阶".to_string(), delta: -8.0 },
-            StyleConstraintAction { key: "exposure".to_string(), label: "曝光".to_string(), delta: -0.08 },
+            StyleConstraintAction {
+                key: "highlights".to_string(),
+                label: "高光".to_string(),
+                delta: -6.0,
+            },
+            StyleConstraintAction {
+                key: "whites".to_string(),
+                label: "白色色阶".to_string(),
+                delta: -8.0,
+            },
+            StyleConstraintAction {
+                key: "exposure".to_string(),
+                label: "曝光".to_string(),
+                delta: -0.08,
+            },
         ],
         "shadow" => vec![
-            StyleConstraintAction { key: "shadows".to_string(), label: "阴影".to_string(), delta: 6.0 },
-            StyleConstraintAction { key: "blacks".to_string(), label: "黑色色阶".to_string(), delta: 5.0 },
-            StyleConstraintAction { key: "exposure".to_string(), label: "曝光".to_string(), delta: 0.06 },
+            StyleConstraintAction {
+                key: "shadows".to_string(),
+                label: "阴影".to_string(),
+                delta: 6.0,
+            },
+            StyleConstraintAction {
+                key: "blacks".to_string(),
+                label: "黑色色阶".to_string(),
+                delta: 5.0,
+            },
+            StyleConstraintAction {
+                key: "exposure".to_string(),
+                label: "曝光".to_string(),
+                delta: 0.06,
+            },
         ],
         "saturation" => vec![
-            StyleConstraintAction { key: "saturation".to_string(), label: "饱和度".to_string(), delta: -6.0 },
-            StyleConstraintAction { key: "vibrance".to_string(), label: "自然饱和度".to_string(), delta: -6.0 },
+            StyleConstraintAction {
+                key: "saturation".to_string(),
+                label: "饱和度".to_string(),
+                delta: -6.0,
+            },
+            StyleConstraintAction {
+                key: "vibrance".to_string(),
+                label: "自然饱和度".to_string(),
+                delta: -6.0,
+            },
         ],
         _ => vec![
-            StyleConstraintAction { key: "contrast".to_string(), label: "对比度".to_string(), delta: -4.0 },
-            StyleConstraintAction { key: "exposure".to_string(), label: "曝光".to_string(), delta: -0.04 },
+            StyleConstraintAction {
+                key: "contrast".to_string(),
+                label: "对比度".to_string(),
+                delta: -4.0,
+            },
+            StyleConstraintAction {
+                key: "exposure".to_string(),
+                label: "曝光".to_string(),
+                delta: -0.04,
+            },
         ],
     }
 }
@@ -916,16 +1091,22 @@ fn build_blocked_items(
     }
     let mut items: Vec<StyleConstraintBlockItem> = grouped
         .into_iter()
-        .map(|(category, (label, reason, hit_count, severity))| StyleConstraintBlockItem {
-            actions: actions_for_constraint_category(&category),
-            category,
-            label,
-            reason,
-            hit_count,
-            severity: (severity * 100.0).round() / 100.0,
-        })
+        .map(
+            |(category, (label, reason, hit_count, severity))| StyleConstraintBlockItem {
+                actions: actions_for_constraint_category(&category),
+                category,
+                label,
+                reason,
+                hit_count,
+                severity: (severity * 100.0).round() / 100.0,
+            },
+        )
         .collect();
-    items.sort_by(|a, b| b.severity.total_cmp(&a.severity).then_with(|| b.hit_count.cmp(&a.hit_count)));
+    items.sort_by(|a, b| {
+        b.severity
+            .total_cmp(&a.severity)
+            .then_with(|| b.hit_count.cmp(&a.hit_count))
+    });
     items.truncate(3);
     items
 }
@@ -946,24 +1127,39 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let total_pixels = (w as f64) * (h as f64);
     if total_pixels == 0.0 {
         return StyleFeatures {
-            mean_luminance: 0.0, highlight_ratio: 0.0, shadow_ratio: 0.0,
+            mean_luminance: 0.0,
+            highlight_ratio: 0.0,
+            shadow_ratio: 0.0,
             contrast_spread: 0.0,
-            p10_luminance: 0.0, p50_luminance: 0.0, p90_luminance: 0.0, p99_luminance: 0.0,
+            p10_luminance: 0.0,
+            p50_luminance: 0.0,
+            p90_luminance: 0.0,
+            p99_luminance: 0.0,
             clipped_highlight_ratio: 0.0,
-            waveform_low_band: 0.0, waveform_mid_band: 0.0, waveform_high_band: 0.0,
-            rb_ratio: 1.0, gb_ratio: 1.0,
-            mean_saturation: 0.0, saturation_spread: 0.0,
-            shadow_luminance_mean: 0.0, mid_luminance_mean: 0.0, highlight_luminance_mean: 0.0,
-            skin_ratio: 0.0, skin_luminance_mean: 0.0, skin_rb_ratio: 1.0,
-            laplacian_variance: 0.0, vignette_diff: 0.0,
+            waveform_low_band: 0.0,
+            waveform_mid_band: 0.0,
+            waveform_high_band: 0.0,
+            rb_ratio: 1.0,
+            gb_ratio: 1.0,
+            mean_saturation: 0.0,
+            saturation_spread: 0.0,
+            shadow_luminance_mean: 0.0,
+            mid_luminance_mean: 0.0,
+            highlight_luminance_mean: 0.0,
+            skin_ratio: 0.0,
+            skin_luminance_mean: 0.0,
+            skin_rb_ratio: 1.0,
+            hue_mean: 0.0,
+            hue_spread: 0.0,
+            laplacian_variance: 0.0,
+            vignette_diff: 0.0,
         };
     }
 
-    // 降采样加速：如果图像太大，缩小到 max 600px 边（减少内存占用）
     let analysis_img = if w > 600 || h > 600 {
-        img.resize(600, 600, image::imageops::FilterType::Nearest)
+        img.resize(600, 600, image::imageops::FilterType::Triangle)
     } else {
-        img.resize(w, h, image::imageops::FilterType::Nearest) // 避免 clone 大图
+        img.resize(w, h, image::imageops::FilterType::Triangle)
     };
     let (aw, ah) = analysis_img.dimensions();
     let a_total = (aw as f64) * (ah as f64);
@@ -972,6 +1168,10 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let mut sum_r: f64 = 0.0;
     let mut sum_g: f64 = 0.0;
     let mut sum_b: f64 = 0.0;
+    let mut robust_sum_r: f64 = 0.0;
+    let mut robust_sum_g: f64 = 0.0;
+    let mut robust_sum_b: f64 = 0.0;
+    let mut robust_color_weight_sum: f64 = 0.0;
     let mut sum_sat: f64 = 0.0;
     let mut highlight_count: f64 = 0.0;
     let mut shadow_count: f64 = 0.0;
@@ -985,6 +1185,8 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let mut skin_count: f64 = 0.0;
     let mut skin_lum_sum: f64 = 0.0;
     let mut skin_rb_sum: f64 = 0.0;
+    let mut hue_values: Vec<f64> = Vec::with_capacity(a_total as usize);
+    let mut hue_weights: Vec<f64> = Vec::with_capacity(a_total as usize);
     let mut lum_values: Vec<f64> = Vec::with_capacity(a_total as usize);
     let mut sat_values: Vec<f64> = Vec::with_capacity(a_total as usize);
     let waveform_bins = 32usize;
@@ -1002,9 +1204,17 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     for y in 0..ah {
         for x in 0..aw {
             let px = analysis_img.get_pixel(x, y).to_rgb();
-            let r = px[0] as f64 / 255.0;
-            let g = px[1] as f64 / 255.0;
-            let b = px[2] as f64 / 255.0;
+            let to_linear = |u: u8| -> f64 {
+                let srgb = u as f64 / 255.0;
+                if srgb <= 0.04045 {
+                    srgb / 12.92
+                } else {
+                    ((srgb + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let r = to_linear(px[0]);
+            let g = to_linear(px[1]);
+            let b = to_linear(px[2]);
 
             let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             sum_lum += lum;
@@ -1013,9 +1223,15 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
             sum_b += b;
             lum_values.push(lum);
 
-            if lum > 0.8 { highlight_count += 1.0; }
-            if lum < 0.2 { shadow_count += 1.0; }
-            if lum > 0.98 { clipped_highlight_count += 1.0; }
+            if lum > 0.8 {
+                highlight_count += 1.0;
+            }
+            if lum < 0.2 {
+                shadow_count += 1.0;
+            }
+            if lum > 0.98 {
+                clipped_highlight_count += 1.0;
+            }
             if lum < 0.33 {
                 shadow_lum_sum += lum;
                 shadow_lum_count += 1.0;
@@ -1035,10 +1251,47 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
             } else {
                 let l = (max_c + min_c) / 2.0;
                 let delta = max_c - min_c;
-                if l <= 0.5 { delta / (max_c + min_c) } else { delta / (2.0 - max_c - min_c) }
+                if l <= 0.5 {
+                    delta / (max_c + min_c)
+                } else {
+                    delta / (2.0 - max_c - min_c)
+                }
             };
             sum_sat += sat;
             sat_values.push(sat);
+            let nx = (x as f64 + 0.5) / aw as f64;
+            let ny = (y as f64 + 0.5) / ah as f64;
+            let center_bias = (1.0 - ((nx - 0.5).abs() * 2.0).powi(2))
+                * (1.0 - ((ny - 0.5).abs() * 2.0).powi(2));
+            let robust_luma_gate = if lum < 0.04 || lum > 0.95 { 0.0 } else { 1.0 };
+            let highlight_gate = (1.0 - (lum - 0.75).max(0.0) / 0.25).max(0.0).min(1.0);
+            let color_weight = (0.25 + 0.75 * center_bias.max(0.0)) * robust_luma_gate * highlight_gate;
+            if color_weight > 0.0 {
+                robust_sum_r += r * color_weight;
+                robust_sum_g += g * color_weight;
+                robust_sum_b += b * color_weight;
+                robust_color_weight_sum += color_weight;
+            }
+            if sat > 0.06 && lum > 0.04 && lum < 0.96 {
+                let max_c = r.max(g).max(b);
+                let min_c = r.min(g).min(b);
+                let delta = max_c - min_c;
+                if delta > 1e-6 {
+                    let mut hue = if (max_c - r).abs() < 1e-6 {
+                        ((g - b) / delta) % 6.0
+                    } else if (max_c - g).abs() < 1e-6 {
+                        (b - r) / delta + 2.0
+                    } else {
+                        (r - g) / delta + 4.0
+                    };
+                    hue /= 6.0;
+                    if hue < 0.0 {
+                        hue += 1.0;
+                    }
+                    hue_values.push(hue);
+                    hue_weights.push((sat * (0.35 + 0.65 * center_bias.max(0.0))).max(0.02).min(1.0));
+                }
+            }
 
             // 暗角：中心 vs 边缘
             let dist = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
@@ -1051,17 +1304,19 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
                 edge_count += 1.0;
             }
 
-            let is_skin = r > 0.35
-                && g > 0.20
-                && b > 0.12
-                && r > g
-                && g > b * 0.8
-                && (r - g) > 0.02
-                && (r - b) > 0.05;
+            let y_val = 0.299 * r + 0.587 * g + 0.114 * b;
+            let cb = (b - y_val) * 0.565 + 0.5;
+            let cr = (r - y_val) * 0.713 + 0.5;
+            let chroma_conf = (1.0
+                - ((cb - 0.42).abs() / 0.14 + (cr - 0.58).abs() / 0.16) * 0.5)
+                .max(0.0)
+                .min(1.0);
+            let is_skin = y_val > 0.08 && y_val < 0.90 && sat > 0.05 && chroma_conf > 0.35;
             if is_skin {
-                skin_count += 1.0;
-                skin_lum_sum += lum;
-                skin_rb_sum += if b > 0.001 { r / b } else { 1.0 };
+                let weight = 0.55 + chroma_conf * 0.45;
+                skin_count += weight;
+                skin_lum_sum += lum * weight;
+                skin_rb_sum += if b > 0.001 { (r / b) * weight } else { weight };
             }
 
             let mut bin_idx = ((x as f64 / aw as f64) * waveform_bins as f64).floor() as usize;
@@ -1076,12 +1331,43 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let mean_sat = sum_sat / a_total;
 
     // 对比度：亮度标准差
-    let variance: f64 = lum_values.iter().map(|l| (l - mean_lum).powi(2)).sum::<f64>() / a_total;
+    let variance: f64 = lum_values
+        .iter()
+        .map(|l| (l - mean_lum).powi(2))
+        .sum::<f64>()
+        / a_total;
     let contrast_spread = variance.sqrt();
 
     // 饱和度标准差
-    let sat_variance: f64 = sat_values.iter().map(|s| (s - mean_sat).powi(2)).sum::<f64>() / a_total;
+    let sat_variance: f64 = sat_values
+        .iter()
+        .map(|s| (s - mean_sat).powi(2))
+        .sum::<f64>()
+        / a_total;
     let saturation_spread = sat_variance.sqrt();
+    let (hue_mean, hue_spread) = if hue_values.is_empty() {
+        (0.0, 0.0)
+    } else {
+        let mut sum_sin = 0.0;
+        let mut sum_cos = 0.0;
+        let mut weight_sum = 0.0;
+        for (idx, h) in hue_values.iter().enumerate() {
+            let rad = h * std::f64::consts::TAU;
+            let w_h = hue_weights.get(idx).copied().unwrap_or(1.0);
+            sum_sin += rad.sin() * w_h;
+            sum_cos += rad.cos() * w_h;
+            weight_sum += w_h;
+        }
+        let mut mean_angle = sum_sin.atan2(sum_cos);
+        if mean_angle < 0.0 {
+            mean_angle += std::f64::consts::TAU;
+        }
+        let r_len = (sum_sin.powi(2) + sum_cos.powi(2)).sqrt() / weight_sum.max(1e-6);
+        (
+            mean_angle / std::f64::consts::TAU,
+            (1.0 - r_len).max(0.0).min(1.0),
+        )
+    };
 
     let mut lum_sorted = lum_values.clone();
     lum_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -1096,6 +1382,12 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let p50 = quantile(0.50);
     let p90 = quantile(0.90);
     let p99 = quantile(0.99);
+    let mut ordered_q = [p10, p50, p90, p99];
+    ordered_q.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p10 = ordered_q[0];
+    let p50 = ordered_q[1];
+    let p90 = ordered_q[2];
+    let p99 = ordered_q[3];
 
     let mut low_sum = 0.0;
     let mut mid_sum = 0.0;
@@ -1115,57 +1407,138 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
         high_sum += get_q(0.90);
         band_count += 1.0;
     }
-    let waveform_low_band = if band_count > 0.0 { low_sum / band_count } else { p10 };
-    let waveform_mid_band = if band_count > 0.0 { mid_sum / band_count } else { p50 };
-    let waveform_high_band = if band_count > 0.0 { high_sum / band_count } else { p90 };
+    let waveform_low_band = if band_count > 0.0 {
+        low_sum / band_count
+    } else {
+        p10
+    };
+    let waveform_mid_band = if band_count > 0.0 {
+        mid_sum / band_count
+    } else {
+        p50
+    };
+    let waveform_high_band = if band_count > 0.0 {
+        high_sum / band_count
+    } else {
+        p90
+    };
 
     // R/B 和 G/B 通道比值（色温/色调）
     let mean_r = sum_r / a_total;
     let mean_g = sum_g / a_total;
     let mean_b = sum_b / a_total;
-    let rb_ratio = if mean_b > 0.001 { mean_r / mean_b } else { 1.0 };
-    let gb_ratio = if mean_b > 0.001 { mean_g / mean_b } else { 1.0 };
+    let robust_mean_r = if robust_color_weight_sum > 0.0 {
+        robust_sum_r / robust_color_weight_sum
+    } else {
+        mean_r
+    };
+    let robust_mean_g = if robust_color_weight_sum > 0.0 {
+        robust_sum_g / robust_color_weight_sum
+    } else {
+        mean_g
+    };
+    let robust_mean_b = if robust_color_weight_sum > 0.0 {
+        robust_sum_b / robust_color_weight_sum
+    } else {
+        mean_b
+    };
+    let rb_ratio = if robust_mean_b > 0.001 {
+        robust_mean_r / robust_mean_b
+    } else {
+        1.0
+    };
+    let gb_ratio = if robust_mean_b > 0.001 {
+        robust_mean_g / robust_mean_b
+    } else {
+        1.0
+    };
+    let rb_ratio = if rb_ratio.is_finite() { rb_ratio } else { 1.0 };
+    let gb_ratio = if gb_ratio.is_finite() { gb_ratio } else { 1.0 };
 
     // 拉普拉斯方差（清晰度/结构）
     let gray = analysis_img.to_luma8();
     let laplacian_variance = compute_laplacian_variance(&gray, aw, ah);
 
     // 暗角差值
-    let center_mean = if center_count > 0.0 { center_lum_sum / center_count } else { mean_lum };
-    let edge_mean = if edge_count > 0.0 { edge_lum_sum / edge_count } else { mean_lum };
+    let center_mean = if center_count > 0.0 {
+        center_lum_sum / center_count
+    } else {
+        mean_lum
+    };
+    let edge_mean = if edge_count > 0.0 {
+        edge_lum_sum / edge_count
+    } else {
+        mean_lum
+    };
     let vignette_diff = center_mean - edge_mean; // 正值=边缘暗=有暗角
-    let shadow_luminance_mean = if shadow_lum_count > 0.0 { shadow_lum_sum / shadow_lum_count } else { p10 };
-    let mid_luminance_mean = if mid_lum_count > 0.0 { mid_lum_sum / mid_lum_count } else { p50 };
-    let highlight_luminance_mean = if highlight_lum_count > 0.0 { highlight_lum_sum / highlight_lum_count } else { p90 };
-    let skin_ratio = skin_count / a_total;
-    let skin_luminance_mean = if skin_count > 0.0 { skin_lum_sum / skin_count } else { mean_lum };
-    let skin_rb_ratio = if skin_count > 0.0 { skin_rb_sum / skin_count } else { rb_ratio };
+    let shadow_luminance_mean = if shadow_lum_count > 0.0 {
+        shadow_lum_sum / shadow_lum_count
+    } else {
+        p10
+    };
+    let mid_luminance_mean = if mid_lum_count > 0.0 {
+        mid_lum_sum / mid_lum_count
+    } else {
+        p50
+    };
+    let highlight_luminance_mean = if highlight_lum_count > 0.0 {
+        highlight_lum_sum / highlight_lum_count
+    } else {
+        p90
+    };
+    let skin_luminance_mean = if skin_count > 0.0 {
+        skin_lum_sum / skin_count
+    } else {
+        mean_lum
+    };
+    let skin_rb_ratio = if skin_count > 0.0 {
+        skin_rb_sum / skin_count
+    } else {
+        rb_ratio
+    };
+
+    let safe = |v: f64, fallback: f64| if v.is_finite() { v } else { fallback };
+    let highlight_ratio = safe((highlight_count / a_total).max(0.0).min(1.0), 0.0);
+    let shadow_ratio = safe((shadow_count / a_total).max(0.0).min(1.0), 0.0);
+    let clipped_ratio = safe((clipped_highlight_count / a_total).max(0.0).min(1.0), 0.0);
+    let skin_ratio = safe((skin_count / a_total).max(0.0).min(1.0), 0.0);
+    let hue_mean = safe(hue_mean.max(0.0).min(1.0), 0.0);
+    let hue_spread = safe(hue_spread.max(0.0).min(1.0), 0.0);
+
+    let mut ordered_wave = [
+        safe(waveform_low_band.max(0.0).min(1.0), p10),
+        safe(waveform_mid_band.max(0.0).min(1.0), p50),
+        safe(waveform_high_band.max(0.0).min(1.0), p90),
+    ];
+    ordered_wave.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     StyleFeatures {
-        mean_luminance: mean_lum,
-        highlight_ratio: highlight_count / a_total,
-        shadow_ratio: shadow_count / a_total,
-        contrast_spread,
-        p10_luminance: p10,
-        p50_luminance: p50,
-        p90_luminance: p90,
-        p99_luminance: p99,
-        clipped_highlight_ratio: clipped_highlight_count / a_total,
-        waveform_low_band,
-        waveform_mid_band,
-        waveform_high_band,
+        mean_luminance: safe(mean_lum.max(0.0).min(1.0), 0.0),
+        highlight_ratio,
+        shadow_ratio,
+        contrast_spread: safe(contrast_spread.max(0.0), 0.0),
+        p10_luminance: safe(p10.max(0.0).min(1.0), 0.0),
+        p50_luminance: safe(p50.max(0.0).min(1.0), 0.0),
+        p90_luminance: safe(p90.max(0.0).min(1.0), 0.0),
+        p99_luminance: safe(p99.max(0.0).min(1.0), 0.0),
+        clipped_highlight_ratio: clipped_ratio,
+        waveform_low_band: ordered_wave[0],
+        waveform_mid_band: ordered_wave[1],
+        waveform_high_band: ordered_wave[2],
         rb_ratio,
         gb_ratio,
-        mean_saturation: mean_sat,
-        saturation_spread,
-        shadow_luminance_mean,
-        mid_luminance_mean,
-        highlight_luminance_mean,
+        mean_saturation: safe(mean_sat.max(0.0).min(1.0), 0.0),
+        saturation_spread: safe(saturation_spread.max(0.0), 0.0),
+        shadow_luminance_mean: safe(shadow_luminance_mean.max(0.0).min(1.0), 0.0),
+        mid_luminance_mean: safe(mid_luminance_mean.max(0.0).min(1.0), 0.0),
+        highlight_luminance_mean: safe(highlight_luminance_mean.max(0.0).min(1.0), 0.0),
         skin_ratio,
-        skin_luminance_mean,
-        skin_rb_ratio,
-        laplacian_variance,
-        vignette_diff,
+        skin_luminance_mean: safe(skin_luminance_mean.max(0.0).min(1.0), 0.0),
+        skin_rb_ratio: safe(skin_rb_ratio.max(0.0), rb_ratio),
+        hue_mean,
+        hue_spread,
+        laplacian_variance: safe(laplacian_variance.max(0.0), 0.0),
+        vignette_diff: safe(vignette_diff, 0.0),
     }
 }
 
@@ -1262,6 +1635,27 @@ fn style_scene_profile(ref_feat: &StyleFeatures, cur_feat: &StyleFeatures) -> St
     profile
 }
 
+fn adaptive_style_thresholds(
+    ref_feat: &StyleFeatures,
+    cur_feat: &StyleFeatures,
+    baseline_error: &StyleTransferErrorBreakdown,
+) -> (f64, f64) {
+    let style_force = style_intensity_score(ref_feat, cur_feat);
+    let color_ratio = baseline_error.color / baseline_error.total.max(1e-6);
+    let tonal_ratio = baseline_error.tonal / baseline_error.total.max(1e-6);
+    let early_exit = (EARLY_EXIT_STYLE_DISTANCE_THRESHOLD - style_force * 0.055
+        + tonal_ratio * 0.018
+        - color_ratio * 0.012)
+        .max(0.14)
+        .min(0.30);
+    let llm_trigger = (LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD - style_force * 0.14
+        - color_ratio * 0.08
+        + tonal_ratio * 0.03)
+        .max(0.42)
+        .min(0.80);
+    (early_exit, llm_trigger.max(early_exit + 0.12))
+}
+
 fn tonal_alignment_score(ref_feat: &StyleFeatures, pred_feat: &StyleFeatures) -> f64 {
     let mut score = 0.0;
     score += (ref_feat.waveform_mid_band - pred_feat.waveform_mid_band).abs() * 4.4;
@@ -1280,7 +1674,10 @@ fn estimate_features_from_adjustments(
 ) -> StyleFeatures {
     let mut f = cur_feat.clone();
     let delta = |k: &str| {
-        candidate_values.get(k).copied().unwrap_or_else(|| current_values.get(k).copied().unwrap_or(0.0))
+        candidate_values
+            .get(k)
+            .copied()
+            .unwrap_or_else(|| current_values.get(k).copied().unwrap_or(0.0))
             - current_values.get(k).copied().unwrap_or(0.0)
     };
 
@@ -1296,8 +1693,12 @@ fn estimate_features_from_adjustments(
     let d_vib = delta("vibrance");
     let d_clarity = delta("clarity");
     let d_vig = delta("vignetteAmount");
+    let d_exp_con = d_exp * d_con.signum() * d_con.abs().min(35.0) * 0.001;
+    let d_wh_hl = d_wh * d_hl * 0.00002;
+    let d_sat_vib = d_sat * d_vib * 0.00003;
 
-    f.mean_luminance += d_exp * 0.20 + d_hl * 0.0012 + d_sh * 0.0010 + d_wh * 0.0016 - d_bl * 0.0009;
+    f.mean_luminance +=
+        d_exp * 0.20 + d_hl * 0.0012 + d_sh * 0.0010 + d_wh * 0.0016 - d_bl * 0.0009;
     f.mid_luminance_mean += d_exp * 0.18 + d_sh * 0.0012 + d_con * 0.0006;
     f.shadow_luminance_mean += d_exp * 0.13 + d_sh * 0.0018 - d_bl * 0.0015 - d_con * 0.0007;
     f.highlight_luminance_mean += d_exp * 0.16 + d_hl * 0.0018 + d_wh * 0.0022 + d_con * 0.0008;
@@ -1309,11 +1710,16 @@ fn estimate_features_from_adjustments(
     f.p90_luminance += d_exp * 0.13 + d_hl * 0.0016 + d_wh * 0.0019 + d_con * 0.0006;
     f.p99_luminance += d_exp * 0.18 + d_hl * 0.0020 + d_wh * 0.0023 + d_con * 0.0010;
     f.clipped_highlight_ratio += d_exp * 0.05 + d_hl * 0.00045 + d_wh * 0.00055;
-    f.contrast_spread += d_con * 0.0021 + d_wh * 0.0008 + d_bl * 0.0008;
+    f.contrast_spread += d_con * 0.0021 + d_wh * 0.0008 + d_bl * 0.0008 + d_exp_con * 0.32;
     f.rb_ratio += d_temp * 0.0028;
     f.gb_ratio += -d_tint * 0.0025;
-    f.mean_saturation += d_sat * 0.0042 + d_vib * 0.0028 - d_exp * 0.0012;
-    f.saturation_spread += d_vib * 0.0032 + d_sat * 0.0014;
+    f.mean_saturation += d_sat * 0.0042 + d_vib * 0.0028 - d_exp * 0.0012 + d_sat_vib * 0.28;
+    f.saturation_spread += d_vib * 0.0032 + d_sat * 0.0014 + d_sat_vib * 0.22;
+    f.p90_luminance += d_wh_hl * 0.25;
+    f.hue_mean += (d_tint * 0.0008 - d_temp * 0.0006 + d_sat_vib * 0.16).max(-0.08).min(0.08);
+    f.hue_spread += (d_vib * 0.0018 + d_sat * 0.0011 + d_sat_vib * 0.20)
+        .max(-0.06)
+        .min(0.08);
     f.skin_luminance_mean += d_exp * 0.15 + d_hl * 0.0011 + d_wh * 0.0014;
     f.skin_rb_ratio += d_temp * 0.0022 - d_tint * 0.0008;
     f.laplacian_variance += d_clarity * 15.0;
@@ -1335,6 +1741,8 @@ fn estimate_features_from_adjustments(
     f.mean_saturation = clamp01(f.mean_saturation);
     f.saturation_spread = clamp01(f.saturation_spread);
     f.skin_luminance_mean = clamp01(f.skin_luminance_mean);
+    f.hue_mean = clamp01(f.hue_mean);
+    f.hue_spread = clamp01(f.hue_spread);
     f
 }
 
@@ -1353,14 +1761,20 @@ fn style_distance_score(
     s += (ref_feat.contrast_spread - pred_feat.contrast_spread).abs() * 7.2;
     s += (ref_feat.mean_saturation - pred_feat.mean_saturation).abs() * 3.3;
     s += (ref_feat.saturation_spread - pred_feat.saturation_spread).abs() * 2.0;
+    s += (ref_feat.hue_mean - pred_feat.hue_mean).abs() * 2.4;
+    s += (ref_feat.hue_spread - pred_feat.hue_spread).abs() * 1.8;
     s += (ref_feat.rb_ratio - pred_feat.rb_ratio).abs() * 2.2;
     s += (ref_feat.gb_ratio - pred_feat.gb_ratio).abs() * 2.1;
     s += (ref_feat.shadow_luminance_mean - pred_feat.shadow_luminance_mean).abs() * 2.8;
     s += (ref_feat.mid_luminance_mean - pred_feat.mid_luminance_mean).abs() * 3.2;
     s += (ref_feat.highlight_luminance_mean - pred_feat.highlight_luminance_mean).abs() * 2.9;
     if ref_feat.skin_ratio > 0.015 && pred_feat.skin_ratio > 0.015 {
-        s += (ref_feat.skin_luminance_mean - pred_feat.skin_luminance_mean).abs() * 3.8 * tuning.skin_protect_strength;
-        s += (ref_feat.skin_rb_ratio - pred_feat.skin_rb_ratio).abs() * 2.0 * tuning.skin_protect_strength;
+        s += (ref_feat.skin_luminance_mean - pred_feat.skin_luminance_mean).abs()
+            * 3.8
+            * tuning.skin_protect_strength;
+        s += (ref_feat.skin_rb_ratio - pred_feat.skin_rb_ratio).abs()
+            * 2.0
+            * tuning.skin_protect_strength;
     }
     let target_p99_cap = if classify_tonal_style(ref_feat) == "高调" {
         0.985 + (1.0 - tuning.highlight_guard_strength) * 0.012
@@ -1373,7 +1787,7 @@ fn style_distance_score(
     s
 }
 
-fn style_metric_vector(feat: &StyleFeatures) -> [f64; 13] {
+fn style_metric_vector(feat: &StyleFeatures) -> [f64; 15] {
     [
         feat.waveform_mid_band,
         feat.waveform_low_band,
@@ -1386,19 +1800,39 @@ fn style_metric_vector(feat: &StyleFeatures) -> [f64; 13] {
         feat.saturation_spread,
         feat.rb_ratio,
         feat.gb_ratio,
+        feat.hue_mean,
+        feat.hue_spread,
         feat.skin_luminance_mean,
         feat.skin_rb_ratio,
     ]
 }
 
-fn style_metric_weights(ref_feat: &StyleFeatures, pred_feat: &StyleFeatures, tuning: StyleTransferTuning) -> [f64; 13] {
+fn style_metric_weights(
+    ref_feat: &StyleFeatures,
+    pred_feat: &StyleFeatures,
+    tuning: StyleTransferTuning,
+) -> [f64; 15] {
     let skin_w = if ref_feat.skin_ratio > 0.015 && pred_feat.skin_ratio > 0.015 {
         1.0 * tuning.skin_protect_strength
     } else {
         0.0
     };
     [
-        6.2, 4.3, 4.8, 3.6, 4.4, 3.5, 7.2, 3.3, 2.0, 2.2, 2.1, 3.8 * skin_w, 2.0 * skin_w,
+        6.2,
+        4.3,
+        4.8,
+        3.6,
+        4.4,
+        3.5,
+        7.2,
+        3.3,
+        2.0,
+        2.2,
+        2.1,
+        2.4,
+        1.8,
+        3.8 * skin_w,
+        2.0 * skin_w,
     ]
 }
 
@@ -1432,14 +1866,17 @@ fn style_error_breakdown(
     color += (ref_feat.saturation_spread - pred_feat.saturation_spread).abs() * 2.0;
     color += (ref_feat.rb_ratio - pred_feat.rb_ratio).abs() * 2.2;
     color += (ref_feat.gb_ratio - pred_feat.gb_ratio).abs() * 2.1;
+    color += (ref_feat.hue_mean - pred_feat.hue_mean).abs() * 2.4;
+    color += (ref_feat.hue_spread - pred_feat.hue_spread).abs() * 1.8;
 
     let mut skin = 0.0;
     if ref_feat.skin_ratio > 0.015 && pred_feat.skin_ratio > 0.015 {
         skin += (ref_feat.skin_luminance_mean - pred_feat.skin_luminance_mean).abs()
             * 3.8
             * tuning.skin_protect_strength;
-        skin +=
-            (ref_feat.skin_rb_ratio - pred_feat.skin_rb_ratio).abs() * 2.0 * tuning.skin_protect_strength;
+        skin += (ref_feat.skin_rb_ratio - pred_feat.skin_rb_ratio).abs()
+            * 2.0
+            * tuning.skin_protect_strength;
     }
 
     let p99_cap = target_p99_cap(ref_feat, tuning);
@@ -1555,6 +1992,316 @@ fn upsert_suggestion_delta(
     true
 }
 
+fn upsert_suggestion_absolute(
+    suggestions: &mut Vec<StyleTransferSuggestion>,
+    key: &str,
+    value: f64,
+    reason: &str,
+) -> bool {
+    let Some((label, min, max)) = action_meta(key) else {
+        return false;
+    };
+    let target = value.max(min).min(max);
+    let normalized = if key == "exposure" {
+        (target * 100.0).round() / 100.0
+    } else {
+        target.round()
+    };
+    if let Some(existing) = suggestions.iter_mut().find(|s| s.key == key) {
+        existing.value = normalized;
+        existing.reason = if existing.reason.is_empty() {
+            reason.to_string()
+        } else {
+            format!("{}；{}", existing.reason, reason)
+        };
+        return true;
+    }
+    suggestions.push(StyleTransferSuggestion {
+        key: key.to_string(),
+        value: normalized,
+        label: label.to_string(),
+        min,
+        max,
+        reason: reason.to_string(),
+    });
+    true
+}
+
+fn apply_reference_normalize_pass(
+    ref_feat: &StyleFeatures,
+    cur_feat: &StyleFeatures,
+    current_adjustments: &Value,
+    suggestions: &mut Vec<StyleTransferSuggestion>,
+    tuning: StyleTransferTuning,
+) {
+    let mut candidate = suggestions.clone();
+    let clamp = |v: f64, min: f64, max: f64| -> f64 { v.max(min).min(max) };
+    let cur_exposure = adjustment_value(current_adjustments, "exposure");
+    let cur_temp = adjustment_value(current_adjustments, "temperature");
+    let cur_tint = adjustment_value(current_adjustments, "tint");
+    let cur_sat = adjustment_value(current_adjustments, "saturation");
+    let cur_vib = adjustment_value(current_adjustments, "vibrance");
+    let cur_shadows = adjustment_value(current_adjustments, "shadows");
+    let cur_blacks = adjustment_value(current_adjustments, "blacks");
+    let tonal_conf = clamp(
+        ((ref_feat.p50_luminance - cur_feat.p50_luminance).abs() * 2.6
+            + (ref_feat.mean_luminance - cur_feat.mean_luminance).abs() * 2.0)
+            * (0.85 + tuning.style_strength * 0.15),
+        0.0,
+        1.0,
+    );
+    let color_conf = clamp(
+        ((ref_feat.rb_ratio - cur_feat.rb_ratio).abs() * 1.8
+            + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 1.8
+            + (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.3),
+        0.0,
+        1.0,
+    );
+    let exposure_target = clamp(
+        cur_exposure
+            + (ref_feat.p50_luminance - cur_feat.p50_luminance) * (0.95 + tonal_conf * 0.30)
+            + (ref_feat.mean_luminance - cur_feat.mean_luminance) * (0.38 + tonal_conf * 0.18),
+        -2.3,
+        2.3,
+    );
+    let bright_gap = (ref_feat.p50_luminance - cur_feat.p50_luminance).max(0.0);
+    let mid_gap = (ref_feat.waveform_mid_band - cur_feat.waveform_mid_band).max(0.0);
+    let highlight_room = (ref_feat.p90_luminance - cur_feat.p90_luminance).max(0.0);
+    let exposure_target = if bright_gap > 0.012 {
+        clamp(
+            exposure_target
+                + bright_gap * (0.22 + tonal_conf * 0.10)
+                + mid_gap * 0.16
+                + highlight_room * 0.08,
+            -2.3,
+            2.3,
+        )
+    } else {
+        exposure_target
+    };
+    let shadows_target = clamp(
+        cur_shadows
+            + (ref_feat.shadow_luminance_mean - cur_feat.shadow_luminance_mean)
+                * (92.0 + tonal_conf * 24.0)
+            + bright_gap * 26.0,
+        -55.0,
+        70.0,
+    );
+    let blacks_target = clamp(
+        cur_blacks
+            + (ref_feat.p10_luminance - cur_feat.p10_luminance) * (58.0 + tonal_conf * 16.0)
+            + bright_gap * 12.0,
+        -55.0,
+        45.0,
+    );
+    let temp_target = clamp(
+        cur_temp
+            + (ref_feat.rb_ratio - cur_feat.rb_ratio) * (26.0 + color_conf * 8.0)
+            + (cur_feat.gb_ratio - ref_feat.gb_ratio) * 6.0,
+        -60.0,
+        60.0,
+    );
+    let tint_target = clamp(
+        cur_tint
+            + (cur_feat.gb_ratio - ref_feat.gb_ratio) * (24.0 + color_conf * 7.0)
+            + (ref_feat.rb_ratio - cur_feat.rb_ratio) * 5.0,
+        -55.0,
+        55.0,
+    );
+    let sat_target = clamp(
+        cur_sat
+            + (ref_feat.mean_saturation - cur_feat.mean_saturation) * (62.0 + color_conf * 18.0),
+        -55.0,
+        55.0,
+    );
+    let vib_target = clamp(
+        cur_vib
+            + (ref_feat.saturation_spread - cur_feat.saturation_spread)
+                * (70.0 + color_conf * 20.0),
+        -55.0,
+        55.0,
+    );
+    let exposure_blend = 0.28 + tonal_conf * 0.36;
+    let color_blend = 0.22 + color_conf * 0.32;
+    if (exposure_target - cur_exposure).abs() > 0.035 {
+        let existing = candidate
+            .iter()
+            .find(|s| s.key == "exposure")
+            .map(|s| s.value)
+            .unwrap_or(cur_exposure);
+        let blended = existing * (1.0 - exposure_blend) + exposure_target * exposure_blend;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "exposure",
+            blended,
+            "参考归一化：先对齐中间调与整体亮度",
+        );
+    }
+    if (temp_target - cur_temp).abs() > 1.5 {
+        let existing = candidate
+            .iter()
+            .find(|s| s.key == "temperature")
+            .map(|s| s.value)
+            .unwrap_or(cur_temp);
+        let blended = existing * (1.0 - color_blend) + temp_target * color_blend;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "temperature",
+            blended,
+            "参考归一化：先对齐冷暖倾向",
+        );
+    }
+    if (tint_target - cur_tint).abs() > 1.5 {
+        let existing = candidate
+            .iter()
+            .find(|s| s.key == "tint")
+            .map(|s| s.value)
+            .unwrap_or(cur_tint);
+        let blended = existing * (1.0 - color_blend) + tint_target * color_blend;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "tint",
+            blended,
+            "参考归一化：先对齐色偏基线",
+        );
+    }
+    if bright_gap > 0.015 || (shadows_target - cur_shadows).abs() > 1.6 {
+        let existing = candidate
+            .iter()
+            .find(|s| s.key == "shadows")
+            .map(|s| s.value)
+            .unwrap_or(cur_shadows);
+        let shadow_blend = 0.34 + tonal_conf * 0.30;
+        let blended = existing * (1.0 - shadow_blend) + shadows_target * shadow_blend;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "shadows",
+            blended,
+            "提亮纠偏：补偿暗部亮度",
+        );
+    }
+    if bright_gap > 0.02 || (blacks_target - cur_blacks).abs() > 1.6 {
+        let existing = candidate
+            .iter()
+            .find(|s| s.key == "blacks")
+            .map(|s| s.value)
+            .unwrap_or(cur_blacks);
+        let black_blend = 0.30 + tonal_conf * 0.26;
+        let blended = existing * (1.0 - black_blend) + blacks_target * black_blend;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "blacks",
+            blended,
+            "提亮纠偏：抬升黑场避免整体发闷",
+        );
+    }
+    if ref_feat.mean_saturation < 0.28 && cur_feat.mean_saturation > ref_feat.mean_saturation + 0.03
+    {
+        let sat_cap = cur_sat + (ref_feat.mean_saturation - cur_feat.mean_saturation) * 48.0;
+        let vib_cap = cur_vib + (ref_feat.saturation_spread - cur_feat.saturation_spread) * 42.0;
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "saturation",
+            sat_target.min(sat_cap),
+            "低饱和参考保护：限制过度上色",
+        );
+        let _ = upsert_suggestion_absolute(
+            &mut candidate,
+            "vibrance",
+            vib_target.min(vib_cap),
+            "低饱和参考保护：限制同系色扩散",
+        );
+    }
+    let before_pred = estimate_features_for_suggestions(cur_feat, current_adjustments, suggestions);
+    let before_error = style_error_breakdown(ref_feat, &before_pred, tuning).total;
+    let after_pred = estimate_features_for_suggestions(cur_feat, current_adjustments, &candidate);
+    let after_error = style_error_breakdown(ref_feat, &after_pred, tuning).total;
+    if after_error + 0.01 < before_error {
+        *suggestions = candidate;
+    }
+}
+
+fn apply_low_confidence_damping(
+    ref_feat: &StyleFeatures,
+    cur_feat: &StyleFeatures,
+    current_adjustments: &Value,
+    suggestions: &mut Vec<StyleTransferSuggestion>,
+    tuning: StyleTransferTuning,
+) {
+    if suggestions.is_empty() {
+        return;
+    }
+    let mut current_values: HashMap<String, f64> = HashMap::new();
+    let mut candidate_values: HashMap<String, f64> = HashMap::new();
+    for s in suggestions.iter() {
+        let current_value = adjustment_value(current_adjustments, &s.key);
+        current_values.insert(s.key.clone(), current_value);
+        candidate_values.insert(s.key.clone(), s.value);
+    }
+    let base_score = style_distance_score(ref_feat, cur_feat, tuning);
+    let predicted =
+        estimate_features_from_adjustments(cur_feat, &current_values, &candidate_values);
+    let after_score = style_distance_score(ref_feat, &predicted, tuning);
+    if base_score < 1e-6 {
+        return;
+    }
+    let improvement = (base_score - after_score) / base_score;
+    let tonal_probe = ((ref_feat.p50_luminance - predicted.p50_luminance).abs()
+        + (ref_feat.waveform_mid_band - predicted.waveform_mid_band).abs())
+        .max(1e-6);
+    let tonal_base = ((ref_feat.p50_luminance - cur_feat.p50_luminance).abs()
+        + (ref_feat.waveform_mid_band - cur_feat.waveform_mid_band).abs())
+        .max(1e-6);
+    let color_probe = ((ref_feat.rb_ratio - predicted.rb_ratio).abs()
+        + (ref_feat.gb_ratio - predicted.gb_ratio).abs()
+        + (ref_feat.hue_mean - predicted.hue_mean).abs())
+        .max(1e-6);
+    let color_base = ((ref_feat.rb_ratio - cur_feat.rb_ratio).abs()
+        + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs()
+        + (ref_feat.hue_mean - cur_feat.hue_mean).abs())
+        .max(1e-6);
+    let probe_improvement = ((tonal_base - tonal_probe) / tonal_base) * 0.55
+        + ((color_base - color_probe) / color_base) * 0.45;
+    let effective_improvement = improvement.min(probe_improvement);
+    let damping: f64 = if effective_improvement < 0.0 {
+        0.45
+    } else if effective_improvement < 0.05 {
+        0.62
+    } else if effective_improvement < 0.10 {
+        0.78
+    } else {
+        1.0
+    };
+    if damping >= 0.999 {
+        return;
+    }
+    for s in suggestions.iter_mut() {
+        let cur = adjustment_value(current_adjustments, &s.key);
+        let mut damping_for_key = damping;
+        let brighten_need = (ref_feat.p50_luminance - cur_feat.p50_luminance).max(0.0)
+            + (ref_feat.waveform_mid_band - cur_feat.waveform_mid_band).max(0.0) * 0.7;
+        if s.key == "exposure" {
+            if brighten_need > 0.02 && s.value > cur {
+                if damping_for_key < 0.88 {
+                    damping_for_key = 0.88;
+                }
+            }
+        } else if (s.key == "shadows" || s.key == "blacks") && brighten_need > 0.018 && s.value > cur
+        {
+            if damping_for_key < 0.84 {
+                damping_for_key = 0.84;
+            }
+        }
+        let damped = cur + (s.value - cur) * damping_for_key;
+        s.value = format_adjustment_value(&s.key, damped);
+        if s.reason.is_empty() {
+            s.reason = "低置信结果自动降幅".to_string();
+        } else {
+            s.reason = format!("{}；低置信结果自动降幅", s.reason);
+        }
+    }
+}
+
 fn auto_refine_suggestions_by_error(
     ref_feat: &StyleFeatures,
     cur_feat: &StyleFeatures,
@@ -1619,7 +2366,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "exposure",
-                ((ref_feat.p50_luminance - pred.p50_luminance) * 0.95).max(-0.12).min(0.12),
+                ((ref_feat.p50_luminance - pred.p50_luminance) * 0.95)
+                    .max(-0.12)
+                    .min(0.12),
                 "误差驱动二次微调：修正中间调偏差",
                 stage,
             );
@@ -1627,7 +2376,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "contrast",
-                ((ref_feat.contrast_spread - pred.contrast_spread) * 28.0).max(-4.0).min(4.0),
+                ((ref_feat.contrast_spread - pred.contrast_spread) * 28.0)
+                    .max(-4.0)
+                    .min(4.0),
                 "误差驱动二次微调：匹配对比度扩散",
                 stage,
             );
@@ -1635,7 +2386,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "shadows",
-                ((ref_feat.waveform_low_band - pred.waveform_low_band) * 18.0).max(-4.0).min(4.0),
+                ((ref_feat.waveform_low_band - pred.waveform_low_band) * 18.0)
+                    .max(-4.0)
+                    .min(4.0),
                 "误差驱动二次微调：补偿暗部波形",
                 stage,
             );
@@ -1643,7 +2396,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "highlights",
-                ((ref_feat.waveform_high_band - pred.waveform_high_band) * 16.0).max(-3.0).min(3.0),
+                ((ref_feat.waveform_high_band - pred.waveform_high_band) * 16.0)
+                    .max(-3.0)
+                    .min(3.0),
                 "误差驱动二次微调：修正亮部波形",
                 stage,
             );
@@ -1666,7 +2421,8 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "temperature",
-                (((ref_feat.rb_ratio - pred.rb_ratio) * 18.0 + (pred.gb_ratio - ref_feat.gb_ratio) * 5.0)
+                (((ref_feat.rb_ratio - pred.rb_ratio) * 18.0
+                    + (pred.gb_ratio - ref_feat.gb_ratio) * 5.0)
                     * tonal_coupling
                     * chroma_guard
                     * scene_profile.color_residual_gain)
@@ -1679,7 +2435,8 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "tint",
-                ((-(ref_feat.gb_ratio - pred.gb_ratio) * 16.0 + (ref_feat.rb_ratio - pred.rb_ratio) * 4.5)
+                ((-(ref_feat.gb_ratio - pred.gb_ratio) * 16.0
+                    + (ref_feat.rb_ratio - pred.rb_ratio) * 4.5)
                     * tonal_coupling
                     * chroma_guard
                     * scene_profile.color_residual_gain)
@@ -1713,7 +2470,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "highlights",
-                ((ref_feat.skin_luminance_mean - pred.skin_luminance_mean) * 15.0).max(-3.0).min(3.0),
+                ((ref_feat.skin_luminance_mean - pred.skin_luminance_mean) * 15.0)
+                    .max(-3.0)
+                    .min(3.0),
                 "误差驱动二次微调：保护肤色亮度层次",
                 stage,
             );
@@ -1721,7 +2480,9 @@ fn auto_refine_suggestions_by_error(
                 suggestions,
                 current_adjustments,
                 "temperature",
-                ((ref_feat.skin_rb_ratio - pred.skin_rb_ratio) * 8.0).max(-3.0).min(3.0),
+                ((ref_feat.skin_rb_ratio - pred.skin_rb_ratio) * 8.0)
+                    .max(-3.0)
+                    .min(3.0),
                 "误差驱动二次微调：校正肤色暖冷",
                 stage,
             );
@@ -1765,7 +2526,9 @@ fn build_debug_actions(
         actions.push(StyleTransferDebugAction {
             key: "temperature".to_string(),
             label: "色温".to_string(),
-            recommended_delta: ((ref_feat.rb_ratio - pred_feat.rb_ratio) * 16.0).max(-6.0).min(6.0),
+            recommended_delta: ((ref_feat.rb_ratio - pred_feat.rb_ratio) * 16.0)
+                .max(-6.0)
+                .min(6.0),
             priority: 1,
             reason: "色彩误差偏大，优先修正冷暖方向".to_string(),
         });
@@ -1783,7 +2546,8 @@ fn build_debug_actions(
         actions.push(StyleTransferDebugAction {
             key: "highlights".to_string(),
             label: "高光".to_string(),
-            recommended_delta: ((ref_feat.skin_luminance_mean - pred_feat.skin_luminance_mean) * 18.0)
+            recommended_delta: ((ref_feat.skin_luminance_mean - pred_feat.skin_luminance_mean)
+                * 18.0)
                 .max(-5.0)
                 .min(5.0),
             priority: 1,
@@ -1794,7 +2558,8 @@ fn build_debug_actions(
         actions.push(StyleTransferDebugAction {
             key: "whites".to_string(),
             label: "白色色阶".to_string(),
-            recommended_delta: (-(pred_feat.p99_luminance - target_p99_cap(ref_feat, tuning)) * 55.0)
+            recommended_delta: (-(pred_feat.p99_luminance - target_p99_cap(ref_feat, tuning))
+                * 55.0)
                 .max(-10.0)
                 .min(0.0),
             priority: 1,
@@ -1802,9 +2567,11 @@ fn build_debug_actions(
         });
     }
     actions.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
-            .then_with(|| b.recommended_delta.abs().total_cmp(&a.recommended_delta.abs()))
+        a.priority.cmp(&b.priority).then_with(|| {
+            b.recommended_delta
+                .abs()
+                .total_cmp(&a.recommended_delta.abs())
+        })
     });
     actions.truncate(4);
     actions
@@ -1834,7 +2601,9 @@ fn build_style_debug_info(
     let proximity_before = style_proximity_score(ref_feat, cur_feat, &before);
     let proximity_after = style_proximity_score(ref_feat, pred_feat, &after);
     let improvement_ratio = if before.total > 1e-6 {
-        ((before.total - after.total) / before.total).max(-1.0).min(1.0)
+        ((before.total - after.total) / before.total)
+            .max(-1.0)
+            .min(1.0)
     } else {
         0.0
     };
@@ -1878,29 +2647,39 @@ fn map_features_to_adjustments(
     let scene_profile = style_scene_profile(ref_feat, cur_feat);
 
     let get_current = |key: &str, default: f64| -> f64 {
-        current_adjustments.get(key).and_then(|v| v.as_f64()).unwrap_or(default)
+        current_adjustments
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(default)
     };
 
     let clamp = |v: f64, min: f64, max: f64| -> f64 { v.max(min).min(max) };
+    let gate = |mag: f64, threshold: f64, width: f64| -> f64 {
+        ((mag - threshold) / width).max(0.0).min(1.0)
+    };
     let adain_contrast_scale = if cur_feat.contrast_spread > 0.0001 {
         clamp(
-            ref_feat.contrast_spread / cur_feat.contrast_spread * (0.85 + tuning.style_strength * 0.15),
+            ref_feat.contrast_spread / cur_feat.contrast_spread
+                * (0.85 + tuning.style_strength * 0.15),
             0.7,
             1.35,
         )
     } else {
         1.0
     };
-    let adain_mean_shift = (ref_feat.mean_luminance - cur_feat.mean_luminance) * tuning.style_strength;
+    let adain_mean_shift =
+        (ref_feat.mean_luminance - cur_feat.mean_luminance) * tuning.style_strength;
     let zone_mid_shift = ref_feat.mid_luminance_mean - cur_feat.mid_luminance_mean;
     let zone_shadow_shift = ref_feat.shadow_luminance_mean - cur_feat.shadow_luminance_mean;
     let zone_high_shift = ref_feat.highlight_luminance_mean - cur_feat.highlight_luminance_mean;
     let tonal_gap = ref_feat.p50_luminance - cur_feat.p50_luminance;
     let highlight_headroom = (target_p99_cap(ref_feat, tuning) - cur_feat.p99_luminance).max(0.0);
     let tonal_lift_bias = if tonal_gap > 0.015 {
-        (tonal_gap * scene_profile.tonal_gain * (0.18 + highlight_headroom * 0.55 * scene_profile.highlight_gain))
+        (tonal_gap
+            * scene_profile.tonal_gain
+            * (0.26 + highlight_headroom * 0.72 * scene_profile.highlight_gain))
             .max(0.0)
-            .min(0.13)
+            .min(0.20)
     } else {
         0.0
     };
@@ -1923,22 +2702,41 @@ fn map_features_to_adjustments(
     } else {
         1.0
     };
-    let chroma_limiter = (chroma_limiter_base * scene_profile.chroma_limit).max(0.70).min(1.05);
+    let chroma_limiter = (chroma_limiter_base * scene_profile.chroma_limit)
+        .max(0.70)
+        .min(1.05);
 
-    if waveform_mid_diff.abs() > 0.012 || adain_mean_shift.abs() > 0.012 || tonal_gap.abs() > 0.014 {
+    let tonal_gate = gate(
+        waveform_mid_diff
+            .abs()
+            .max(adain_mean_shift.abs())
+            .max(tonal_gap.abs()),
+        0.010,
+        0.018,
+    );
+    if tonal_gate > 0.0 {
+        let positive_exposure_cap = if tonal_gap > 0.0 {
+            0.60 + (tonal_gap * 1.08 + highlight_headroom * 0.64).min(0.44)
+        } else {
+            0.56
+        };
         let exposure_delta = clamp(
-            (waveform_mid_diff * 0.95 + adain_mean_shift * 0.75 + zone_mid_shift * 0.55 + tonal_lift_bias)
+            (waveform_mid_diff * 1.16
+                + adain_mean_shift * 0.98
+                + zone_mid_shift * 0.78
+                + tonal_lift_bias)
                 * scene_profile.tonal_gain,
             -0.56,
-            0.56,
-        );
+            positive_exposure_cap,
+        ) * tonal_gate;
         let cur_exposure = get_current("exposure", 0.0);
         let new_exposure = clamp(cur_exposure + exposure_delta, -2.0, 2.0);
         suggestions.push(StyleTransferSuggestion {
             key: "exposure".to_string(),
             value: (new_exposure * 100.0).round() / 100.0,
             label: "曝光".to_string(),
-            min: -5.0, max: 5.0,
+            min: -5.0,
+            max: 5.0,
             reason: "先对齐波形中间带，建立基础亮度区间".to_string(),
         });
     }
@@ -1946,86 +2744,118 @@ fn map_features_to_adjustments(
     let spread_ref = ref_feat.waveform_high_band - ref_feat.waveform_low_band;
     let spread_cur = cur_feat.waveform_high_band - cur_feat.waveform_low_band;
     let spread_diff = spread_ref - spread_cur + (adain_contrast_scale - 1.0) * 0.12;
-    if spread_diff.abs() > 0.03 {
+    let contrast_gate = gate(spread_diff.abs(), 0.02, 0.05);
+    if contrast_gate > 0.0 {
         let contrast_delta = clamp(spread_diff * 90.0 * tuning.style_strength, -24.0, 24.0);
         let cur_contrast = get_current("contrast", 0.0);
-        let new_contrast = clamp(cur_contrast + contrast_delta, -50.0, 50.0);
+        let new_contrast = clamp(cur_contrast + contrast_delta * contrast_gate, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "contrast".to_string(),
             value: new_contrast.round(),
             label: "对比度".to_string(),
-            min: -100.0, max: 100.0,
+            min: -100.0,
+            max: 100.0,
             reason: "按波形上下带间距匹配影调对比".to_string(),
         });
     }
 
     let high_band_diff = ref_feat.waveform_high_band - cur_feat.waveform_high_band;
     let clip_diff = ref_feat.clipped_highlight_ratio - cur_feat.clipped_highlight_ratio;
-    if high_band_diff.abs() > 0.020 || clip_diff.abs() > 0.01 || zone_high_shift.abs() > 0.02 {
+    let highlight_gate = gate(
+        high_band_diff.abs().max(clip_diff.abs() * 0.8).max(zone_high_shift.abs()),
+        0.012,
+        0.025,
+    );
+    if highlight_gate > 0.0 {
         let hl_delta = clamp(
             high_band_diff * 60.0 + zone_high_shift * 34.0 - clip_diff * 120.0,
             -30.0,
             20.0,
-        ) * (0.9 + tuning.style_strength * 0.1) * scene_profile.highlight_gain;
+        ) * (0.9 + tuning.style_strength * 0.1)
+            * scene_profile.highlight_gain
+            * highlight_gate;
         let cur_hl = get_current("highlights", 0.0);
         let new_hl = clamp(cur_hl + hl_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "highlights".to_string(),
             value: new_hl.round(),
             label: "高光".to_string(),
-            min: -100.0, max: 100.0,
+            min: -100.0,
+            max: 100.0,
             reason: "约束高光上沿，避免波形顶部挤压和过曝".to_string(),
         });
     }
 
     let low_band_diff = ref_feat.waveform_low_band - cur_feat.waveform_low_band;
-    if low_band_diff.abs() > 0.020 || zone_shadow_shift.abs() > 0.02 {
-        let sh_delta = clamp(low_band_diff * 60.0 + zone_shadow_shift * 45.0, -24.0, 24.0)
+    let shadow_gate = gate(low_band_diff.abs().max(zone_shadow_shift.abs()), 0.012, 0.025);
+    if shadow_gate > 0.0 {
+        let lift_bias = if tonal_gap > 0.015 {
+            (tonal_gap * 18.0).min(8.0)
+        } else {
+            0.0
+        };
+        let sh_delta = clamp(
+            low_band_diff * 68.0 + zone_shadow_shift * 55.0 + lift_bias,
+            -20.0,
+            32.0,
+        )
             * (0.9 + tuning.style_strength * 0.1)
-            * scene_profile.shadow_gain;
+            * scene_profile.shadow_gain
+            * shadow_gate;
         let cur_sh = get_current("shadows", 0.0);
         let new_sh = clamp(cur_sh + sh_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "shadows".to_string(),
             value: new_sh.round(),
             label: "阴影".to_string(),
-            min: -100.0, max: 100.0,
+            min: -100.0,
+            max: 100.0,
             reason: "对齐波形低部区间，控制暗部密度".to_string(),
         });
     }
 
     let p99_diff = ref_feat.p99_luminance - cur_feat.p99_luminance;
-    if p99_diff.abs() > 0.02 || clip_diff.abs() > 0.01 {
-        let whites_delta =
-            clamp((p99_diff * 80.0 - clip_diff * 140.0) * scene_profile.highlight_gain, -18.0, 14.0);
+    let white_gate = gate(p99_diff.abs().max(clip_diff.abs() * 0.9), 0.012, 0.026);
+    if white_gate > 0.0 {
+        let whites_delta = clamp(
+            (p99_diff * 80.0 - clip_diff * 140.0) * scene_profile.highlight_gain,
+            -18.0,
+            14.0,
+        ) * white_gate;
         let cur_whites = get_current("whites", 0.0);
         let new_whites = clamp(cur_whites + whites_delta, -45.0, 45.0);
         suggestions.push(StyleTransferSuggestion {
             key: "whites".to_string(),
             value: new_whites.round(),
             label: "白色色阶".to_string(),
-            min: -100.0, max: 100.0,
+            min: -100.0,
+            max: 100.0,
             reason: "通过 99 分位亮度匹配白场上限".to_string(),
         });
     }
 
     let p10_diff = ref_feat.p10_luminance - cur_feat.p10_luminance;
-    if p10_diff.abs() > 0.02 {
-        let blacks_delta = clamp(p10_diff * 70.0 * scene_profile.shadow_gain, -15.0, 15.0);
+    let black_gate = gate(p10_diff.abs(), 0.012, 0.022);
+    if black_gate > 0.0 {
+        let blacks_delta =
+            clamp(p10_diff * 70.0 * scene_profile.shadow_gain, -15.0, 15.0) * black_gate;
         let cur_blacks = get_current("blacks", 0.0);
         let new_blacks = clamp(cur_blacks + blacks_delta, -45.0, 45.0);
         suggestions.push(StyleTransferSuggestion {
             key: "blacks".to_string(),
             value: new_blacks.round(),
             label: "黑色色阶".to_string(),
-            min: -100.0, max: 100.0,
+            min: -100.0,
+            max: 100.0,
             reason: "通过 10 分位亮度匹配黑场下限".to_string(),
         });
     }
 
     // ===== 阶段二：影调收敛后再匹配色彩风格 =====
     let temp_diff = ref_feat.rb_ratio - cur_feat.rb_ratio;
-    if temp_diff.abs() > 0.03 {
+    let hue_diff = ref_feat.hue_mean - cur_feat.hue_mean;
+    let temp_gate = gate(temp_diff.abs().max(hue_diff.abs() * 0.7), 0.018, 0.042);
+    if temp_gate > 0.0 {
         let skin_temp_bias = if ref_feat.skin_ratio > 0.015 && cur_feat.skin_ratio > 0.015 {
             (ref_feat.skin_rb_ratio - cur_feat.skin_rb_ratio) * 8.0
         } else {
@@ -2033,102 +2863,161 @@ fn map_features_to_adjustments(
         };
         let tint_diff = ref_feat.gb_ratio - cur_feat.gb_ratio;
         let temp_delta = clamp(
-            (temp_diff * 32.0 + skin_temp_bias + (-tint_diff) * 5.0) * color_scale,
+            (temp_diff * 32.0 + skin_temp_bias + (-tint_diff) * 5.0 + hue_diff * 18.0)
+                * color_scale,
             -30.0,
             30.0,
-        );
+        ) * temp_gate;
         let cur_temp = get_current("temperature", 0.0);
         let new_temp = clamp(cur_temp + temp_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "temperature".to_string(),
             value: new_temp.round(),
             label: "色温".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图色调{}", if temp_diff > 0.0 { "偏暖" } else { "偏冷" }),
+            min: -100.0,
+            max: 100.0,
+            reason: format!(
+                "参考图色调{}",
+                if temp_diff > 0.0 { "偏暖" } else { "偏冷" }
+            ),
         });
     }
 
     // 6. 色调偏移 (tint): 保守映射
     let tint_diff = ref_feat.gb_ratio - cur_feat.gb_ratio;
-    if tint_diff.abs() > 0.03 {
-        let tint_delta = clamp((-tint_diff * 27.0 + temp_diff * 6.5) * color_scale, -24.0, 24.0);
+    let tint_gate = gate(tint_diff.abs().max(hue_diff.abs() * 0.8), 0.018, 0.042);
+    if tint_gate > 0.0 {
+        let tint_delta = clamp(
+            (-tint_diff * 27.0 + temp_diff * 6.5 - hue_diff * 14.0) * color_scale,
+            -24.0,
+            24.0,
+        ) * tint_gate;
         let cur_tint = get_current("tint", 0.0);
         let new_tint = clamp(cur_tint + tint_delta, -40.0, 40.0);
         suggestions.push(StyleTransferSuggestion {
             key: "tint".to_string(),
             value: new_tint.round(),
             label: "色调偏移".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图色调{}", if tint_diff > 0.0 { "偏绿" } else { "偏品红" }),
+            min: -100.0,
+            max: 100.0,
+            reason: format!(
+                "参考图色调{}",
+                if tint_diff > 0.0 {
+                    "偏绿"
+                } else {
+                    "偏品红"
+                }
+            ),
         });
     }
 
     // 7. 饱和度 (saturation): 保守映射
     let sat_diff = ref_feat.mean_saturation - cur_feat.mean_saturation;
-    if sat_diff.abs() > 0.03 {
+    let sat_gate = gate(sat_diff.abs(), 0.015, 0.045);
+    if sat_gate > 0.0 {
         let sat_delta = clamp(
             sat_diff * 70.0 * tuning.style_strength * color_scale * chroma_limiter,
             -22.0,
             22.0,
-        );
+        ) * sat_gate;
         let cur_sat = get_current("saturation", 0.0);
         let new_sat = clamp(cur_sat + sat_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "saturation".to_string(),
             value: new_sat.round(),
             label: "饱和度".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图色彩{}", if sat_diff > 0.0 { "更鲜艳" } else { "更淡雅" }),
+            min: -100.0,
+            max: 100.0,
+            reason: format!(
+                "参考图色彩{}",
+                if sat_diff > 0.0 {
+                    "更鲜艳"
+                } else {
+                    "更淡雅"
+                }
+            ),
         });
     }
 
     // 8. 自然饱和度 (vibrance): 保守映射
     let vib_diff = ref_feat.saturation_spread - cur_feat.saturation_spread;
-    if vib_diff.abs() > 0.02 {
+    let vib_gate = gate(vib_diff.abs(), 0.010, 0.035);
+    if vib_gate > 0.0 {
         let vib_delta = clamp(
             vib_diff * 82.0 * tuning.style_strength * color_scale * chroma_limiter,
             -18.0,
             18.0,
-        );
+        ) * vib_gate;
         let cur_vib = get_current("vibrance", 0.0);
         let new_vib = clamp(cur_vib + vib_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "vibrance".to_string(),
             value: new_vib.round(),
             label: "自然饱和度".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图色彩层次{}", if vib_diff > 0.0 { "更丰富" } else { "更统一" }),
+            min: -100.0,
+            max: 100.0,
+            reason: format!(
+                "参考图色彩层次{}",
+                if vib_diff > 0.0 {
+                    "更丰富"
+                } else {
+                    "更统一"
+                }
+            ),
         });
     }
 
     // 9. 清晰度 (clarity): 保守映射
     let lap_diff = ref_feat.laplacian_variance - cur_feat.laplacian_variance;
-    if lap_diff.abs() > 100.0 {
-        let clarity_delta = clamp(lap_diff / 300.0, -25.0, 25.0);
+    let clarity_gate = gate(lap_diff.abs(), 70.0, 120.0);
+    if clarity_gate > 0.0 {
+        let clarity_delta = clamp(lap_diff / 300.0, -25.0, 25.0) * clarity_gate;
         let cur_clarity = get_current("clarity", 0.0);
         let new_clarity = clamp(cur_clarity + clarity_delta, -50.0, 50.0);
         suggestions.push(StyleTransferSuggestion {
             key: "clarity".to_string(),
             value: new_clarity.round(),
             label: "清晰度".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图纹理{}", if lap_diff > 0.0 { "更锐利" } else { "更柔和" }),
+            min: -100.0,
+            max: 100.0,
+            reason: format!(
+                "参考图纹理{}",
+                if lap_diff > 0.0 {
+                    "更锐利"
+                } else {
+                    "更柔和"
+                }
+            ),
         });
     }
 
     // 10. 暗角 (vignetteAmount): 保守映射
     let vig_diff = ref_feat.vignette_diff - cur_feat.vignette_diff;
+    let vignette_evidence = ref_feat.vignette_diff > 0.075
+        && (ref_feat.vignette_diff - cur_feat.vignette_diff) > 0.022
+        && ref_feat.p50_luminance < 0.88
+        && ref_feat.p90_luminance < 0.985;
     if vig_diff.abs() > 0.03 {
         let vig_delta = clamp(-vig_diff * 50.0, -25.0, 25.0);
         let cur_vig = get_current("vignetteAmount", 0.0);
-        let new_vig = clamp(cur_vig + vig_delta, -50.0, 50.0);
-        suggestions.push(StyleTransferSuggestion {
-            key: "vignetteAmount".to_string(),
-            value: new_vig.round(),
-            label: "暗角".to_string(),
-            min: -100.0, max: 100.0,
-            reason: format!("参考图暗角{}", if vig_diff > 0.0 { "更明显" } else { "更轻微" }),
-        });
+        if vig_delta >= 0.0 || vignette_evidence {
+            let new_vig = clamp(cur_vig + vig_delta, -50.0, 50.0);
+            suggestions.push(StyleTransferSuggestion {
+                key: "vignetteAmount".to_string(),
+                value: new_vig.round(),
+                label: "暗角".to_string(),
+                min: -100.0,
+                max: 100.0,
+                reason: format!(
+                    "参考图暗角{}",
+                    if vig_diff > 0.0 {
+                        "更明显"
+                    } else {
+                        "更轻微"
+                    }
+                ),
+            });
+        }
     }
 
     // ===== 亮度安全检查 =====
@@ -2146,8 +3035,9 @@ fn map_features_to_adjustments(
             _ => {}
         }
     }
-    if brightness_impact.abs() > 60.0 {
-        let scale = 60.0 / brightness_impact.abs();
+    let impact_limit = if brightness_impact > 0.0 { 82.0 } else { 58.0 };
+    if brightness_impact.abs() > impact_limit {
+        let scale = impact_limit / brightness_impact.abs();
         for s in &mut suggestions {
             match s.key.as_str() {
                 "exposure" | "highlights" | "shadows" | "contrast" | "whites" | "blacks" => {
@@ -2286,11 +3176,12 @@ fn map_features_to_adjustments(
         );
         let ref_vec = style_metric_vector(ref_feat);
         for _ in 0..3 {
-            let pred_feat = estimate_features_from_adjustments(cur_feat, &current_values, &candidate_values);
+            let pred_feat =
+                estimate_features_from_adjustments(cur_feat, &current_values, &candidate_values);
             let pred_vec = style_metric_vector(&pred_feat);
             let weights = style_metric_weights(ref_feat, &pred_feat, tuning);
-            let mut residual = [0.0f64; 13];
-            for i in 0..13 {
+            let mut residual = [0.0f64; 15];
+            for i in 0..15 {
                 residual[i] = (ref_vec[i] - pred_vec[i]) * weights[i];
             }
             for key in &mutable_keys {
@@ -2305,12 +3196,16 @@ fn map_features_to_adjustments(
                     _ => 1.0,
                 };
                 candidate_values.insert(key.clone(), (cur_val + eps).max(min_v).min(max_v));
-                let plus_feat = estimate_features_from_adjustments(cur_feat, &current_values, &candidate_values);
+                let plus_feat = estimate_features_from_adjustments(
+                    cur_feat,
+                    &current_values,
+                    &candidate_values,
+                );
                 let plus_vec = style_metric_vector(&plus_feat);
                 candidate_values.insert(key.clone(), cur_val);
                 let mut num = 0.0;
                 let mut den = 1e-6;
-                for i in 0..13 {
+                for i in 0..15 {
                     let j = (plus_vec[i] - pred_vec[i]) / eps;
                     num += j * residual[i];
                     den += j * j;
@@ -2352,7 +3247,11 @@ fn map_features_to_adjustments(
                         continue;
                     }
                     candidate_values.insert(key.clone(), trial);
-                    let predicted = estimate_features_from_adjustments(cur_feat, &current_values, &candidate_values);
+                    let predicted = estimate_features_from_adjustments(
+                        cur_feat,
+                        &current_values,
+                        &candidate_values,
+                    );
                     let score = style_distance_score(ref_feat, &predicted, tuning);
                     if score + 1e-6 < best_score {
                         best_score = score;
@@ -2386,7 +3285,8 @@ fn map_features_to_adjustments(
         if tonal_gap_total < 0.020 {
             break;
         }
-        let mut exp_delta = (mid_gap * 0.92 + (ref_feat.mid_luminance_mean - pred.mid_luminance_mean) * 0.45)
+        let mut exp_delta = (mid_gap * 0.92
+            + (ref_feat.mid_luminance_mean - pred.mid_luminance_mean) * 0.45)
             .max(-0.14)
             .min(0.16);
         if mid_gap > 0.025 && pred.p99_luminance < target_cap - 0.020 {
@@ -2395,13 +3295,15 @@ fn map_features_to_adjustments(
         if pred.p99_luminance > target_cap - 0.004 {
             exp_delta = exp_delta.min(0.03);
         }
-        let mut high_delta = (high_gap * 22.0 + (ref_feat.highlight_luminance_mean - pred.highlight_luminance_mean) * 16.0)
+        let mut high_delta = (high_gap * 22.0
+            + (ref_feat.highlight_luminance_mean - pred.highlight_luminance_mean) * 16.0)
             .max(-4.5)
             .min(4.5);
         if pred.p99_luminance > target_cap {
             high_delta = high_delta.min(-1.0);
         }
-        let shadow_delta = (low_gap * 22.0 + (ref_feat.shadow_luminance_mean - pred.shadow_luminance_mean) * 18.0)
+        let shadow_delta = (low_gap * 22.0
+            + (ref_feat.shadow_luminance_mean - pred.shadow_luminance_mean) * 18.0)
             .max(-4.5)
             .min(4.5);
         let mut changed = false;
@@ -2446,7 +3348,9 @@ fn map_features_to_adjustments(
             &mut suggestions,
             current_adjustments,
             "exposure",
-            (mid_gap * 0.55 * scene_profile.tonal_gain).max(-0.07).min(0.12),
+            (mid_gap * 0.55 * scene_profile.tonal_gain)
+                .max(-0.07)
+                .min(0.12),
             "组合明暗回正：以曝光对齐中间调",
             "tonal",
         );
@@ -2536,6 +3440,20 @@ fn map_features_to_adjustments(
             let _ = estimate_features_for_suggestions(cur_feat, current_adjustments, &suggestions);
         }
     }
+    apply_reference_normalize_pass(
+        ref_feat,
+        cur_feat,
+        current_adjustments,
+        &mut suggestions,
+        tuning,
+    );
+    apply_low_confidence_damping(
+        ref_feat,
+        cur_feat,
+        current_adjustments,
+        &mut suggestions,
+        tuning,
+    );
 
     suggestions
 }
@@ -2549,11 +3467,18 @@ pub async fn analyze_style_transfer(
     highlight_guard_strength: Option<f64>,
     skin_protect_strength: Option<f64>,
 ) -> Result<StyleTransferResponse, String> {
-    let tuning = StyleTransferTuning::from_options(style_strength, highlight_guard_strength, skin_protect_strength);
+    let tuning = StyleTransferTuning::from_options(
+        style_strength,
+        highlight_guard_strength,
+        skin_protect_strength,
+    );
     validate_style_transfer_paths(&reference_path, &current_image_path)?;
-    let (ref_img, cur_img) = load_style_transfer_images(&reference_path, &current_image_path).await?;
+    let (ref_img, cur_img) =
+        load_style_transfer_images(&reference_path, &current_image_path).await?;
     let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
-    if ctx.baseline_error.total < EARLY_EXIT_STYLE_DISTANCE_THRESHOLD {
+    let (early_exit_threshold, _) =
+        adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
+    if ctx.baseline_error.total < early_exit_threshold {
         return Ok(build_style_transfer_early_exit_response(&ctx));
     }
     let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
@@ -2605,24 +3530,39 @@ fn describe_features(feat: &StyleFeatures, label: &str) -> String {
     format!(
         "【{}】风格影调={}；亮度={:.2}（{}），高光占比={:.1}%，阴影占比={:.1}%，对比度={:.3}（{}），\
          P10/P50/P90/P99={:.2}/{:.2}/{:.2}/{:.2}，波形低/中/高带={:.2}/{:.2}/{:.2}，过曝像素={:.2}%，\
-         R/B比={:.3}（{}），饱和度={:.3}（{}），饱和度分布={:.3}，分区亮度(暗/中/亮)={:.2}/{:.2}/{:.2}，肤色占比={:.2}%（亮度={:.2}），\
+         R/B比={:.3}（{}），色相均值/离散={:.3}/{:.3}，饱和度={:.3}（{}），饱和度分布={:.3}，分区亮度(暗/中/亮)={:.2}/{:.2}/{:.2}，肤色占比={:.2}%（亮度={:.2}），\
          纹理方差={:.1}，暗角差={:.3}（{}）",
         label,
         tonal_style,
-        feat.mean_luminance, brightness_desc,
+        feat.mean_luminance,
+        brightness_desc,
         feat.highlight_ratio * 100.0,
         feat.shadow_ratio * 100.0,
-        feat.contrast_spread, contrast_desc,
-        feat.p10_luminance, feat.p50_luminance, feat.p90_luminance, feat.p99_luminance,
-        feat.waveform_low_band, feat.waveform_mid_band, feat.waveform_high_band,
+        feat.contrast_spread,
+        contrast_desc,
+        feat.p10_luminance,
+        feat.p50_luminance,
+        feat.p90_luminance,
+        feat.p99_luminance,
+        feat.waveform_low_band,
+        feat.waveform_mid_band,
+        feat.waveform_high_band,
         feat.clipped_highlight_ratio * 100.0,
-        feat.rb_ratio, temp_desc,
-        feat.mean_saturation, sat_desc,
+        feat.rb_ratio,
+        temp_desc,
+        feat.hue_mean,
+        feat.hue_spread,
+        feat.mean_saturation,
+        sat_desc,
         feat.saturation_spread,
-        feat.shadow_luminance_mean, feat.mid_luminance_mean, feat.highlight_luminance_mean,
-        feat.skin_ratio * 100.0, feat.skin_luminance_mean,
+        feat.shadow_luminance_mean,
+        feat.mid_luminance_mean,
+        feat.highlight_luminance_mean,
+        feat.skin_ratio * 100.0,
+        feat.skin_luminance_mean,
         feat.laplacian_variance,
-        feat.vignette_diff, vig_desc,
+        feat.vignette_diff,
+        vig_desc,
     )
 }
 
@@ -2644,7 +3584,12 @@ fn build_style_transfer_prompt(
     } else {
         algo_suggestions
             .iter()
-            .map(|s| format!("  - {}({}): {} → 建议值 {}（{}）", s.label, s.key, s.reason, s.value, s.reason))
+            .map(|s| {
+                format!(
+                    "  - {}({}): {} → 建议值 {}（{}）",
+                    s.label, s.key, s.reason, s.value, s.reason
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -2771,7 +3716,10 @@ fn extract_json_from_response(text: &str) -> Result<String, String> {
         }
     }
 
-    Err(format!("无法从 LLM 响应中提取 JSON: {}", &cleaned[..cleaned.len().min(200)]))
+    Err(format!(
+        "无法从 LLM 响应中提取 JSON: {}",
+        &cleaned[..cleaned.len().min(200)]
+    ))
 }
 
 /// 调用 LLM 增强风格迁移结果（流式推送思考过程）
@@ -2851,7 +3799,10 @@ async fn enhance_with_llm(
         }
     }
 
-    let response = req.send().await.map_err(|e| format!("LLM 请求失败: {}", e))?;
+    let response = req
+        .send()
+        .await
+        .map_err(|e| format!("LLM 请求失败: {}", e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -2882,7 +3833,8 @@ async fn enhance_with_llm(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
+                    {
                         if delta_content.is_empty() {
                             continue;
                         }
@@ -2894,24 +3846,31 @@ async fn enhance_with_llm(
                         }
 
                         if in_thinking {
-                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            let clean =
+                                delta_content.replace("<think>", "").replace("</think>", "");
                             if !clean.is_empty() {
-                                let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-                                    chunk_type: "thinking".to_string(),
-                                    text: clean,
-                                    result: None,
-                                });
+                                let _ = app_handle.emit(
+                                    "style-transfer-stream",
+                                    StreamChunkPayload {
+                                        chunk_type: "thinking".to_string(),
+                                        text: clean,
+                                        result: None,
+                                    },
+                                );
                             }
                         }
 
                         if delta_content.contains("</think>") {
                             in_thinking = false;
                             // 思考结束，推送过渡提示
-                            let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-                                chunk_type: "thinking".to_string(),
-                                text: "\n正在生成调整参数...\n".to_string(),
-                                result: None,
-                            });
+                            let _ = app_handle.emit(
+                                "style-transfer-stream",
+                                StreamChunkPayload {
+                                    chunk_type: "thinking".to_string(),
+                                    text: "\n正在生成调整参数...\n".to_string(),
+                                    result: None,
+                                },
+                            );
                         }
 
                         // 非思考内容是 JSON 格式，不推送给前端显示
@@ -2924,8 +3883,13 @@ async fn enhance_with_llm(
 
     // 流结束，解析完整内容
     let json_str = extract_json_from_response(&full_content)?;
-    let parsed: StyleTransferResponse = serde_json::from_str(&json_str)
-        .map_err(|e| format!("解析风格迁移 JSON 失败: {}，原始: {}", e, &full_content[..full_content.len().min(500)]))?;
+    let parsed: StyleTransferResponse = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "解析风格迁移 JSON 失败: {}，原始: {}",
+            e,
+            &full_content[..full_content.len().min(500)]
+        )
+    })?;
 
     Ok(parsed)
 }
@@ -2946,20 +3910,33 @@ pub async fn analyze_style_transfer_with_llm(
 ) -> Result<StyleTransferResponse, String> {
     validate_style_transfer_paths(&reference_path, &current_image_path)?;
 
-    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-        chunk_type: "thinking".to_string(),
-        text: "正在加载参考图和当前图片...\n".to_string(),
-        result: None,
-    });
-    let (ref_img, cur_img) = load_style_transfer_images(&reference_path, &current_image_path).await?;
-    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-        chunk_type: "thinking".to_string(),
-        text: "正在提取图像色彩特征（亮度、对比度、色温、饱和度等）...\n".to_string(),
-        result: None,
-    });
-    let tuning = StyleTransferTuning::from_options(style_strength, highlight_guard_strength, skin_protect_strength);
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        StreamChunkPayload {
+            chunk_type: "thinking".to_string(),
+            text: "正在加载参考图和当前图片...\n".to_string(),
+            result: None,
+        },
+    );
+    let (ref_img, cur_img) =
+        load_style_transfer_images(&reference_path, &current_image_path).await?;
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        StreamChunkPayload {
+            chunk_type: "thinking".to_string(),
+            text: "正在提取图像色彩特征（亮度、对比度、色温、饱和度等）...\n".to_string(),
+            result: None,
+        },
+    );
+    let tuning = StyleTransferTuning::from_options(
+        style_strength,
+        highlight_guard_strength,
+        skin_protect_strength,
+    );
     let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
-    if ctx.baseline_error.total < EARLY_EXIT_STYLE_DISTANCE_THRESHOLD {
+    let (early_exit_threshold, llm_trigger_threshold) =
+        adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
+    if ctx.baseline_error.total < early_exit_threshold {
         let result = build_style_transfer_early_exit_response(&ctx);
         emit_style_transfer_done(&app_handle, &result);
         return Ok(result);
@@ -2967,7 +3944,7 @@ pub async fn analyze_style_transfer_with_llm(
     let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
     let algo_suggestions = algorithm_result.adjustments.clone();
     let algo_style_debug = algorithm_result.style_debug.clone();
-    if algo_style_debug.after.total < LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD {
+    if algo_style_debug.after.total < llm_trigger_threshold {
         let result = build_algorithm_response(
             algo_suggestions.clone(),
             algo_style_debug.clone(),
@@ -2978,11 +3955,17 @@ pub async fn analyze_style_transfer_with_llm(
         return Ok(result);
     }
 
-    let _ = app_handle.emit("style-transfer-stream", StreamChunkPayload {
-        chunk_type: "thinking".to_string(),
-        text: format!("算法分析完成，初步建议 {} 项调整。正在请求 AI 优化...\n", algo_suggestions.len()),
-        result: None,
-    });
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        StreamChunkPayload {
+            chunk_type: "thinking".to_string(),
+            text: format!(
+                "算法分析完成，初步建议 {} 项调整。正在请求 AI 优化...\n",
+                algo_suggestions.len()
+            ),
+            result: None,
+        },
+    );
 
     // 尝试 LLM 增强
     let model = resolve_style_transfer_model(llm_model);
@@ -3002,10 +3985,19 @@ pub async fn analyze_style_transfer_with_llm(
     .await
     {
         Ok(mut llm_result) => {
-            let llm_constraint_debug =
-                apply_dynamic_constraints_to_style_suggestions(&mut llm_result.adjustments, &ctx.constraint_window);
-            let llm_predicted_features =
-                estimate_features_for_suggestions(&ctx.cur_features, &current_adjustments, &llm_result.adjustments);
+            apply_soft_dynamic_constraints_to_style_suggestions(
+                &mut llm_result.adjustments,
+                &ctx.constraint_window,
+            );
+            let llm_constraint_debug = apply_dynamic_constraints_to_style_suggestions(
+                &mut llm_result.adjustments,
+                &ctx.constraint_window,
+            );
+            let llm_predicted_features = estimate_features_for_suggestions(
+                &ctx.cur_features,
+                &current_adjustments,
+                &llm_result.adjustments,
+            );
             let llm_style_debug = build_style_debug_info(
                 &ctx.ref_features,
                 &ctx.cur_features,
@@ -3034,5 +4026,98 @@ pub async fn analyze_style_transfer_with_llm(
             emit_style_transfer_done(&app_handle, &result);
             Ok(result)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, Rgb, RgbImage};
+
+    fn assert_finite_features(feat: &StyleFeatures) {
+        let values = [
+            feat.mean_luminance,
+            feat.highlight_ratio,
+            feat.shadow_ratio,
+            feat.contrast_spread,
+            feat.p10_luminance,
+            feat.p50_luminance,
+            feat.p90_luminance,
+            feat.p99_luminance,
+            feat.clipped_highlight_ratio,
+            feat.waveform_low_band,
+            feat.waveform_mid_band,
+            feat.waveform_high_band,
+            feat.rb_ratio,
+            feat.gb_ratio,
+            feat.mean_saturation,
+            feat.saturation_spread,
+            feat.shadow_luminance_mean,
+            feat.mid_luminance_mean,
+            feat.highlight_luminance_mean,
+            feat.skin_ratio,
+            feat.skin_luminance_mean,
+            feat.skin_rb_ratio,
+            feat.hue_mean,
+            feat.hue_spread,
+            feat.laplacian_variance,
+            feat.vignette_diff,
+        ];
+        for v in values {
+            assert!(v.is_finite());
+        }
+        assert!((0.0..=1.0).contains(&feat.highlight_ratio));
+        assert!((0.0..=1.0).contains(&feat.shadow_ratio));
+        assert!((0.0..=1.0).contains(&feat.clipped_highlight_ratio));
+        assert!((0.0..=1.0).contains(&feat.hue_mean));
+        assert!((0.0..=1.0).contains(&feat.hue_spread));
+    }
+
+    #[test]
+    fn extract_features_on_uniform_image_is_stable() {
+        let img = RgbImage::from_pixel(128, 128, Rgb([180, 140, 120]));
+        let feat = extract_features(&DynamicImage::ImageRgb8(img));
+        assert_finite_features(&feat);
+        assert!(feat.mean_luminance > 0.0);
+        assert!(feat.rb_ratio > 0.0);
+        assert!(feat.gb_ratio > 0.0);
+    }
+
+    #[test]
+    fn extract_features_on_extreme_checker_is_stable() {
+        let mut img = RgbImage::new(192, 192);
+        for y in 0..192 {
+            for x in 0..192 {
+                let px = if (x + y) % 2 == 0 {
+                    Rgb([255, 255, 255])
+                } else {
+                    Rgb([0, 0, 0])
+                };
+                img.put_pixel(x, y, px);
+            }
+        }
+        let feat = extract_features(&DynamicImage::ImageRgb8(img));
+        assert_finite_features(&feat);
+        assert!(feat.p99_luminance >= feat.p90_luminance);
+        assert!(feat.p90_luminance >= feat.p50_luminance);
+        assert!(feat.p50_luminance >= feat.p10_luminance);
+    }
+
+    #[test]
+    fn extract_features_on_black_and_white_images_are_stable() {
+        let black = RgbImage::from_pixel(96, 96, Rgb([0, 0, 0]));
+        let white = RgbImage::from_pixel(96, 96, Rgb([255, 255, 255]));
+        let feat_black = extract_features(&DynamicImage::ImageRgb8(black));
+        let feat_white = extract_features(&DynamicImage::ImageRgb8(white));
+        assert_finite_features(&feat_black);
+        assert_finite_features(&feat_white);
+        assert!(feat_black.p10_luminance <= feat_black.p50_luminance);
+        assert!(feat_black.p50_luminance <= feat_black.p90_luminance);
+        assert!(feat_white.p10_luminance <= feat_white.p50_luminance);
+        assert!(feat_white.p50_luminance <= feat_white.p90_luminance);
+        assert!(feat_black.waveform_low_band <= feat_black.waveform_mid_band);
+        assert!(feat_black.waveform_mid_band <= feat_black.waveform_high_band);
+        assert!(feat_white.waveform_low_band <= feat_white.waveform_mid_band);
+        assert!(feat_white.waveform_mid_band <= feat_white.waveform_high_band);
     }
 }

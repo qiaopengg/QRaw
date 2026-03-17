@@ -1,13 +1,11 @@
+use crate::style_transfer::{
+    DynamicConstraintClampRecord, DynamicConstraintDebugInfo,
+    build_dynamic_constraint_window_from_image, clamp_value_with_dynamic_window,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::Emitter;
-use crate::style_transfer::{
-    DynamicConstraintClampRecord,
-    DynamicConstraintDebugInfo,
-    build_dynamic_constraint_window_from_image,
-    clamp_value_with_dynamic_window,
-};
 
 const DEFAULT_TEXT_MODEL: &str = "qwen3.5:9b";
 
@@ -154,7 +152,6 @@ fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -
     )
 }
 
-
 /// 剥离 Qwen3 模型的 <think>...</think> 思考标签
 pub fn strip_thinking_tags(text: &str) -> String {
     let mut result = text.to_string();
@@ -230,8 +227,10 @@ pub async fn chat_adjust(
         .map_err(|e| e.to_string())?;
 
     let model = resolve_text_model(llm_model);
-    let constraint_window =
-        build_dynamic_constraint_window_from_image(current_image_path.as_deref(), &current_adjustments);
+    let constraint_window = build_dynamic_constraint_window_from_image(
+        current_image_path.as_deref(),
+        &current_adjustments,
+    );
     let constraint_window_value = serde_json::to_value(&constraint_window)
         .map_err(|e| format!("动态约束序列化失败: {}", e))?;
     let system_prompt = build_system_prompt(&current_adjustments, &constraint_window_value);
@@ -313,7 +312,8 @@ pub async fn chat_adjust(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
+                    {
                         if delta_content.is_empty() {
                             continue;
                         }
@@ -328,13 +328,17 @@ pub async fn chat_adjust(
                         if in_thinking {
                             thinking_buffer.push_str(delta_content);
                             // 清理标签后推送思考内容
-                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            let clean =
+                                delta_content.replace("<think>", "").replace("</think>", "");
                             if !clean.is_empty() {
-                                let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
-                                    chunk_type: "thinking".to_string(),
-                                    text: clean,
-                                    result: None,
-                                });
+                                let _ = app_handle.emit(
+                                    "chat-stream-chunk",
+                                    StreamChunkPayload {
+                                        chunk_type: "thinking".to_string(),
+                                        text: clean,
+                                        result: None,
+                                    },
+                                );
                             }
                         }
 
@@ -342,11 +346,14 @@ pub async fn chat_adjust(
                             in_thinking = false;
                             thinking_buffer.clear();
                             // 思考结束，推送过渡提示
-                            let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
-                                chunk_type: "thinking".to_string(),
-                                text: "\n正在生成调整参数...\n".to_string(),
-                                result: None,
-                            });
+                            let _ = app_handle.emit(
+                                "chat-stream-chunk",
+                                StreamChunkPayload {
+                                    chunk_type: "thinking".to_string(),
+                                    text: "\n正在生成调整参数...\n".to_string(),
+                                    result: None,
+                                },
+                            );
                         }
 
                         // 非思考内容是 JSON 格式，不推送给前端显示
@@ -359,8 +366,13 @@ pub async fn chat_adjust(
 
     // 流结束，解析完整内容
     let json_str = extract_json(&full_content)?;
-    let mut parsed: ChatAdjustResponse = serde_json::from_str(&json_str)
-        .map_err(|e| format!("解析 JSON 失败: {}，原始内容: {}", e, &full_content[..full_content.len().min(500)]))?;
+    let mut parsed: ChatAdjustResponse = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "解析 JSON 失败: {}，原始内容: {}",
+            e,
+            &full_content[..full_content.len().min(500)]
+        )
+    })?;
 
     let mut clamps = Vec::new();
     for adj in &mut parsed.adjustments {
@@ -373,7 +385,8 @@ pub async fn chat_adjust(
             }
         }
         let original = adj.value;
-        let (clamped, reason) = clamp_value_with_dynamic_window(&adj.key, adj.value, &constraint_window);
+        let (clamped, reason) =
+            clamp_value_with_dynamic_window(&adj.key, adj.value, &constraint_window);
         adj.value = clamped;
         if let Some(reason_text) = reason {
             clamps.push(DynamicConstraintClampRecord {
@@ -398,11 +411,14 @@ pub async fn chat_adjust(
     parsed.constraint_debug = serde_json::to_value(&constraint_debug).ok();
 
     // 推送完成事件
-    let _ = app_handle.emit("chat-stream-chunk", StreamChunkPayload {
-        chunk_type: "done".to_string(),
-        text: String::new(),
-        result: Some(parsed.clone()),
-    });
+    let _ = app_handle.emit(
+        "chat-stream-chunk",
+        StreamChunkPayload {
+            chunk_type: "done".to_string(),
+            text: String::new(),
+            result: Some(parsed.clone()),
+        },
+    );
 
     Ok(parsed)
 }
