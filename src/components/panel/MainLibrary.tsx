@@ -121,6 +121,7 @@ interface MainLibraryProps {
   onSettingsChange(settings: AppSettings): void;
   onThumbnailAspectRatioChange(aspectRatio: ThumbnailAspectRatio): void;
   onThumbnailSizeChange(size: ThumbnailSize): void;
+  onRequestThumbnails?(paths: string[]): void;
   rootPath: string | null;
   searchCriteria: SearchCriteria;
   setFilterCriteria(criteria: FilterCriteria): void;
@@ -1267,6 +1268,7 @@ export default function MainLibrary({
   onSettingsChange,
   onThumbnailAspectRatioChange,
   onThumbnailSizeChange,
+  onRequestThumbnails,
   rootPath,
   searchCriteria,
   setFilterCriteria,
@@ -1288,6 +1290,10 @@ export default function MainLibrary({
   const [listHandle, setListHandle] = useListCallbackRef();
   const [isLoaderVisible, setIsLoaderVisible] = useState(false);
   const loadedThumbnailsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    loadedThumbnailsRef.current.clear();
+  }, [currentFolderPath]);
 
   const prevScrollState = useRef({
     path: null as string | null,
@@ -1440,6 +1446,21 @@ export default function MainLibrary({
       .then((types) => setSupportedTypes(types as SupportedTypes))
       .catch((err) => console.error('Failed to load supported file types:', err));
   }, []);
+
+  useEffect(() => {
+    if (!onRequestThumbnails || imageList.length === 0) {
+      return;
+    }
+
+    const pathsToRequest = imageList
+      .filter((img) => !thumbnails[img.path] && !loadedThumbnailsRef.current.has(img.path))
+      .slice(0, 120)
+      .map((img) => img.path);
+
+    if (pathsToRequest.length > 0) {
+      onRequestThumbnails(pathsToRequest);
+    }
+  }, [imageList, thumbnails, onRequestThumbnails]);
 
   useEffect(() => {
     const handleWheel = (event: WheelEvent) => {

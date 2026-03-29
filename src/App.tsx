@@ -418,7 +418,7 @@ function App() {
   const [libraryScrollTop, setLibraryScrollTop] = useState<number>(0);
   const { showContextMenu } = useContextMenu();
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
-  const { loading: isThumbnailsLoading } = useThumbnails();
+  const { loading: isThumbnailsLoading, requestThumbnails, clearThumbnailQueue } = useThumbnails();
   const transformWrapperRef = useRef<ReactZoomPanPinchRef | null>(null);
   const isProgrammaticZoom = useRef(false);
   const currentResRef = useRef<number>(1280);
@@ -1847,6 +1847,7 @@ function App() {
   const handleSelectSubfolder = useCallback(
     async (path: string | null, isNewRoot = false, preloadedImages?: ImageFile[]) => {
       await invoke('cancel_thumbnail_generation');
+      clearThumbnailQueue();
       setIsViewLoading(true);
       setSearchCriteria({ tags: [], text: '', mode: 'OR' });
       setLibraryScrollTop(0);
@@ -1974,7 +1975,16 @@ function App() {
         setIsViewLoading(false);
       }
     },
-    [appSettings, handleSettingsChange, selectedImage, rootPath, sortCriteria.key, pinnedFolders, libraryViewMode],
+    [
+      appSettings,
+      handleSettingsChange,
+      selectedImage,
+      rootPath,
+      sortCriteria.key,
+      pinnedFolders,
+      libraryViewMode,
+      clearThumbnailQueue,
+    ],
   );
 
   const handleLibraryRefresh = useCallback(() => {
@@ -4772,6 +4782,7 @@ function App() {
               onSettingsChange={handleSettingsChange}
               onThumbnailAspectRatioChange={setThumbnailAspectRatio}
               onThumbnailSizeChange={setThumbnailSize}
+              onRequestThumbnails={requestThumbnails}
               rootPath={rootPath}
               searchCriteria={searchCriteria}
               setFilterCriteria={setFilterCriteria}
@@ -4804,6 +4815,7 @@ function App() {
               onPaste={() => handlePasteAdjustments()}
               onRate={handleRate}
               onReset={() => handleResetAdjustments()}
+              onRequestThumbnails={requestThumbnails}
               rating={libraryActiveAdjustments.rating || 0}
               thumbnailAspectRatio={thumbnailAspectRatio}
               totalImages={imageList.length}
@@ -4840,6 +4852,7 @@ function App() {
       isCopied,
       isPasted,
       copiedAdjustments,
+      requestThumbnails,
       libraryActiveAdjustments,
       supportedTypes,
       copiedFilePaths,
@@ -4961,6 +4974,7 @@ function App() {
                 onOpenCopyPasteSettings={() => setIsCopyPasteSettingsModalOpen(true)}
                 onImageSelect={handleImageClick}
                 onPaste={() => handlePasteAdjustments()}
+                onRequestThumbnails={requestThumbnails}
                 onRate={handleRate}
                 onZoomChange={handleZoomChange}
                 rating={adjustments.rating || 0}
