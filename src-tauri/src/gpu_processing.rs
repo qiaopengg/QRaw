@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use bytemuck;
 use half::f16;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgba};
 use wgpu::util::{DeviceExt, TextureDataOrder};
@@ -18,6 +17,13 @@ pub struct Roi {
     pub height: u32,
 }
 
+pub struct RenderRequest<'a> {
+    pub adjustments: AllAdjustments,
+    pub mask_bitmaps: &'a [ImageBuffer<Luma<u8>, Vec<u8>>],
+    pub lut: Option<Arc<Lut>>,
+    pub roi: Option<Roi>,
+}
+
 pub fn get_or_init_gpu_context(state: &tauri::State<AppState>) -> Result<GpuContext, String> {
     let mut context_lock = state.gpu_context.lock().unwrap();
     if let Some(context) = &*context_lock {
@@ -31,12 +37,25 @@ pub fn get_or_init_gpu_context(state: &tauri::State<AppState>) -> Result<GpuCont
         instance_desc.backends = wgpu::Backends::PRIMARY;
     }
 
+    let flag_path = state.gpu_crash_flag_path.lock().unwrap().clone();
+    if let Some(p) = &flag_path {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(p, "initializing_gpu");
+    }
+
     let instance = wgpu::Instance::new(&instance_desc);
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         ..Default::default()
     }))
-    .map_err(|e| format!("Failed to find a wgpu adapter: {}", e))?;
+    .map_err(|e| {
+        if let Some(p) = &flag_path {
+            let _ = std::fs::remove_file(p);
+        }
+        format!("Failed to find a wgpu adapter: {}", e)
+    })?;
 
     let mut required_features = wgpu::Features::empty();
     if adapter
@@ -56,7 +75,16 @@ pub fn get_or_init_gpu_context(state: &tauri::State<AppState>) -> Result<GpuCont
         memory_hints: wgpu::MemoryHints::Performance,
         trace: wgpu::Trace::Off,
     }))
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        if let Some(p) = &flag_path {
+            let _ = std::fs::remove_file(p);
+        }
+        e.to_string()
+    })?;
+
+    if let Some(p) = &flag_path {
+        let _ = std::fs::remove_file(p);
+    }
 
     let new_context = GpuContext {
         device: Arc::new(device),
@@ -702,17 +730,14 @@ impl GpuProcessor {
         input_texture_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-        roi: Option<Roi>,
-        adjustments: AllAdjustments,
-        mask_bitmaps: &[ImageBuffer<Luma<u8>, Vec<u8>>],
-        lut: Option<Arc<Lut>>,
+        request: RenderRequest,
     ) -> Result<(Vec<u8>, u32, u32), String> {
         let device = &self.context.device;
         let queue = &self.context.queue;
         let scale = (width.min(height) as f32) / 1080.0;
         const MAX_MASKS: u32 = 8;
 
-        let bounds = roi.unwrap_or(Roi {
+        let bounds = request.roi.unwrap_or(Roi {
             x: 0,
             y: 0,
             width,
@@ -726,7 +751,8 @@ impl GpuProcessor {
             height,
             depth_or_array_layers: 1,
         };
-        let mask_views: Vec<wgpu::TextureView> = mask_bitmaps
+        let mask_views: Vec<wgpu::TextureView> = request
+            .mask_bitmaps
             .iter()
             .map(|mask_bitmap| {
                 let mask_texture = device.create_texture_with_data(
@@ -748,7 +774,7 @@ impl GpuProcessor {
             })
             .collect();
 
-        let (lut_texture_view, lut_sampler) = if let Some(lut_arc) = &lut {
+        let (lut_texture_view, lut_sampler) = if let Some(lut_arc) = &request.lut {
             let lut_data = &lut_arc.data;
             let size = lut_arc.size;
             let mut rgba_lut_data_f16 = Vec::with_capacity(lut_data.len() / 3 * 4);
@@ -791,6 +817,7 @@ impl GpuProcessor {
             (self.dummy_lut_view.clone(), self.dummy_lut_sampler.clone())
         };
 
+        let adjustments = request.adjustments;
         if adjustments.global.flare_amount > 0.0 {
             let mut encoder = device.create_command_encoder(&Default::default());
 
@@ -965,8 +992,8 @@ impl GpuProcessor {
 
         let start_tile_x = bounds.x / TILE_SIZE;
         let start_tile_y = bounds.y / TILE_SIZE;
-        let end_tile_x = (bounds.x + bounds.width + TILE_SIZE - 1) / TILE_SIZE;
-        let end_tile_y = (bounds.y + bounds.height + TILE_SIZE - 1) / TILE_SIZE;
+        let end_tile_x = (bounds.x + bounds.width).div_ceil(TILE_SIZE);
+        let end_tile_y = (bounds.y + bounds.height).div_ceil(TILE_SIZE);
 
         for tile_y in start_tile_y..end_tile_y {
             for tile_x in start_tile_x..end_tile_x {
@@ -1008,8 +1035,8 @@ impl GpuProcessor {
                         radius,
                         tile_offset_x: input_x_start,
                         tile_offset_y: input_y_start,
-                        input_width: input_width,
-                        input_height: input_height,
+                        input_width,
+                        input_height,
                         _pad1: 0,
                         _pad2: 0,
                         _pad3: 0,
@@ -1041,7 +1068,7 @@ impl GpuProcessor {
                         let mut cpass = blur_encoder.begin_compute_pass(&Default::default());
                         cpass.set_pipeline(&self.h_blur_pipeline);
                         cpass.set_bind_group(0, &h_blur_bg, &[]);
-                        cpass.dispatch_workgroups((input_width + 255) / 256, input_height, 1);
+                        cpass.dispatch_workgroups(input_width.div_ceil(256), input_height, 1);
                     }
 
                     let v_blur_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1067,7 +1094,7 @@ impl GpuProcessor {
                         let mut cpass = blur_encoder.begin_compute_pass(&Default::default());
                         cpass.set_pipeline(&self.v_blur_pipeline);
                         cpass.set_bind_group(0, &v_blur_bg, &[]);
-                        cpass.dispatch_workgroups(input_width, (input_height + 255) / 256, 1);
+                        cpass.dispatch_workgroups(input_width, input_height.div_ceil(256), 1);
                     }
 
                     queue.submit(Some(blur_encoder.finish()));
@@ -1178,8 +1205,8 @@ impl GpuProcessor {
                     compute_pass.set_pipeline(&self.main_pipeline);
                     compute_pass.set_bind_group(0, &bind_group, &[]);
                     compute_pass.dispatch_workgroups(
-                        (input_width + 7) / 8,
-                        (input_height + 7) / 8,
+                        input_width.div_ceil(8),
+                        input_height.div_ceil(8),
                         1,
                     );
                 }
@@ -1215,10 +1242,7 @@ pub fn process_and_get_dynamic_image(
     state: &tauri::State<AppState>,
     base_image: &DynamicImage,
     transform_hash: u64,
-    all_adjustments: AllAdjustments,
-    mask_bitmaps: &[ImageBuffer<Luma<u8>, Vec<u8>>],
-    lut: Option<Arc<Lut>>,
-    roi: Option<Roi>,
+    request: RenderRequest,
     caller_id: &str,
 ) -> Result<DynamicImage, String> {
     let start_time = Instant::now();
@@ -1260,11 +1284,12 @@ pub fn process_and_get_dynamic_image(
     let processor = &processor_state.processor;
 
     let mut cache_lock = state.gpu_image_cache.lock().unwrap();
-    if let Some(cache) = &*cache_lock {
-        if cache.transform_hash != transform_hash || cache.width != width || cache.height != height
-        {
-            *cache_lock = None;
-        }
+    if let Some(cache) = &*cache_lock
+        && (cache.transform_hash != transform_hash
+            || cache.width != width
+            || cache.height != height)
+    {
+        *cache_lock = None;
     }
 
     if cache_lock.is_none() {
@@ -1302,15 +1327,8 @@ pub fn process_and_get_dynamic_image(
 
     let cache = cache_lock.as_ref().unwrap();
 
-    let (processed_pixels, out_w, out_h) = processor.run(
-        &cache.texture_view,
-        cache.width,
-        cache.height,
-        roi,
-        all_adjustments,
-        mask_bitmaps,
-        lut,
-    )?;
+    let (processed_pixels, out_w, out_h) =
+        processor.run(&cache.texture_view, cache.width, cache.height, request)?;
 
     let duration = start_time.elapsed();
     let fps = 1.0 / duration.as_secs_f64();

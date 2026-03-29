@@ -137,7 +137,7 @@ function WatermarkPreview({
       {watermarkPath && (
         <div style={getPositionStyles()}>
           <div
-            className="w-full bg-accent/50 border-2 border-dashed border-accent rounded-sm flex items-center justify-center"
+            className="w-full bg-accent/50 border-2 border-dashed border-accent rounded-xs flex items-center justify-center"
             style={{ aspectRatio: watermarkImageAspectRatio }}
           >
             <span className="text-white text-[8px] font-bold">{t('export.logo')}</span>
@@ -484,11 +484,13 @@ export default function LibraryExportPanel({
   };
 
   const canExport = numImages > 0;
+  const isLut = fileFormat === FileFormats.Cube;
+  const itemLabel = isLut ? 'LUT' : 'Image';
 
   return (
     <div className="h-full bg-bg-secondary rounded-lg flex flex-col">
-      <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('export.title')}</h2>
+      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Export</h2>
         <button
           onClick={onClose}
           className="p-1 rounded-md text-text-secondary hover:bg-surface hover:text-text-primary"
@@ -496,7 +498,7 @@ export default function LibraryExportPanel({
           <X size={20} />
         </button>
       </div>
-      <div className="flex-grow overflow-y-auto p-4 text-text-secondary space-y-6">
+      <div className="grow overflow-y-auto p-4 text-text-secondary space-y-6">
         {canExport ? (
           <>
             <ExportPresetsList
@@ -697,7 +699,7 @@ export default function LibraryExportPanel({
         )}
       </div>
 
-      <div className="p-4 border-t border-surface flex-shrink-0 space-y-3">
+      <div className="p-4 border-t border-surface shrink-0 space-y-3">
         <div className="text-center text-xs text-text-tertiary h-4">
           {isEstimating ? (
             <span className="italic">{t('export.estimatingSize')}</span>
@@ -709,7 +711,7 @@ export default function LibraryExportPanel({
           ) : null}
         </div>
         <Button
-          className={`group rounded-md h-11 w-full flex items-center text-md !font-bold justify-center ${
+          className={`group rounded-md h-11 w-full flex items-center text-md font-bold! justify-center ${
             status === Status.Exporting
               ? 'bg-red-600/80 hover:bg-red-600 text-white'
               : status === Status.Success
@@ -751,8 +753,7 @@ export default function LibraryExportPanel({
             </>
           ) : (
             <>
-              <Save size={18} className="mr-2" />{' '}
-              {numImages > 1 ? t('export.exportImages', { count: numImages }) : t('export.exportImage')}
+              <Save size={18} className="mr-2" /> Export {numImages > 1 ? `${numImages} ${itemLabel}s` : itemLabel}
             </>
           )}
         </Button>

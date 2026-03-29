@@ -80,7 +80,7 @@ const PasteModeSwitch = ({ selectedMode, onModeChange, isVisible }: PasteModeSwi
   return (
     <div ref={containerRef} className="relative flex w-full gap-1 bg-bg-primary p-1 rounded-md">
       <motion.div
-        className="absolute top-1 bottom-1 z-0 bg-accent shadow-sm"
+        className="absolute top-1 bottom-1 z-0 bg-accent shadow-xs"
         style={{ borderRadius: 6 }}
         animate={bubbleStyle}
         transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
@@ -178,7 +178,7 @@ export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settin
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center z-50 bg-black/30 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${
+      className={`fixed inset-0 flex items-center justify-center z-50 bg-black/30 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${
         show ? 'opacity-100' : 'opacity-0'
       }`}
       onClick={onClose}
@@ -193,7 +193,7 @@ export default function CopyPasteSettingsModal({ isOpen, onClose, onSave, settin
         <Text variant={TextVariants.title} className="mb-4">
           {t('modals.copyPasteSettings')}
         </Text>
-        <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-6">
+        <div className="grow overflow-y-auto pr-2 -mr-2 space-y-6">
           <div>
             <Text variant={TextVariants.heading} className="block mb-2">
               {t('modals.pasteMode')}

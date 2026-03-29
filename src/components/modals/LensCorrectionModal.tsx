@@ -546,9 +546,9 @@ export default function LensCorrectionModal({
   };
 
   const renderControls = () => (
-    <div className="w-80 flex-shrink-0 bg-bg-secondary flex flex-col border-l border-surface h-full z-10">
-      <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <Text variant={TextVariants.title}>{t('lensCorrection.title')}</Text>
+    <div className="w-80 shrink-0 bg-bg-secondary flex flex-col border-l border-surface h-full z-10">
+      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+        <Text variant={TextVariants.title}>Lens Correction</Text>
         <button
           onClick={handleReset}
           data-tooltip={t('lensCorrection.resetAll')}
@@ -557,7 +557,7 @@ export default function LensCorrectionModal({
           <RotateCcw size={18} />
         </button>
       </div>
-      <div className="flex-grow overflow-y-auto p-4 flex flex-col gap-8 text-text-secondary">
+      <div className="grow overflow-y-auto p-4 flex flex-col gap-8 text-text-secondary">
         <div>
           <Text variant={TextVariants.heading} className="mb-2">
             {t('lensCorrection.autoDetected')}
@@ -592,7 +592,7 @@ export default function LensCorrectionModal({
                     color={TextColors.error}
                     className="flex items-center gap-3"
                   >
-                    <Info size={16} className="flex-shrink-0" />
+                    <Info size={16} className="shrink-0" />
                     <p className="leading-relaxed">
                       Lens correction may not be available for all lenses. Auto-detection relies on EXIF data.
                     </p>
@@ -645,12 +645,12 @@ export default function LensCorrectionModal({
                   availability.distortion ? 'bg-surface' : 'bg-surface/30 opacity-60',
                 )}
               >
-                <div className="p-1.5 bg-bg-primary rounded text-text-secondary">
+                <div className="p-1.5 bg-bg-primary rounded-sm text-text-secondary">
                   <SquareDashed size={16} />
                 </div>
                 <Switch
-                  className="flex-grow"
-                  label={t('lensCorrection.distortion')}
+                  className="grow"
+                  label="Distortion"
                   checked={params.lensDistortionEnabled && availability.distortion}
                   onChange={(val) => handleToggleChange('lensDistortionEnabled', val)}
                   disabled={!availability.distortion}
@@ -671,6 +671,7 @@ export default function LensCorrectionModal({
                       min={0}
                       max={200}
                       defaultValue={100}
+                      step={1}
                       onChange={(e) => handleAmountChange('lensDistortionAmount', Number(e.target.value))}
                     />
                   </motion.div>
@@ -685,12 +686,12 @@ export default function LensCorrectionModal({
                   availability.tca ? 'bg-surface' : 'bg-surface/30 opacity-60',
                 )}
               >
-                <div className="p-1.5 bg-bg-primary rounded text-text-secondary">
+                <div className="p-1.5 bg-bg-primary rounded-sm text-text-secondary">
                   <Activity size={16} />
                 </div>
                 <Switch
-                  className="flex-grow"
-                  label={t('lensCorrection.chromaticAberration')}
+                  className="grow"
+                  label="Chromatic Aberration"
                   checked={params.lensTcaEnabled && availability.tca}
                   onChange={(val) => handleToggleChange('lensTcaEnabled', val)}
                   disabled={!availability.tca}
@@ -711,6 +712,7 @@ export default function LensCorrectionModal({
                       min={0}
                       max={200}
                       defaultValue={100}
+                      step={1}
                       onChange={(e) => handleAmountChange('lensTcaAmount', Number(e.target.value))}
                     />
                   </motion.div>
@@ -725,12 +727,12 @@ export default function LensCorrectionModal({
                   availability.vignetting ? 'bg-surface' : 'bg-surface/30 opacity-60',
                 )}
               >
-                <div className="p-1.5 bg-bg-primary rounded text-text-secondary">
+                <div className="p-1.5 bg-bg-primary rounded-sm text-text-secondary">
                   <CircleDashed size={16} />
                 </div>
                 <Switch
-                  className="flex-grow"
-                  label={t('lensCorrection.vignetting')}
+                  className="grow"
+                  label="Vignetting"
                   checked={params.lensVignetteEnabled && availability.vignetting}
                   onChange={(val) => handleToggleChange('lensVignetteEnabled', val)}
                   disabled={!availability.vignetting}
@@ -751,6 +753,7 @@ export default function LensCorrectionModal({
                       min={0}
                       max={200}
                       defaultValue={100}
+                      step={1}
                       onChange={(e) => handleAmountChange('lensVignetteAmount', Number(e.target.value))}
                     />
                   </motion.div>
@@ -767,8 +770,10 @@ export default function LensCorrectionModal({
               variant={TextVariants.small}
               className="p-3 bg-surface rounded-md border border-surface flex items-center gap-3"
             >
-              <Info size={16} className="flex-shrink-0" />
-              <p className="leading-relaxed">{t('lensCorrection.maskWarning')}</p>
+              <Info size={16} className="shrink-0" />
+              <p className="leading-relaxed">
+                Lens correction updates base geometry. Existing masks may shift, and AI masks must be regenerated.
+              </p>
             </Text>
           )}
           <Text
@@ -776,7 +781,7 @@ export default function LensCorrectionModal({
             variant={TextVariants.small}
             className="p-3 bg-surface rounded-md border border-surface flex items-center gap-3"
           >
-            <Info size={16} className="flex-shrink-0" />
+            <Info size={16} className="shrink-0" />
             <div className="leading-tight space-y-1">
               <p>
                 Lens database provided by the{' '}
@@ -808,7 +813,7 @@ export default function LensCorrectionModal({
 
   const renderContent = () => (
     <div className="flex flex-row h-full w-full overflow-hidden">
-      <div className="flex-grow flex flex-col relative min-h-0 bg-[#0f0f0f] overflow-hidden">
+      <div className="grow flex flex-col relative min-h-0 bg-[#0f0f0f] overflow-hidden">
         <div
           ref={containerRef}
           className="flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing select-none"
@@ -836,7 +841,7 @@ export default function LensCorrectionModal({
                       as="div"
                       variant={TextVariants.small}
                       color={TextColors.button}
-                      className="absolute top-4 left-4 bg-accent px-2 py-1 rounded shadow-lg z-20"
+                      className="absolute top-4 left-4 bg-accent px-2 py-1 rounded-sm shadow-lg z-20"
                     >
                       {t('transform.original')}
                     </Text>
@@ -898,10 +903,14 @@ export default function LensCorrectionModal({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity duration-300 ${
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs transition-opacity duration-300 ${
         show ? 'opacity-100' : 'opacity-0'
       }`}
-      onMouseDown={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
     >
       <AnimatePresence>
         {show && (
@@ -911,10 +920,9 @@ export default function LensCorrectionModal({
             exit={{ scale: 0.95, opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="bg-surface rounded-lg shadow-xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden"
-            onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="flex-grow min-h-0 overflow-hidden">{renderContent()}</div>
-            <div className="flex-shrink-0 p-4 flex justify-end gap-3 border-t border-surface bg-bg-secondary z-20">
+            <div className="grow min-h-0 overflow-hidden">{renderContent()}</div>
+            <div className="shrink-0 p-4 flex justify-end gap-3 border-t border-surface bg-bg-secondary z-20">
               <button
                 onClick={onClose}
                 className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"

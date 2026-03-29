@@ -3,7 +3,31 @@ import { ExportPreset } from './ExportImportProperties';
 import { Adjustments, CopyPasteSettings } from '../../utils/adjustments';
 import { ToolType } from '../panel/right/Masks';
 
-export const GLOBAL_KEYS = [' ', 'ArrowUp', 'ArrowDown', 'f', 'b', 'w', 'ArrowLeft', 'ArrowRight'];
+export const GLOBAL_KEYS = [
+  ' ',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'f',
+  'b',
+  'a',
+  's',
+  'd',
+  'r',
+  'm',
+  'k',
+  'p',
+  'i',
+  'e',
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  'Enter',
+];
 export const OPTION_SEPARATOR = 'separator';
 
 export interface CollapsibleSectionsState extends Record<string, boolean> {
@@ -50,6 +74,7 @@ export enum Invokes {
   GenerateUncroppedPreview = 'generate_uncropped_preview',
   GenerateWaveform = 'image_processing::generate_waveform',
   GetFolderTree = 'get_folder_tree',
+  GetFolderChildren = 'get_folder_children',
   GetLogFilePath = 'get_log_file_path',
   GetPinnedFolderTrees = 'get_pinned_folder_trees',
   GetSupportedFileTypes = 'get_supported_file_types',
@@ -224,7 +249,8 @@ export interface Option {
   isDestructive?: boolean;
   label?: string;
   onClick?(): void;
-  submenu?: Option[];
+  onRightClick?(): void;
+  submenu?: any;
   type?: string;
 }
 
@@ -275,6 +301,7 @@ export enum ThumbnailSize {
   Large = 'large',
   Medium = 'medium',
   Small = 'small',
+  List = 'list',
 }
 
 export interface TransformState {

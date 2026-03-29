@@ -28,7 +28,6 @@ mod style_transfer;
 mod tagging;
 mod tagging_utils;
 
-use log;
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -56,7 +55,6 @@ use imageproc::edges::canny;
 use imageproc::hough::{LineDetectionOptions, detect_lines};
 use mozjpeg_rs::{Encoder, Preset};
 use rayon::prelude::*;
-use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Emitter, Manager, ipc::Response};
@@ -71,20 +69,41 @@ use crate::ai_processing::{
     run_u2netp_model,
 };
 use crate::exif_processing::{read_exposure_time_secs, read_iso};
-use crate::file_management::{AppSettings, load_settings, parse_virtual_path, read_file_mapped};
+use crate::file_management::{
+    AppSettings, generate_filename_from_template, load_settings, parse_virtual_path,
+    read_file_mapped,
+};
 use crate::formats::is_raw_file;
 use crate::image_loader::{
     composite_patches_on_image, load_and_composite, load_base_image_from_bytes,
 };
 use crate::image_processing::{
-    AllAdjustments, Crop, GeometryParams, GpuContext, ImageMetadata, apply_coarse_rotation,
-    apply_cpu_default_raw_processing, apply_crop, apply_flip, apply_geometry_warp, apply_rotation,
-    apply_unwarp_geometry, downscale_f32_image, get_all_adjustments_from_json,
-    get_or_init_gpu_context, process_and_get_dynamic_image, warp_image_geometry,
+    AllAdjustments, Crop, GeometryParams, GpuContext, ImageMetadata, RenderRequest,
+    apply_coarse_rotation, apply_cpu_default_raw_processing, apply_crop, apply_flip,
+    apply_geometry_warp, apply_rotation, apply_unwarp_geometry, downscale_f32_image,
+    get_all_adjustments_from_json, get_or_init_gpu_context, process_and_get_dynamic_image,
+    warp_image_geometry,
 };
 use crate::lut_processing::Lut;
 use crate::mask_generation::{AiPatchDefinition, MaskDefinition, generate_mask_bitmap};
 use tagging_utils::{candidates, hierarchy};
+
+#[cfg(target_os = "macos")]
+extern "C" fn force_exit(_signal: libc::c_int) {
+    unsafe {
+        libc::_exit(0);
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn register_exit_handler() {
+    unsafe {
+        libc::signal(libc::SIGABRT, force_exit as libc::sighandler_t);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn register_exit_handler() {}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct WindowState {
@@ -291,6 +310,7 @@ struct AnalyticsJob {
 }
 pub struct AppState {
     window_setup_complete: AtomicBool,
+    pub gpu_crash_flag_path: Mutex<Option<PathBuf>>,
     original_image: Mutex<Option<LoadedImage>>,
     cached_preview: Mutex<Option<CachedPreview>>,
     gpu_context: Mutex<Option<GpuContext>>,
@@ -416,7 +436,7 @@ fn apply_all_transformations(
     let rotated_image = apply_rotation(&flipped_image, rotation_degrees);
 
     let crop_data: Option<Crop> = serde_json::from_value(adjustments["crop"].clone()).ok();
-    let crop_json = serde_json::to_value(crop_data.clone()).unwrap_or(serde_json::Value::Null);
+    let crop_json = serde_json::to_value(crop_data).unwrap_or(serde_json::Value::Null);
     let cropped_image = apply_crop(rotated_image, &crop_json);
 
     let unscaled_crop_offset = crop_data.map_or((0.0, 0.0), |c| (c.x as f32, c.y as f32));
@@ -503,10 +523,10 @@ fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
     let flip_v = adjustments["flipVertical"].as_bool().unwrap_or(false);
     flip_v.hash(&mut hasher);
 
-    if let Some(crop_val) = adjustments.get("crop") {
-        if !crop_val.is_null() {
-            crop_val.to_string().hash(&mut hasher);
-        }
+    if let Some(crop_val) = adjustments.get("crop")
+        && !crop_val.is_null()
+    {
+        crop_val.to_string().hash(&mut hasher);
     }
 
     for key in GEOMETRY_KEYS {
@@ -516,54 +536,54 @@ fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
         }
     }
 
-    if let Some(patches_val) = adjustments.get("aiPatches") {
-        if let Some(patches_arr) = patches_val.as_array() {
-            patches_arr.len().hash(&mut hasher);
+    if let Some(patches_val) = adjustments.get("aiPatches")
+        && let Some(patches_arr) = patches_val.as_array()
+    {
+        patches_arr.len().hash(&mut hasher);
 
-            for patch in patches_arr {
-                if let Some(id) = patch.get("id").and_then(|v| v.as_str()) {
-                    id.hash(&mut hasher);
-                }
-
-                let is_visible = patch
-                    .get("visible")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                is_visible.hash(&mut hasher);
-
-                if let Some(patch_data) = patch.get("patchData") {
-                    let color_len = patch_data
-                        .get("color")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .len();
-                    color_len.hash(&mut hasher);
-
-                    let mask_len = patch_data
-                        .get("mask")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .len();
-                    mask_len.hash(&mut hasher);
-                } else {
-                    let data_len = patch
-                        .get("patchDataBase64")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .len();
-                    data_len.hash(&mut hasher);
-                }
-
-                if let Some(sub_masks_val) = patch.get("subMasks") {
-                    sub_masks_val.to_string().hash(&mut hasher);
-                }
-
-                let invert = patch
-                    .get("invert")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                invert.hash(&mut hasher);
+        for patch in patches_arr {
+            if let Some(id) = patch.get("id").and_then(|v| v.as_str()) {
+                id.hash(&mut hasher);
             }
+
+            let is_visible = patch
+                .get("visible")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            is_visible.hash(&mut hasher);
+
+            if let Some(patch_data) = patch.get("patchData") {
+                let color_len = patch_data
+                    .get("color")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .len();
+                color_len.hash(&mut hasher);
+
+                let mask_len = patch_data
+                    .get("mask")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .len();
+                mask_len.hash(&mut hasher);
+            } else {
+                let data_len = patch
+                    .get("patchDataBase64")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .len();
+                data_len.hash(&mut hasher);
+            }
+
+            if let Some(sub_masks_val) = patch.get("subMasks") {
+                sub_masks_val.to_string().hash(&mut hasher);
+            }
+
+            let invert = patch
+                .get("invert")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            invert.hash(&mut hasher);
         }
     }
 
@@ -594,7 +614,7 @@ fn hydrate_adjustments(state: &tauri::State<AppState>, adjustments: &mut serde_j
                 continue;
             }
 
-            let has_data = patch.get("patchData").map_or(false, |v| !v.is_null());
+            let has_data = patch.get("patchData").is_some_and(|v| !v.is_null());
 
             if has_data {
                 if let Some(data) = patch.get("patchData") {
@@ -627,18 +647,14 @@ fn hydrate_adjustments(state: &tauri::State<AppState>, adjustments: &mut serde_j
                     if let Some(params) = sub_mask
                         .get_mut("parameters")
                         .and_then(|p| p.as_object_mut())
+                        && params.contains_key("mask_data_base64")
                     {
-                        if params.contains_key("mask_data_base64") {
-                            let val = params.get("mask_data_base64").unwrap();
-                            if !val.is_null() {
-                                cache.insert(id.clone(), val.clone());
-                            } else {
-                                if let Some(cached_data) = cache.get(&id) {
-                                    params.insert(
-                                        "mask_data_base64".to_string(),
-                                        cached_data.clone(),
-                                    );
-                                }
+                        let val = params.get("mask_data_base64").unwrap();
+                        if !val.is_null() {
+                            cache.insert(id.clone(), val.clone());
+                        } else {
+                            if let Some(cached_data) = cache.get(&id) {
+                                params.insert("mask_data_base64".to_string(), cached_data.clone());
                             }
                         }
                     }
@@ -807,7 +823,7 @@ async fn load_image(
     let (orig_width, orig_height) = pristine_img.dimensions();
 
     *state.original_image.lock().unwrap() = Some(LoadedImage {
-        path: source_path_str.clone(),
+        path,
         image: Arc::new(pristine_img),
         is_raw,
     });
@@ -906,10 +922,10 @@ fn get_cached_full_warped_image(
 
     {
         let cache_lock = state.full_warped_cache.lock().unwrap();
-        if let Some((hash, img)) = cache_lock.as_ref() {
-            if *hash == geo_hash {
-                return Ok(Arc::clone(img));
-            }
+        if let Some((hash, img)) = cache_lock.as_ref()
+            && *hash == geo_hash
+        {
+            return Ok(Arc::clone(img));
         }
     }
 
@@ -992,6 +1008,7 @@ pub fn get_cached_or_generate_mask(
     generated
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_preview_job(
     app_handle: &tauri::AppHandle,
     state: tauri::State<AppState>,
@@ -1047,7 +1064,7 @@ fn process_preview_job(
 
     let mut cached_preview_lock = state.cached_preview.lock().unwrap();
 
-    let cache_valid = cached_preview_lock.as_ref().map_or(false, |c| {
+    let cache_valid = cached_preview_lock.as_ref().is_some_and(|c| {
         c.transform_hash == new_transform_hash
             && c.preview_dim == preview_dim
             && c.interactive_divisor == interactive_divisor
@@ -1128,7 +1145,7 @@ fn process_preview_job(
     let mask_definitions: Vec<MaskDefinition> = adjustments_clone
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let scaled_crop_offset = (
         unscaled_crop_offset.0 * effective_scale,
@@ -1160,10 +1177,12 @@ fn process_preview_job(
         &state,
         &processing_image,
         new_transform_hash,
-        final_adjustments,
-        &mask_bitmaps,
-        lut,
-        pixel_roi,
+        RenderRequest {
+            adjustments: final_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: pixel_roi,
+        },
         "apply_adjustments",
     );
 
@@ -1171,18 +1190,17 @@ fn process_preview_job(
         if !(is_interactive && pixel_roi.is_some()) {
             let analytics_job = AnalyticsJob {
                 path: loaded_image.path.clone(),
-                image: Arc::new(final_processed_image.clone()),
-                compute_waveform: !is_interactive,
-                active_waveform_channel: None,
+                image: Arc::clone(&final_processed_image),
+                compute_waveform,
+                active_waveform_channel: channel_filter,
             };
 
             if let Some(tx) = state.analytics_worker_tx.lock().unwrap().as_ref() {
                 let _ = tx.send(analytics_job);
             }
         }
-        if is_interactive && pixel_roi.is_some() {
-            let r = pixel_roi.unwrap();
 
+        if let Some(r) = pixel_roi.filter(|_| is_interactive) {
             let step_start = std::time::Instant::now();
             let roi_rgb = final_processed_image.to_rgb8();
 
@@ -1277,16 +1295,16 @@ fn start_analytics_worker(app_handle: tauri::AppHandle) {
                 );
             }
 
-            if job.compute_waveform {
-                if let Ok(waveform_data) = image_processing::calculate_waveform_from_image(
+            if job.compute_waveform
+                && let Ok(waveform_data) = image_processing::calculate_waveform_from_image(
                     &job.image,
                     job.active_waveform_channel.as_deref(),
-                ) {
-                    let _ = app_handle.emit(
-                        "waveform-update",
-                        serde_json::json!({ "path": job.path, "data": waveform_data }),
-                    );
-                }
+                )
+            {
+                let _ = app_handle.emit(
+                    "waveform-update",
+                    serde_json::json!({ "path": job.path, "data": waveform_data }),
+                );
             }
         }
     });
@@ -1424,7 +1442,7 @@ fn generate_uncropped_preview(
         let mask_definitions: Vec<MaskDefinition> = adjustments_clone
             .get("masks")
             .and_then(|m| serde_json::from_value(m.clone()).ok())
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         let mask_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = mask_definitions
             .iter()
@@ -1450,17 +1468,19 @@ fn generate_uncropped_preview(
             &state,
             &processing_base,
             unique_hash,
-            uncropped_adjustments,
-            &mask_bitmaps,
-            lut,
-            None,
+            RenderRequest {
+                adjustments: uncropped_adjustments,
+                mask_bitmaps: &mask_bitmaps,
+                lut,
+                roi: None,
+            },
             "generate_uncropped_preview",
         ) {
             let (width, height) = processed_image.dimensions();
             let rgb_pixels = processed_image.to_rgb8().into_vec();
             match Encoder::new(Preset::BaselineFastest)
                 .quality(80)
-                .encode_rgb(&rgb_pixels, width as u32, height as u32)
+                .encode_rgb(&rgb_pixels, width, height)
             {
                 Ok(bytes) => {
                     let base64_str = general_purpose::STANDARD.encode(&bytes);
@@ -1518,7 +1538,7 @@ fn generate_original_transformed_preview(
 
     let bytes = Encoder::new(Preset::BaselineFastest)
         .quality(80)
-        .encode_rgb(&rgb_pixels, width as u32, height as u32)
+        .encode_rgb(&rgb_pixels, width, height)
         .map_err(|e| format!("Failed to encode with mozjpeg-rs: {}", e))?;
 
     let base64_str = general_purpose::STANDARD.encode(&bytes);
@@ -1611,10 +1631,12 @@ async fn preview_geometry_transform(
                 &state,
                 &preview_base,
                 visual_hash,
-                all_adjustments,
-                &mask_bitmaps,
-                lut,
-                None,
+                RenderRequest {
+                    adjustments: all_adjustments,
+                    mask_bitmaps: &mask_bitmaps,
+                    lut,
+                    roi: None,
+                },
                 "preview_geometry_transform_base_gen",
             )?;
 
@@ -1710,7 +1732,7 @@ async fn preview_geometry_transform(
 
     let bytes = Encoder::new(Preset::BaselineFastest)
         .quality(75)
-        .encode_rgb(&rgb_pixels, width as u32, height as u32)
+        .encode_rgb(&rgb_pixels, width, height)
         .map_err(|e| format!("Failed to encode with mozjpeg-rs: {}", e))?;
 
     let base64_str = general_purpose::STANDARD.encode(&bytes);
@@ -1793,13 +1815,13 @@ fn process_image_for_export_pipeline(
     debug_tag: &str,
 ) -> Result<DynamicImage, String> {
     let (transformed_image, unscaled_crop_offset) =
-        apply_all_transformations(&base_image, &js_adjustments);
+        apply_all_transformations(base_image, js_adjustments);
     let (img_w, img_h) = transformed_image.dimensions();
 
     let mask_definitions: Vec<MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let warped_image = resolve_warped_image_for_masks(state, js_adjustments, &mask_definitions);
     let mask_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = mask_definitions
@@ -1816,23 +1838,25 @@ fn process_image_for_export_pipeline(
         })
         .collect();
 
-    let mut all_adjustments = get_all_adjustments_from_json(&js_adjustments, is_raw);
+    let mut all_adjustments = get_all_adjustments_from_json(js_adjustments, is_raw);
     all_adjustments.global.show_clipping = 0;
 
     let lut_path = js_adjustments["lutPath"].as_str();
-    let lut = lut_path.and_then(|p| get_or_load_lut(&state, p).ok());
+    let lut = lut_path.and_then(|p| get_or_load_lut(state, p).ok());
 
     let unique_hash = calculate_full_job_hash(path, js_adjustments);
 
     process_and_get_dynamic_image(
-        &context,
-        &state,
+        context,
+        state,
         &transformed_image,
         unique_hash,
-        all_adjustments,
-        &mask_bitmaps,
-        lut,
-        None,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: None,
+        },
         debug_tag,
     )
 }
@@ -1947,6 +1971,7 @@ fn encode_image_to_bytes(
     Ok(image_bytes)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_masks_for_image(
     base_image: &DynamicImage,
     js_adjustments: &Value,
@@ -1958,12 +1983,12 @@ fn export_masks_for_image(
     is_raw: bool,
 ) -> Result<(), String> {
     let (transformed_image, unscaled_crop_offset) =
-        apply_all_transformations(&base_image, &js_adjustments);
+        apply_all_transformations(base_image, js_adjustments);
     let (img_w, img_h) = transformed_image.dimensions();
     let mask_definitions: Vec<MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let warped_image = resolve_warped_image_for_masks(state, js_adjustments, &mask_definitions);
     let mask_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = mask_definitions
@@ -1981,13 +2006,11 @@ fn export_masks_for_image(
         .collect();
 
     if !mask_bitmaps.is_empty() {
-        let all_adjustments = get_all_adjustments_from_json(&js_adjustments, is_raw);
+        let all_adjustments = get_all_adjustments_from_json(js_adjustments, is_raw);
         let lut_path = js_adjustments["lutPath"].as_str();
-        let lut = lut_path.and_then(|p| get_or_load_lut(&state, p).ok());
-        let unique_hash = calculate_full_job_hash(&source_path_str, &js_adjustments);
-        let output_dir = output_path_obj
-            .parent()
-            .unwrap_or_else(|| output_path_obj.as_ref());
+        let lut = lut_path.and_then(|p| get_or_load_lut(state, p).ok());
+        let unique_hash = calculate_full_job_hash(source_path_str, js_adjustments);
+        let output_dir = output_path_obj.parent().unwrap_or(output_path_obj);
         let stem = output_path_obj
             .file_stem()
             .and_then(|s| s.to_str())
@@ -2003,18 +2026,20 @@ fn export_masks_for_image(
             let single_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = vec![full_white_mask];
 
             let processed = process_and_get_dynamic_image(
-                &context,
-                &state,
+                context,
+                state,
                 &transformed_image,
                 unique_hash,
-                single_adjustments,
-                &single_bitmaps,
-                lut.clone(),
-                None,
+                RenderRequest {
+                    adjustments: single_adjustments,
+                    mask_bitmaps: &single_bitmaps,
+                    lut: lut.clone(),
+                    roi: None,
+                },
                 "export_mask_image",
             )?;
 
-            let with_options = apply_export_resize_and_watermark(processed, &export_settings)?;
+            let with_options = apply_export_resize_and_watermark(processed, export_settings)?;
             let (out_w, out_h) = with_options.dimensions();
 
             let alpha_resized = imageops::resize(
@@ -2031,8 +2056,8 @@ fn export_masks_for_image(
             save_image_with_metadata(
                 &with_options,
                 &mask_image_path,
-                &source_path_str,
-                &export_settings,
+                source_path_str,
+                export_settings,
             )?;
 
             let alpha_bytes = encode_grayscale_to_png(&alpha_resized)?;
@@ -2040,6 +2065,54 @@ fn export_masks_for_image(
         }
     }
     Ok(())
+}
+
+fn export_adjustments_as_lut(
+    js_adjustments: &Value,
+    source_path_str: &str,
+    context: &Arc<GpuContext>,
+    state: &tauri::State<AppState>,
+) -> Result<Vec<u8>, String> {
+    let lut_size = 33;
+    let identity_image = generate_identity_lut_image(lut_size);
+
+    let mut all_adjustments = get_all_adjustments_from_json(js_adjustments, false);
+
+    all_adjustments.global.show_clipping = 0;
+    all_adjustments.global.vignette_amount = 0.0;
+    all_adjustments.global.grain_amount = 0.0;
+    all_adjustments.global.sharpness = 0.0;
+    all_adjustments.global.clarity = 0.0;
+    all_adjustments.global.dehaze = 0.0;
+    all_adjustments.global.structure = 0.0;
+    all_adjustments.global.centré = 0.0;
+    all_adjustments.global.glow_amount = 0.0;
+    all_adjustments.global.halation_amount = 0.0;
+    all_adjustments.global.flare_amount = 0.0;
+    all_adjustments.global.luma_noise_reduction = 0.0;
+    all_adjustments.global.color_noise_reduction = 0.0;
+    all_adjustments.global.chromatic_aberration_red_cyan = 0.0;
+    all_adjustments.global.chromatic_aberration_blue_yellow = 0.0;
+
+    let lut_path = js_adjustments["lutPath"].as_str();
+    let lut = lut_path.and_then(|p| get_or_load_lut(state, p).ok());
+    let unique_hash = calculate_full_job_hash(source_path_str, js_adjustments);
+
+    let processed_lut = process_and_get_dynamic_image(
+        context,
+        state,
+        &identity_image,
+        unique_hash,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &[],
+            lut,
+            roi: None,
+        },
+        "export_lut",
+    )?;
+
+    convert_image_to_cube_lut(&processed_lut, lut_size)
 }
 
 #[tauri::command]
@@ -2069,10 +2142,10 @@ async fn export_image(
                 .map_err(|e| format!("Failed to composite AI patches for export: {}", e))?;
 
             let mut main_export_adjustments = js_adjustments.clone();
-            if export_settings.export_masks {
-                if let Some(obj) = main_export_adjustments.as_object_mut() {
-                    obj.insert("masks".to_string(), serde_json::json!([]));
-                }
+            if export_settings.export_masks
+                && let Some(obj) = main_export_adjustments.as_object_mut()
+            {
+                obj.insert("masks".to_string(), serde_json::json!([]));
             }
 
             let final_image = process_image_for_export(
@@ -2180,11 +2253,42 @@ async fn batch_export_images(
         }
         let pool = pool_result.unwrap();
 
+        let mut base_path_counts: HashMap<String, usize> = HashMap::new();
+        let mut export_items = Vec::with_capacity(total_paths);
+
+        for (i, path_str) in paths.into_iter().enumerate() {
+            let (source_path, _) = parse_virtual_path(&path_str);
+            let source_str = source_path.to_string_lossy().to_string();
+            let count = base_path_counts.entry(source_str.clone()).or_insert(0);
+            *count += 1;
+
+            let mut explicit_vc = None;
+            if let Some(idx) = path_str.rfind("vc=") {
+                let id_str = path_str[idx + 3..].split('&').next().unwrap_or("");
+                if let Ok(id) = id_str.parse::<u32>() {
+                    explicit_vc = Some(id);
+                }
+            }
+            if explicit_vc.is_none() {
+                let lower = path_str.to_lowercase();
+                if let Some(idx) = lower.rfind("_vc") {
+                    let id_str: String = lower[idx + 3..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
+                    if let Ok(id) = id_str.parse::<u32>() {
+                        explicit_vc = Some(id);
+                    }
+                }
+            }
+
+            export_items.push((i, path_str, *count, explicit_vc));
+        }
+
         let results: Vec<Result<(), String>> = pool.install(|| {
-            paths
-                .par_iter()
-                .enumerate()
-                .map(|(global_index, image_path_str)| {
+            export_items
+                .into_par_iter()
+                .map(|(global_index, image_path_str, appearance_count, explicit_vc)| {
                     if app_handle
                         .state::<AppState>()
                         .export_task_handle
@@ -2201,12 +2305,12 @@ async fn batch_export_images(
                         serde_json::json!({
                             "current": current_progress,
                             "total": total_paths,
-                            "path": image_path_str
+                            "path": &image_path_str
                         }),
                     );
 
                     let result: Result<(), String> = (|| {
-                        let (source_path, sidecar_path) = parse_virtual_path(image_path_str);
+                        let (source_path, sidecar_path) = parse_virtual_path(&image_path_str);
                         let source_path_str = source_path.to_string_lossy().to_string();
 
                         let metadata: ImageMetadata = if sidecar_path.exists() {
@@ -2219,6 +2323,42 @@ async fn batch_export_images(
                         let mut js_adjustments = metadata.adjustments;
                         hydrate_adjustments(&state, &mut js_adjustments);
                         let is_raw = is_raw_file(&source_path_str);
+
+                        let original_path = std::path::Path::new(&source_path_str);
+                        let file_date = exif_processing::get_creation_date_from_path(original_path);
+
+                        let filename_template = export_settings
+                            .filename_template
+                            .as_deref()
+                            .unwrap_or("{original_filename}_edited");
+                        let mut new_stem = generate_filename_from_template(
+                            filename_template,
+                            original_path,
+                            global_index + 1,
+                            total_paths,
+                            &file_date,
+                        );
+
+                        if let Some(vc_id) = explicit_vc {
+                            new_stem = format!("{}_VC{:02}", new_stem, vc_id);
+                        } else if appearance_count > 1 {
+                            new_stem = format!("{}_VC{:02}", new_stem, appearance_count - 1);
+                        }
+
+                        let new_filename = format!("{}.{}", new_stem, output_format);
+                        let output_path = output_folder_path.join(new_filename);
+                        let extension = output_format.to_lowercase();
+
+                        if extension == "cube" {
+                            let cube_bytes = export_adjustments_as_lut(
+                                &js_adjustments,
+                                &source_path_str,
+                                &context,
+                                &state,
+                            )?;
+                            fs::write(&output_path, cube_bytes).map_err(|e| e.to_string())?;
+                            return Ok(());
+                        }
 
                         let base_image = match read_file_mapped(Path::new(&source_path_str)) {
                             Ok(mmap) => load_and_composite(
@@ -2254,11 +2394,10 @@ async fn batch_export_images(
                         };
 
                         let mut main_export_adjustments = js_adjustments.clone();
-                        if export_settings.export_masks {
-                            if let Some(obj) = main_export_adjustments.as_object_mut() {
+                        if export_settings.export_masks
+                            && let Some(obj) = main_export_adjustments.as_object_mut() {
                                 obj.insert("masks".to_string(), serde_json::json!([]));
                             }
-                        }
 
                         let final_image = process_image_for_export(
                             &source_path_str,
@@ -2404,7 +2543,7 @@ async fn estimate_export_size(
     let mask_definitions: Vec<MaskDefinition> = adjustments_clone
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let scaled_crop_offset = (
         unscaled_crop_offset.0 * scale,
@@ -2439,10 +2578,12 @@ async fn estimate_export_size(
         &state,
         &preview_image,
         unique_hash,
-        all_adjustments,
-        &mask_bitmaps,
-        lut,
-        None,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: None,
+        },
         "estimate_export_size",
     )?;
 
@@ -2549,16 +2690,16 @@ async fn estimate_batch_export_size(
     };
 
     let mut scaled_adjustments = js_adjustments.clone();
-    if let Some(crop_val) = scaled_adjustments.get_mut("crop") {
-        if let Ok(c) = serde_json::from_value::<Crop>(crop_val.clone()) {
-            *crop_val = serde_json::to_value(Crop {
-                x: c.x * raw_scale_factor as f64,
-                y: c.y * raw_scale_factor as f64,
-                width: c.width * raw_scale_factor as f64,
-                height: c.height * raw_scale_factor as f64,
-            })
-            .unwrap_or(serde_json::Value::Null);
-        }
+    if let Some(crop_val) = scaled_adjustments.get_mut("crop")
+        && let Ok(c) = serde_json::from_value::<Crop>(crop_val.clone())
+    {
+        *crop_val = serde_json::to_value(Crop {
+            x: c.x * raw_scale_factor as f64,
+            y: c.y * raw_scale_factor as f64,
+            width: c.width * raw_scale_factor as f64,
+            height: c.height * raw_scale_factor as f64,
+        })
+        .unwrap_or(serde_json::Value::Null);
     }
 
     let (transformed_shrunk_res, unscaled_crop_offset) =
@@ -2583,7 +2724,7 @@ async fn estimate_batch_export_size(
     let mask_definitions: Vec<MaskDefinition> = scaled_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let scaled_crop_offset = (
         unscaled_crop_offset.0 * gpu_scale,
@@ -2618,10 +2759,12 @@ async fn estimate_batch_export_size(
         &state,
         &preview_base,
         unique_hash,
-        all_adjustments,
-        &mask_bitmaps,
-        lut,
-        None,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: None,
+        },
         "estimate_batch_export_size",
     )?;
 
@@ -2759,6 +2902,7 @@ async fn generate_ai_sky_mask(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn generate_ai_subject_mask(
     js_adjustments: serde_json::Value,
@@ -2912,6 +3056,50 @@ async fn generate_ai_subject_mask(
 }
 
 #[tauri::command]
+async fn precompute_ai_subject_mask(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let models = get_or_init_ai_models(&app_handle, &state.ai_state, &state.ai_init_lock)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let path_hash = {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(path.as_bytes());
+        let mut geo_hasher = DefaultHasher::new();
+        for key in GEOMETRY_KEYS {
+            if let Some(val) = js_adjustments.get(key) {
+                key.hash(&mut geo_hasher);
+                val.to_string().hash(&mut geo_hasher);
+            }
+        }
+        hasher.update(&geo_hasher.finish().to_le_bytes());
+        hasher.finalize().to_hex().to_string()
+    };
+
+    let mut ai_state_lock = state.ai_state.lock().unwrap();
+    let ai_state = ai_state_lock.as_mut().unwrap();
+
+    if let Some(cached_embeddings) = &ai_state.embeddings
+        && cached_embeddings.path_hash == path_hash
+    {
+        return Ok(());
+    }
+
+    let warped_image = get_cached_full_warped_image(&state, &js_adjustments)?;
+    let mut new_embeddings = generate_image_embeddings(warped_image.as_ref(), &models.sam_encoder)
+        .map_err(|e| e.to_string())?;
+
+    new_embeddings.path_hash = path_hash.clone();
+    ai_state.embeddings = Some(new_embeddings);
+
+    Ok(())
+}
+
+#[tauri::command]
 fn generate_preset_preview(
     js_adjustments: serde_json::Value,
     state: tauri::State<AppState>,
@@ -2939,7 +3127,7 @@ fn generate_preset_preview(
     let mask_definitions: Vec<MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let warped_image = resolve_warped_image_for_masks(&state, &js_adjustments, &mask_definitions);
     let mask_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = mask_definitions
@@ -2965,10 +3153,12 @@ fn generate_preset_preview(
         &state,
         &transformed_image,
         unique_hash,
-        all_adjustments,
-        &mask_bitmaps,
-        lut,
-        None,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: None,
+        },
         "generate_preset_preview",
     )?;
 
@@ -3285,7 +3475,7 @@ async fn generate_all_community_previews(
 
         for (i, (base_image, is_raw)) in base_thumbnails.iter().enumerate() {
             let (transformed_image, unscaled_crop_offset) =
-                crate::apply_all_transformations(&base_image, &js_adjustments);
+                crate::apply_all_transformations(base_image, js_adjustments);
             let (img_w, img_h) = transformed_image.dimensions();
 
             let mask_definitions: Vec<MaskDefinition> = js_adjustments
@@ -3309,7 +3499,7 @@ async fn generate_all_community_previews(
                 })
                 .collect();
 
-            let all_adjustments = get_all_adjustments_from_json(&js_adjustments, *is_raw);
+            let all_adjustments = get_all_adjustments_from_json(js_adjustments, *is_raw);
             let lut_path = js_adjustments["lutPath"].as_str();
             let lut = lut_path.and_then(|p| get_or_load_lut(&state, p).ok());
 
@@ -3320,10 +3510,12 @@ async fn generate_all_community_previews(
                 &state,
                 &transformed_image,
                 unique_hash,
-                all_adjustments,
-                &mask_bitmaps,
-                lut,
-                None,
+                RenderRequest {
+                    adjustments: all_adjustments,
+                    mask_bitmaps: &mask_bitmaps,
+                    lut,
+                    roi: None,
+                },
                 "generate_all_community_previews",
             )?;
 
@@ -3551,12 +3743,12 @@ async fn merge_hdr(
             )
             .map_err(|e| format!("Failed to load image {}: {}", path, e))?;
 
-            let gains = match read_iso(&path, &file_bytes) {
+            let gains = match read_iso(path, &file_bytes) {
                 None => return Err(format!("Image {} is missing ISO/Sensitivity data", path)),
                 Some(gains) => gains as f32,
             };
 
-            let exposure = match read_exposure_time_secs(&path, &file_bytes) {
+            let exposure = match read_exposure_time_secs(path, &file_bytes) {
                 None => return Err(format!("Image {} is missing ExposureTime data", path)),
                 Some(exp) => Duration::from_secs_f32(exp),
             };
@@ -3668,17 +3860,31 @@ async fn save_hdr(
 async fn apply_denoising(
     path: String,
     intensity: f32,
+    method: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let (source_path, _) = parse_virtual_path(&path);
     let path_str = source_path.to_string_lossy().to_string();
 
+    let mut ai_session = None;
+    if method == "ai" {
+        let session = crate::ai_processing::get_or_init_denoise_model(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        ai_session = Some(session);
+    }
+
     let denoise_result_handle = state.denoise_result.clone();
 
     tokio::task::spawn_blocking(move || {
-        match denoising::denoise_image(path_str, intensity, app_handle.clone()) {
-            Ok((image, _base64_ignored_in_this_handler_logic)) => {
+        match denoising::denoise_image(path_str, intensity, method, app_handle.clone(), ai_session)
+        {
+            Ok((image, _)) => {
                 *denoise_result_handle.lock().unwrap() = Some(image);
             }
             Err(e) => {
@@ -3813,7 +4019,7 @@ fn generate_preview_for_path(
     let mask_definitions: Vec<MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let warped_image = resolve_warped_image_for_masks(&state, &js_adjustments, &mask_definitions);
     let mask_bitmaps: Vec<ImageBuffer<Luma<u8>, Vec<u8>>> = mask_definitions
@@ -3839,10 +4045,12 @@ fn generate_preview_for_path(
         &state,
         &transformed_image,
         unique_hash,
-        all_adjustments,
-        &mask_bitmaps,
-        lut,
-        None,
+        RenderRequest {
+            adjustments: all_adjustments,
+            mask_bitmaps: &mask_bitmaps,
+            lut,
+            roi: None,
+        },
         "generate_preview_for_path",
     )?;
     let (width, height) = final_image.dimensions();
@@ -3850,7 +4058,7 @@ fn generate_preview_for_path(
 
     let bytes = Encoder::new(Preset::BaselineFastest)
         .quality(92)
-        .encode_rgb(&rgb_pixels, width as u32, height as u32)
+        .encode_rgb(&rgb_pixels, width, height)
         .map_err(|e| format!("Failed to encode with mozjpeg-rs: {}", e))?;
 
     Ok(Response::new(bytes))
@@ -4028,10 +4236,10 @@ fn frontend_log(level: String, message: String) -> Result<(), String> {
 }
 
 fn handle_file_open(app_handle: &tauri::AppHandle, path: PathBuf) {
-    if let Some(path_str) = path.to_str() {
-        if let Err(e) = app_handle.emit("open-with-file", path_str) {
-            log::error!("Failed to emit open-with-file event: {}", e);
-        }
+    if let Some(path_str) = path.to_str()
+        && let Err(e) = app_handle.emit("open-with-file", path_str)
+    {
+        log::error!("Failed to emit open-with-file event: {}", e);
     }
 }
 
@@ -4049,51 +4257,43 @@ fn frontend_ready(
     #[allow(unused_mut)]
     let mut should_fullscreen = false;
 
-    if is_first_run {
-        if let Ok(config_dir) = app_handle.path().app_config_dir() {
-            let path = config_dir.join("window_state.json");
+    if is_first_run && let Ok(config_dir) = app_handle.path().app_config_dir() {
+        let path = config_dir.join("window_state.json");
 
-            if let Ok(contents) = std::fs::read_to_string(&path) {
-                if let Ok(saved_state) = serde_json::from_str::<WindowState>(&contents) {
-                    #[cfg(any(windows, target_os = "linux"))]
-                    {
-                        should_maximize = saved_state.maximized;
-                        should_fullscreen = saved_state.fullscreen;
-                    }
-                    #[cfg(not(any(windows, target_os = "linux")))]
-                    let _ = &saved_state;
+        if let Ok(contents) = std::fs::read_to_string(&path)
+            && let Ok(saved_state) = serde_json::from_str::<WindowState>(&contents)
+        {
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                should_maximize = saved_state.maximized;
+                should_fullscreen = saved_state.fullscreen;
+            }
 
-                    if should_maximize || should_fullscreen {
-                        if let Some(monitor) = window
-                            .current_monitor()
+            if (should_maximize || should_fullscreen)
+                && let Some(monitor) = window
+                    .current_monitor()
+                    .ok()
+                    .flatten()
+                    .or_else(|| window.primary_monitor().ok().flatten())
+                    .or_else(|| {
+                        window
+                            .available_monitors()
                             .ok()
-                            .flatten()
-                            .or_else(|| window.primary_monitor().ok().flatten())
-                            .or_else(|| {
-                                window
-                                    .available_monitors()
-                                    .ok()
-                                    .and_then(|m| m.into_iter().next())
-                            })
-                        {
-                            let monitor_size = monitor.size();
-                            let monitor_pos = monitor.position();
-                            let default_width = 1440i32;
-                            let default_height = 900i32;
-                            let center_x =
-                                monitor_pos.x + (monitor_size.width as i32 - default_width) / 2;
-                            let center_y =
-                                monitor_pos.y + (monitor_size.height as i32 - default_height) / 2;
+                            .and_then(|m| m.into_iter().next())
+                    })
+            {
+                let monitor_size = monitor.size();
+                let monitor_pos = monitor.position();
+                let default_width = 1280i32;
+                let default_height = 720i32;
+                let center_x = monitor_pos.x + (monitor_size.width as i32 - default_width) / 2;
+                let center_y = monitor_pos.y + (monitor_size.height as i32 - default_height) / 2;
 
-                            let _ = window.set_size(tauri::PhysicalSize::new(
-                                default_width as u32,
-                                default_height as u32,
-                            ));
-                            let _ = window
-                                .set_position(tauri::PhysicalPosition::new(center_x, center_y));
-                        }
-                    }
-                }
+                let _ = window.set_size(tauri::PhysicalSize::new(
+                    default_width as u32,
+                    default_height as u32,
+                ));
+                let _ = window.set_position(tauri::PhysicalPosition::new(center_x, center_y));
             }
         }
     }
@@ -4168,18 +4368,32 @@ fn main() {
             }
 
             let app_handle = app.handle().clone();
-            let settings: AppSettings = load_settings(app_handle.clone()).unwrap_or_default();
+            let config_dir = app_handle.path().app_config_dir().expect("Failed to get config dir");
+            let crash_flag_path = config_dir.join(".gpu_init_crash_flag");
+
+            {
+                let state = app.state::<AppState>();
+                *state.gpu_crash_flag_path.lock().unwrap() = Some(crash_flag_path.clone());
+            }
+
+            let mut settings: AppSettings = load_settings(app_handle.clone()).unwrap_or_default();
+
+            if crash_flag_path.exists() {
+                log::warn!("GPU Driver crash detected on last run! Falling back to OpenGL backend.");
+                settings.processing_backend = Some("gl".to_string());
+                let _ = crate::file_management::save_settings(settings.clone(), app_handle.clone());
+                let _ = std::fs::remove_file(&crash_flag_path);
+            }
 
             let lens_db = lens_correction::load_lensfun_db(&app_handle);
             let state = app.state::<AppState>();
             *state.lens_db.lock().unwrap() = Some(lens_db);
 
             unsafe {
-                if let Some(backend) = &settings.processing_backend {
-                    if backend != "auto" {
+                if let Some(backend) = &settings.processing_backend
+                    && backend != "auto" {
                         std::env::set_var("WGPU_BACKEND", backend);
                     }
-                }
 
                 if settings.linux_gpu_optimization.unwrap_or(true) {
                     #[cfg(target_os = "linux")]
@@ -4216,11 +4430,10 @@ fn main() {
 
             setup_logging(&app_handle);
 
-            if let Some(backend) = &settings.processing_backend {
-                if backend != "auto" {
+            if let Some(backend) = &settings.processing_backend
+                && backend != "auto" {
                     log::info!("Applied processing backend setting: {}", backend);
                 }
-            }
             if settings.linux_gpu_optimization.unwrap_or(false) {
                 #[cfg(target_os = "linux")]
                 {
@@ -4231,7 +4444,7 @@ fn main() {
             start_preview_worker(app_handle.clone());
             start_analytics_worker(app_handle.clone());
 
-            let window_cfg = app.config().app.windows.get(0).unwrap().clone();
+            let window_cfg = app.config().app.windows.first().unwrap().clone();
             let transparent = settings.transparent.unwrap_or(window_cfg.transparent);
             let decorations = settings.decorations.unwrap_or(window_cfg.decorations);
 
@@ -4312,15 +4525,14 @@ fn main() {
                         lock.take()
                     };
 
-                    if let Some(state) = state_to_save {
-                        if let Ok(config_dir) = app_handle_for_saver.path().app_config_dir() {
+                    if let Some(state) = state_to_save
+                        && let Ok(config_dir) = app_handle_for_saver.path().app_config_dir() {
                             let path = config_dir.join("window_state.json");
                             let _ = std::fs::create_dir_all(&config_dir);
                             if let Ok(json) = serde_json::to_string(&state) {
                                 let _ = std::fs::write(&path, json);
                             }
                         }
-                    }
                 }
             });
 
@@ -4357,23 +4569,31 @@ fn main() {
                         state.y = position.y;
                     }
 
-                    if !maximized && !fullscreen {
-                        if let Ok(size) = window_for_handler.outer_size() {
-                            if size.width >= 200 && size.height >= 150 {
-                                state.width = size.width;
-                                state.height = size.height;
-                            }
+                        if let Ok(position) = window_for_handler.outer_position() {
+                            state.x = position.x;
+                            state.y = position.y;
                         }
+
+                        if !maximized && !fullscreen
+                            && let Ok(size) = window_for_handler.outer_size()
+                                && size.width >= 200 && size.height >= 150 {
+                                    state.width = size.width;
+                                    state.height = size.height;
+                                }
+
+                        *pending_state_for_handler.lock().unwrap() = Some(state);
                     }
 
                     *pending_state_for_handler.lock().unwrap() = Some(state);
                 }
                 _ => {}
             });
+            crate::register_exit_handler();
             Ok(())
         })
         .manage(AppState {
             window_setup_complete: AtomicBool::new(false),
+            gpu_crash_flag_path: Mutex::new(None),
             original_image: Mutex::new(None),
             cached_preview: Mutex::new(None),
             gpu_context: Mutex::new(None),
@@ -4444,6 +4664,7 @@ fn main() {
             file_management::list_images_in_dir,
             file_management::list_images_recursive,
             file_management::get_folder_tree,
+            file_management::get_folder_children,
             file_management::get_pinned_folder_trees,
             file_management::generate_thumbnails,
             file_management::generate_thumbnails_progressive,
@@ -4512,7 +4733,20 @@ fn main() {
                         }
                     }
                 }
-                tauri::RunEvent::ExitRequested { .. } => {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    api.prevent_exit();
+
+                    #[cfg(target_os = "macos")]
+                    unsafe { libc::_exit(0); }
+
+                    #[cfg(not(target_os = "macos"))]
+                    std::process::exit(0);
+                }
+                tauri::RunEvent::Exit => {
+                    #[cfg(target_os = "macos")]
+                    unsafe { libc::_exit(0); }
+
+                    #[cfg(not(target_os = "macos"))]
                     std::process::exit(0);
                 }
                 _ => {}

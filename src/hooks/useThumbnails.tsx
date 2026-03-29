@@ -1,89 +1,70 @@
-import { useState, useEffect, useRef } from 'react';
-import type React from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ImageFile, Invokes, Progress } from '../components/ui/AppProperties';
+import { Invokes } from '../components/ui/AppProperties';
 
-export function useThumbnails(
-  imageList: Array<ImageFile>,
-  setThumbnails: React.Dispatch<React.SetStateAction<Record<string, string>>>,
-) {
+export function useThumbnails() {
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState<Progress>({ completed: 0, total: 0 });
-  const processedImageListKey = useRef<string | null>(null);
+  const requestedPathsRef = useRef<Set<string>>(new Set());
+  const queueTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingQueueRef = useRef<Set<string>>(new Set());
+  const loadingCountRef = useRef(0);
 
   useEffect(() => {
-    const newKey =
-      imageList && imageList.length > 0 ? JSON.stringify(imageList.map((img: ImageFile) => img.path).sort()) : '';
-
-    if (newKey === processedImageListKey.current) {
-      return;
-    }
-
-    processedImageListKey.current = newKey;
-
-    if (!imageList || imageList.length === 0) {
-      setThumbnails({});
-      setLoading(false);
-      setProgress({ completed: 0, total: 0 });
-      return;
-    }
-
-    const imagePaths = imageList.map((img: ImageFile) => img.path);
-
-    setThumbnails((prevThumbnails: Record<string, string>) => {
-      const newPathSet = new Set(imagePaths);
-      const nextThumbnails = { ...prevThumbnails };
-      let hasChanges = false;
-
-      Object.keys(nextThumbnails).forEach((path) => {
-        if (!newPathSet.has(path)) {
-          delete nextThumbnails[path];
-          hasChanges = true;
+    let unlistenComplete: any;
+    const setupListener = async () => {
+      unlistenComplete = await listen('thumbnail-generation-complete', () => {
+        loadingCountRef.current = Math.max(0, loadingCountRef.current - 1);
+        if (loadingCountRef.current === 0) {
+          setLoading(false);
         }
       });
+    };
+    setupListener();
+    return () => {
+      if (unlistenComplete) unlistenComplete();
+    };
+  }, []);
 
-      return hasChanges || Object.keys(nextThumbnails).length !== imagePaths.length ? nextThumbnails : prevThumbnails;
+  const clearThumbnailQueue = useCallback(() => {
+    requestedPathsRef.current.clear();
+    pendingQueueRef.current.clear();
+    if (queueTimeoutRef.current) {
+      clearTimeout(queueTimeoutRef.current);
+    }
+    loadingCountRef.current = 0;
+    setLoading(false);
+  }, []);
+
+  const requestThumbnails = useCallback((paths: string[]) => {
+    let added = false;
+    paths.forEach((p) => {
+      if (!requestedPathsRef.current.has(p)) {
+        requestedPathsRef.current.add(p);
+        pendingQueueRef.current.add(p);
+        added = true;
+      }
     });
 
-    let unlistenComplete: (() => void) | undefined;
-    let unlistenProgress: (() => void) | undefined;
+    if (added) {
+      if (queueTimeoutRef.current) clearTimeout(queueTimeoutRef.current);
+      queueTimeoutRef.current = setTimeout(() => {
+        const pathsToRequest = Array.from(pendingQueueRef.current);
+        pendingQueueRef.current.clear();
 
-    const setupListenersAndInvoke = async () => {
-      setLoading(true);
-      setProgress({ completed: 0, total: imagePaths.length });
+        if (pathsToRequest.length > 0) {
+          loadingCountRef.current += 1;
+          setLoading(true);
+          invoke(Invokes.GenerateThumbnailsProgressive, { paths: pathsToRequest }).catch((err) => {
+            console.error('Failed to request thumbnails:', err);
+            pathsToRequest.forEach((p) => requestedPathsRef.current.delete(p));
+            loadingCountRef.current = Math.max(0, loadingCountRef.current - 1);
+            if (loadingCountRef.current === 0) setLoading(false);
+          });
+        }
+      }, 150);
+    }
+  }, []);
 
-      unlistenProgress = await listen(
-        'thumbnail-progress',
-        (event: { payload: { completed: number; total: number } }) => {
-          const { completed, total } = event.payload;
-          setProgress({ completed, total });
-        },
-      );
-
-      unlistenComplete = await listen('thumbnail-generation-complete', () => {
-        setLoading(false);
-      });
-
-      try {
-        await invoke(Invokes.GenerateThumbnailsProgressive, { paths: imagePaths });
-      } catch (error) {
-        console.error('Failed to invoke thumbnail generation:', error);
-        setLoading(false);
-      }
-    };
-
-    setupListenersAndInvoke();
-
-    return () => {
-      if (unlistenComplete) {
-        unlistenComplete();
-      }
-      if (unlistenProgress) {
-        unlistenProgress();
-      }
-    };
-  }, [imageList, setThumbnails]);
-
-  return { loading, progress };
+  return { loading, requestThumbnails, clearThumbnailQueue };
 }

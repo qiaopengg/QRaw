@@ -22,6 +22,7 @@ interface KeyboardShortcutsProps {
   handlePasteFiles(str: string): void;
   handleRate(rate: number): void;
   handleRightPanelSelect(panel: Panel): void;
+  handleRotate(degrees: number): void;
   handleSetColorLabel(label: string | null): void;
   handleToggleFullScreen(): void;
   handleZoomChange(zoomValue: number, fitToWindow?: boolean): void;
@@ -72,6 +73,7 @@ export const useKeyboardShortcuts = ({
   handlePasteFiles,
   handleRate,
   handleRightPanelSelect,
+  handleRotate,
   handleSetColorLabel,
   handleToggleFullScreen,
   handleZoomChange,
@@ -324,6 +326,15 @@ export const useKeyboardShortcuts = ({
         handleRate(parseInt(key, 10));
       }
 
+      if (key === '[' && !isCtrl && selectedImage) {
+        event.preventDefault();
+        handleRotate(-90);
+      }
+      if (key === ']' && !isCtrl && selectedImage) {
+        event.preventDefault();
+        handleRotate(90);
+      }
+
       // On macOS the physical ⌫ key sends Backspace, not Delete.
       // File deletion follows macOS convention: Cmd + Delete (i.e. Cmd + Backspace).
       // Non-destructive mask/patch deletion uses plain Backspace on macOS.
@@ -440,6 +451,7 @@ export const useKeyboardShortcuts = ({
     handlePasteFiles,
     handleRate,
     handleRightPanelSelect,
+    handleRotate,
     handleSetColorLabel,
     handleToggleFullScreen,
     handleZoomChange,

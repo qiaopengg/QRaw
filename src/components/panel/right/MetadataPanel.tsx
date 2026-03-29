@@ -67,9 +67,9 @@ function parseDms(dmsString: string) {
 
 function MetadataItem({ label, value }: MetaDataItemProps) {
   return (
-    <div className="grid grid-cols-3 gap-2 text-xs py-1.5 px-2 rounded odd:bg-bg-primary">
-      <p className="font-semibold text-text-primary col-span-1 break-words">{label}</p>
-      <p className="text-text-secondary col-span-2 break-words truncate" data-tooltip={String(value)}>
+    <div className="grid grid-cols-3 gap-2 text-xs py-1.5 px-2 rounded-sm odd:bg-bg-primary">
+      <p className="font-semibold text-text-primary col-span-1 wrap-break-word">{label}</p>
+      <p className="text-text-secondary col-span-2 wrap-break-word truncate" data-tooltip={String(value)}>
         {String(value)}
       </p>
     </div>
@@ -211,10 +211,10 @@ export default function MetadataPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('metadata.title')}</h2>
+      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Metadata</h2>
       </div>
-      <div className="flex-grow overflow-y-auto p-4 text-text-secondary custom-scrollbar">
+      <div className="grow overflow-y-auto p-4 text-text-secondary custom-scrollbar">
         {selectedImage ? (
           <div className="flex flex-col gap-6">
             <div>
@@ -252,11 +252,30 @@ export default function MetadataPanel({
                     >
                       <div className="p-3 pt-0 border-t border-surface/50 flex flex-col gap-3">
                         <div className="mt-3">
-                          <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-1 block">
-                            {t('metadata.rating')}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            {[1, 2, 3, 4, 5].map((star) => (
+                            <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-1 block">Rating</span>
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  onClick={() => onRate(star, [selectedImage.path])}
+                                  className="focus:outline-hidden transition-transform active:scale-95 hover:scale-110"
+                                >
+                                  <Star
+                                    size={20}
+                                    className={clsx(
+                                      "transition-colors duration-200",
+                                      star <= rating 
+                                        ? "fill-accent text-accent" 
+                                        : "fill-transparent text-text-tertiary hover:text-text-secondary"
+                                    )}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-2 mt-1 block">Color Label</span>
+                            <div className="flex flex-wrap gap-2">
                               <button
                                 key={star}
                                 onClick={() => onRate(star, [selectedImage.path])}
@@ -302,73 +321,39 @@ export default function MetadataPanel({
                                     ? 'ring-2 ring-white ring-offset-1 ring-offset-bg-primary'
                                     : 'hover:ring-2 hover:ring-white/20',
                                 )}
-                                style={{ backgroundColor: color.color }}
-                                data-tooltip={color.name}
-                              >
-                                {currentColor === color.name && <Check size={12} className="text-black/50 mx-auto" />}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-2 mt-1  block">
-                            {t('metadata.tags')}
-                          </span>
-                          <div className="flex flex-wrap gap-1.5 mb-2">
-                            <AnimatePresence>
-                              {currentTags.length > 0 ? (
-                                currentTags.map((tagItem) => (
-                                  <motion.div
-                                    key={tagItem.tag}
-                                    layout
-                                    initial={{ opacity: 0, scale: 0.8 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.8 }}
-                                    className="flex items-center gap-1 bg-bg-primary text-text-primary text-xs font-medium px-2 py-1 rounded-md group cursor-pointer border border-surface hover:border-text-tertiary/50 transition-colors"
-                                    onClick={() => handleRemoveTag(tagItem)}
-                                  >
-                                    <span>{tagItem.tag}</span>
-                                    <X size={10} className="opacity-50 group-hover:opacity-100" />
-                                  </motion.div>
-                                ))
-                              ) : (
-                                <span className="text-xs text-text-tertiary italic">{t('metadata.noTags')}</span>
-                              )}
-                            </AnimatePresence>
-                          </div>
-
-                          <div
-                            className={clsx(
-                              'flex items-center bg-surface border rounded-md px-2 py-1 transition-colors',
-                              isTagInputFocused ? 'border-accent' : 'border-border-color',
-                            )}
-                          >
-                            <input
-                              type="text"
-                              value={tagInputValue}
-                              onChange={(e) => setTagInputValue(e.target.value)}
-                              onKeyDown={handleTagInputKeyDown}
-                              onFocus={() => setIsTagInputFocused(true)}
-                              onBlur={() => setIsTagInputFocused(false)}
-                              placeholder={t('metadata.addTag')}
-                              className="bg-transparent border-none outline-none text-xs w-full text-text-primary placeholder-text-tertiary"
-                            />
-                            <button
-                              onClick={() => handleAddTag(tagInputValue)}
-                              disabled={!tagInputValue.trim()}
-                              className="text-text-secondary hover:text-accent disabled:opacity-30 transition-colors"
-                            >
-                              <Plus size={14} />
-                            </button>
-                          </div>
-                          {appSettings?.taggingShortcuts && appSettings.taggingShortcuts.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {appSettings.taggingShortcuts.map((shortcut) => (
-                                <button
+                              </AnimatePresence>
+                           </div>
+                           
+                           <div className={clsx(
+                             "flex items-center bg-surface border rounded-md px-2 py-1 transition-colors",
+                             isTagInputFocused ? "border-accent" : "border-border-color"
+                           )}>
+                             <input
+                                type="text"
+                                value={tagInputValue}
+                                onChange={(e) => setTagInputValue(e.target.value)}
+                                onKeyDown={handleTagInputKeyDown}
+                                onFocus={() => setIsTagInputFocused(true)}
+                                onBlur={() => setIsTagInputFocused(false)}
+                                placeholder="Add tag..."
+                                className="bg-transparent border-none outline-hidden text-xs w-full text-text-primary placeholder-text-tertiary"
+                             />
+                             <button
+                               onClick={() => handleAddTag(tagInputValue)}
+                               disabled={!tagInputValue.trim()}
+                               className="text-text-secondary hover:text-accent disabled:opacity-30 transition-colors"
+                             >
+                               <Plus size={14} />
+                             </button>
+                           </div>
+                           {appSettings?.taggingShortcuts && appSettings.taggingShortcuts.length > 0 && (
+                             <div className="mt-2 flex flex-wrap gap-1">
+                               {appSettings.taggingShortcuts.map((shortcut) => (
+                                 <button
                                   key={shortcut}
                                   onClick={() => handleAddTag(shortcut)}
-                                  className="text-xs font-medium bg-bg-secondary hover:bg-card-active text-text-secondary px-1.5 py-0.5 rounded border border-transparent hover:border-border-color transition-all"
-                                >
+                                  className="text-xs font-medium bg-bg-secondary hover:bg-card-active text-text-secondary px-1.5 py-0.5 rounded-sm border border-transparent hover:border-border-color transition-all"
+                                 >
                                   {shortcut}
                                 </button>
                               ))}

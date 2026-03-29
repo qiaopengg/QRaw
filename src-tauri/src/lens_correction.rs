@@ -1,6 +1,5 @@
 use crate::AppState;
 use fuzzy_matcher::FuzzyMatcher;
-use log;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs;
@@ -159,12 +158,12 @@ pub struct LensDistortionParams {
 }
 
 fn strip_maker_prefix(name: &str, maker: &str) -> String {
-    if name.to_lowercase().starts_with(&maker.to_lowercase()) {
-        if let Some(rest) = name.get(maker.len()..) {
-            let trimmed = rest.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
+    if name.to_lowercase().starts_with(&maker.to_lowercase())
+        && let Some(rest) = name.get(maker.len()..)
+    {
+        let trimmed = rest.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
     name.to_string()
@@ -193,12 +192,12 @@ impl Lens {
         let raw_name = self.get_full_model_name();
         let maker = self.get_maker();
 
-        if raw_name.to_lowercase().starts_with(&maker.to_lowercase()) {
-            if let Some(rest) = raw_name.get(maker.len()..) {
-                let stripped = rest.trim();
-                if !stripped.is_empty() {
-                    return stripped.to_string();
-                }
+        if raw_name.to_lowercase().starts_with(&maker.to_lowercase())
+            && let Some(rest) = raw_name.get(maker.len()..)
+        {
+            let stripped = rest.trim();
+            if !stripped.is_empty() {
+                return stripped.to_string();
             }
         }
 
@@ -312,7 +311,7 @@ impl Lens {
             {
                 extract_dist_params(exact)
             } else if focal_length < distortions[0].focal {
-                extract_dist_params(&distortions[0])
+                extract_dist_params(distortions[0])
             } else if focal_length > distortions.last().unwrap().focal {
                 extract_dist_params(distortions.last().unwrap())
             } else {
@@ -351,7 +350,7 @@ impl Lens {
             if let Some(exact) = tcas.iter().find(|d| (d.focal - focal_length).abs() < 1e-5) {
                 extract_tca_params(exact)
             } else if focal_length < tcas[0].focal {
-                extract_tca_params(&tcas[0])
+                extract_tca_params(tcas[0])
             } else if focal_length > tcas.last().unwrap().focal {
                 extract_tca_params(tcas.last().unwrap())
             } else {
@@ -541,7 +540,7 @@ pub fn load_lensfun_db(app_handle: &tauri::AppHandle) -> LensDatabase {
     for entry in WalkDir::new(resource_path)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "xml"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "xml"))
     {
         let path = entry.path();
         log::info!("Processing file: {:?}", path);

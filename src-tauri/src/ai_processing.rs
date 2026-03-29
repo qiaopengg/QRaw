@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use image::imageops::{self, FilterType};
-use image::{DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma};
-use ndarray::{Array, IxDyn};
+use image::{DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma, Rgb, Rgb32FImage};
+use ndarray::{Array, Array4, IxDyn};
 use ort::session::Session;
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
@@ -15,8 +15,6 @@ use tauri::Emitter;
 use tauri::Manager;
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex as TokioMutex;
-
-use crate::file_management;
 
 const ENCODER_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/sam_vit_b_01ec64_encoder.onnx?download=true";
 const DECODER_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/sam_vit_b_01ec64_decoder.onnx?download=true";
@@ -44,13 +42,20 @@ const CLIP_TOKENIZER_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Mod
 const CLIP_TOKENIZER_FILENAME: &str = "clip_tokenizer.json";
 const CLIP_MODEL_SHA256: &str = "57879bb1c23cdeb350d23569dd251ed4b740a96d747c529e94a2bb8040ac5d00";
 
+const DENOISE_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/nind_denoise_utnet_684.onnx?download=true";
+const DENOISE_FILENAME: &str = "nind_denoise_utnet_684.onnx";
+const DENOISE_SHA256: &str = "ee3586279d514df557ff3f7dec6df37fafc51ba5d3a3435b2cc9ac2d9017e7fe";
+
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
     pub sam_decoder: Mutex<Session>,
     pub u2netp: Mutex<Session>,
     pub sky_seg: Mutex<Session>,
-    pub clip_model: Option<Mutex<Session>>,
-    pub clip_tokenizer: Option<Tokenizer>,
+}
+
+pub struct ClipModels {
+    pub model: Mutex<Session>,
+    pub tokenizer: Tokenizer,
 }
 
 #[derive(Clone)]
@@ -61,7 +66,9 @@ pub struct ImageEmbeddings {
 }
 
 pub struct AiState {
-    pub models: Arc<AiModels>,
+    pub models: Option<Arc<AiModels>>,
+    pub denoise_model: Option<Arc<Mutex<Session>>>,
+    pub clip_models: Option<Arc<ClipModels>>,
     pub embeddings: Option<ImageEmbeddings>,
 }
 
@@ -91,12 +98,12 @@ fn edt_1d(f: &mut [f32], v: &mut [usize], z: &mut [f32], d: &mut [f32]) {
         z[k + 1] = f32::INFINITY;
     }
     k = 0;
-    for q in 0..n {
+    for (q, d_q) in d[..n].iter_mut().enumerate() {
         while z[k + 1] < q as f32 {
             k += 1;
         }
         let diff = q as f32 - v[k] as f32;
-        d[q] = diff * diff + f[v[k]];
+        *d_q = diff * diff + f[v[k]];
     }
     f.copy_from_slice(&d[..n]);
 }
@@ -196,30 +203,18 @@ pub async fn get_or_init_ai_models(
     ai_state_mutex: &Mutex<Option<AiState>>,
     ai_init_lock: &TokioMutex<()>,
 ) -> Result<Arc<AiModels>> {
-    let settings = file_management::load_settings(app_handle.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to load settings: {}", e))?;
-    let enable_tagging = settings.enable_ai_tagging.unwrap_or(false);
-
-    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref() {
-        if enable_tagging
-            && (ai_state.models.clip_model.is_none() || ai_state.models.clip_tokenizer.is_none())
-        {
-            // tagging is enabled now, but models were loaded without it. re-initialize.
-        } else {
-            return Ok(ai_state.models.clone());
-        }
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(models) = &ai_state.models
+    {
+        return Ok(models.clone());
     }
 
     let _guard = ai_init_lock.lock().await;
 
-    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref() {
-        if enable_tagging
-            && (ai_state.models.clip_model.is_none() || ai_state.models.clip_tokenizer.is_none())
-        {
-            // fall through
-        } else {
-            return Ok(ai_state.models.clone());
-        }
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(models) = &ai_state.models
+    {
+        return Ok(models.clone());
     }
 
     let models_dir = get_models_dir(app_handle)?;
@@ -263,37 +258,6 @@ pub async fn get_or_init_ai_models(
 
     let _ = ort::init().with_name("AI").commit();
 
-    let mut clip_model = None;
-    let mut clip_tokenizer = None;
-
-    if enable_tagging {
-        download_and_verify_model(
-            app_handle,
-            &models_dir,
-            CLIP_MODEL_FILENAME,
-            CLIP_MODEL_URL,
-            CLIP_MODEL_SHA256,
-            "CLIP Model",
-        )
-        .await?;
-
-        let clip_tokenizer_path = models_dir.join(CLIP_TOKENIZER_FILENAME);
-        if !clip_tokenizer_path.exists() {
-            let _ = app_handle.emit("ai-model-download-start", "CLIP Tokenizer");
-            download_model(CLIP_TOKENIZER_URL, &clip_tokenizer_path).await?;
-            let _ = app_handle.emit("ai-model-download-finish", "CLIP Tokenizer");
-        }
-
-        let clip_model_path = models_dir.join(CLIP_MODEL_FILENAME);
-        clip_model = Some(Mutex::new(
-            Session::builder()?.commit_from_file(clip_model_path)?,
-        ));
-        clip_tokenizer = Some(
-            Tokenizer::from_file(clip_tokenizer_path)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?,
-        );
-    }
-
     let encoder_path = models_dir.join(ENCODER_FILENAME);
     let decoder_path = models_dir.join(DECODER_FILENAME);
     let u2netp_path = models_dir.join(U2NETP_FILENAME);
@@ -304,22 +268,389 @@ pub async fn get_or_init_ai_models(
     let u2netp = Session::builder()?.commit_from_file(u2netp_path)?;
     let sky_seg = Session::builder()?.commit_from_file(sky_seg_path)?;
 
+    crate::register_exit_handler();
+
     let models = Arc::new(AiModels {
         sam_encoder: Mutex::new(sam_encoder),
         sam_decoder: Mutex::new(sam_decoder),
         u2netp: Mutex::new(u2netp),
         sky_seg: Mutex::new(sky_seg),
-        clip_model,
-        clip_tokenizer,
     });
 
     let mut ai_state_lock = ai_state_mutex.lock().unwrap();
-    *ai_state_lock = Some(AiState {
-        models: models.clone(),
-        embeddings: None,
-    });
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.models = Some(models.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: Some(models.clone()),
+            denoise_model: None,
+            clip_models: None,
+            embeddings: None,
+        });
+    }
 
     Ok(models)
+}
+
+pub async fn get_or_init_denoise_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(denoise_model) = &ai_state.denoise_model
+    {
+        return Ok(denoise_model.clone());
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(denoise_model) = &ai_state.denoise_model
+    {
+        return Ok(denoise_model.clone());
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    download_and_verify_model(
+        app_handle,
+        &models_dir,
+        DENOISE_FILENAME,
+        DENOISE_URL,
+        DENOISE_SHA256,
+        "AI Denoise Model",
+    )
+    .await?;
+
+    let _ = ort::init().with_name("RapidRAW-Denoise").commit();
+    let model_path = models_dir.join(DENOISE_FILENAME);
+    let session = Session::builder()?.commit_from_file(model_path)?;
+    let denoise_model = Arc::new(Mutex::new(session));
+
+    crate::register_exit_handler();
+
+    let mut ai_state_lock = ai_state_mutex.lock().unwrap();
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.denoise_model = Some(denoise_model.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: None,
+            denoise_model: Some(denoise_model.clone()),
+            clip_models: None,
+            embeddings: None,
+        });
+    }
+
+    Ok(denoise_model)
+}
+
+pub async fn get_or_init_clip_models(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<ClipModels>> {
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(clip_models) = &ai_state.clip_models
+    {
+        return Ok(clip_models.clone());
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(ai_state) = ai_state_mutex.lock().unwrap().as_ref()
+        && let Some(clip_models) = &ai_state.clip_models
+    {
+        return Ok(clip_models.clone());
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+
+    download_and_verify_model(
+        app_handle,
+        &models_dir,
+        CLIP_MODEL_FILENAME,
+        CLIP_MODEL_URL,
+        CLIP_MODEL_SHA256,
+        "CLIP Model",
+    )
+    .await?;
+
+    let clip_tokenizer_path = models_dir.join(CLIP_TOKENIZER_FILENAME);
+    if !clip_tokenizer_path.exists() {
+        let _ = app_handle.emit("ai-model-download-start", "CLIP Tokenizer");
+        download_model(CLIP_TOKENIZER_URL, &clip_tokenizer_path).await?;
+        let _ = app_handle.emit("ai-model-download-finish", "CLIP Tokenizer");
+    }
+
+    let _ = ort::init().with_name("AI-Tagging").commit();
+    let clip_model_path = models_dir.join(CLIP_MODEL_FILENAME);
+    let model = Mutex::new(Session::builder()?.commit_from_file(clip_model_path)?);
+    let tokenizer =
+        Tokenizer::from_file(clip_tokenizer_path).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    crate::register_exit_handler();
+
+    let clip_models = Arc::new(ClipModels { model, tokenizer });
+
+    let mut ai_state_lock = ai_state_mutex.lock().unwrap();
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.clip_models = Some(clip_models.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: None,
+            denoise_model: None,
+            clip_models: Some(clip_models.clone()),
+            embeddings: None,
+        });
+    }
+
+    Ok(clip_models)
+}
+
+#[derive(Clone, Copy)]
+struct TileParams {
+    cs: usize,
+    ucs: usize,
+    overlap: usize,
+    pad: usize,
+}
+
+impl TileParams {
+    const fn new(cs: usize, ucs: usize, overlap: usize) -> Self {
+        Self {
+            cs,
+            ucs,
+            overlap,
+            pad: (cs - ucs) / 2,
+        }
+    }
+}
+
+const TILE_BALANCED: TileParams = TileParams::new(504, 480, 6);
+const TILE_FASTER: TileParams = TileParams::new(504, 504, 0);
+const TILE_HIGHER_QUALITY: TileParams = TileParams::new(504, 448, 12);
+
+fn select_tile_params(quality_0_1: f32) -> TileParams {
+    let q = quality_0_1.clamp(0.0, 1.0);
+    if q <= 0.25 {
+        TILE_FASTER
+    } else if q >= 0.75 {
+        TILE_HIGHER_QUALITY
+    } else {
+        TILE_BALANCED
+    }
+}
+
+#[inline]
+fn mirror_coord(c: i32, size: i32) -> i32 {
+    if c < 0 {
+        (-c).min(size - 1)
+    } else if c >= size {
+        (2 * size - 1 - c).max(0)
+    } else {
+        c
+    }
+}
+
+fn extract_tile_mirror(img: &Rgb32FImage, x0: i32, y0: i32, cs: usize) -> Array4<f32> {
+    let (w, h) = (img.width() as i32, img.height() as i32);
+    let mut arr = Array4::zeros((1, 3, cs, cs));
+    for dy in 0..cs as i32 {
+        for dx in 0..cs as i32 {
+            let sx = mirror_coord(x0 + dx, w);
+            let sy = mirror_coord(y0 + dy, h);
+            let px = img.get_pixel(sx as u32, sy as u32);
+            arr[[0, 0, dy as usize, dx as usize]] = px[0];
+            arr[[0, 1, dy as usize, dx as usize]] = px[1];
+            arr[[0, 2, dy as usize, dx as usize]] = px[2];
+        }
+    }
+    arr
+}
+
+struct SeamlessBlend {
+    ud0: usize,
+    ud1: usize,
+    ud2: usize,
+    ud3: usize,
+    absx0: usize,
+    absy0: usize,
+    fswidth: usize,
+    fsheight: usize,
+    overlap: usize,
+}
+
+fn apply_seamless(tile: &mut Array4<f32>, blend: &SeamlessBlend) {
+    let SeamlessBlend {
+        ud0,
+        ud1,
+        ud2,
+        ud3,
+        absx0,
+        absy0,
+        fswidth,
+        fsheight,
+        overlap,
+    } = *blend;
+    let ol = overlap;
+    if absx0 > 0 {
+        for c in 0..3 {
+            for y in ud1..ud3 {
+                for x in ud0..(ud0 + ol).min(ud2) {
+                    tile[[0, c, y, x]] *= 0.5;
+                }
+            }
+        }
+    }
+    if absy0 > 0 {
+        for c in 0..3 {
+            for y in ud1..(ud1 + ol).min(ud3) {
+                for x in ud0..ud2 {
+                    tile[[0, c, y, x]] *= 0.5;
+                }
+            }
+        }
+    }
+    if absx0 + (ud2 - ud0) < fswidth && ol > 0 {
+        let right_start = (ud2 as i32 - ol as i32).max(ud0 as i32) as usize;
+        for c in 0..3 {
+            for y in ud1..ud3 {
+                for x in right_start..ud2 {
+                    tile[[0, c, y, x]] *= 0.5;
+                }
+            }
+        }
+    }
+    if absy0 + (ud3 - ud1) < fsheight && ol > 0 {
+        let bottom_start = (ud3 as i32 - ol as i32).max(ud1 as i32) as usize;
+        for c in 0..3 {
+            for y in bottom_start..ud3 {
+                for x in ud0..ud2 {
+                    tile[[0, c, y, x]] *= 0.5;
+                }
+            }
+        }
+    }
+}
+
+fn run_native_denoise(
+    img: &Rgb32FImage,
+    session: &Mutex<Session>,
+    accumulator: &mut [f32],
+    width: usize,
+    height: usize,
+    app_handle: &tauri::AppHandle,
+    params: TileParams,
+) -> Result<()> {
+    let w = width as i32;
+    let h = height as i32;
+    let step = params.ucs.saturating_sub(params.overlap).max(1);
+    let iperhl = (width.saturating_sub(params.ucs) as f64 / step as f64).ceil() as usize;
+    let ipervl = (height.saturating_sub(params.ucs) as f64 / step as f64).ceil() as usize;
+    let total = (iperhl + 1) * (ipervl + 1);
+
+    for i in 0..total {
+        let yi = i / (iperhl + 1);
+        let xi = i % (iperhl + 1);
+        let x0 =
+            params.ucs as i32 * xi as i32 - params.overlap as i32 * xi as i32 - params.pad as i32;
+        let y0 =
+            params.ucs as i32 * yi as i32 - params.overlap as i32 * yi as i32 - params.pad as i32;
+
+        if i % 10 == 0 {
+            let pct = (i as f32 / total as f32) * 100.0;
+            let _ = app_handle.emit("denoise-progress", format!("Denoising… {:.0}%", pct));
+        }
+
+        let crop = extract_tile_mirror(img, x0, y0, params.cs);
+        let input_values = crop.as_standard_layout().to_owned();
+        let t_input = Tensor::from_array(input_values)?;
+
+        let out = {
+            let mut sess = session.lock().unwrap();
+            let outputs = sess.run(ort::inputs![t_input])?;
+            let arr = outputs[0].try_extract_array::<f32>()?.to_owned();
+            arr.into_dimensionality::<ndarray::Ix4>()
+                .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))?
+        };
+
+        let x1pad = (0i32).max(x0 + params.cs as i32 - w) as usize;
+        let y1pad = (0i32).max(y0 + params.cs as i32 - h) as usize;
+        let ud0 = params.pad;
+        let ud1 = params.pad;
+        let ud2 = params.cs - params.pad.max(x1pad);
+        let ud3 = params.cs - params.pad.max(y1pad);
+        let absx0 = (x0 + params.pad as i32).max(0) as usize;
+        let absy0 = (y0 + params.pad as i32).max(0) as usize;
+
+        let mut tile = out;
+        apply_seamless(
+            &mut tile,
+            &SeamlessBlend {
+                ud0,
+                ud1,
+                ud2,
+                ud3,
+                absx0,
+                absy0,
+                fswidth: width,
+                fsheight: height,
+                overlap: params.overlap,
+            },
+        );
+
+        for cy in 0..(ud3 - ud1) {
+            for cx in 0..(ud2 - ud0) {
+                let gx = absx0 + cx;
+                let gy = absy0 + cy;
+                if gx < width && gy < height {
+                    let base = (gy * width + gx) * 3;
+                    accumulator[base] += tile[[0, 0, ud1 + cy, ud0 + cx]].clamp(0.0, 1.0);
+                    accumulator[base + 1] += tile[[0, 1, ud1 + cy, ud0 + cx]].clamp(0.0, 1.0);
+                    accumulator[base + 2] += tile[[0, 2, ud1 + cy, ud0 + cx]].clamp(0.0, 1.0);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn accumulator_to_rgb32f(acc: &[f32], width: u32, height: u32) -> Rgb32FImage {
+    let mut out = Rgb32FImage::new(width, height);
+    for (i, p) in out.pixels_mut().enumerate() {
+        let i3 = i * 3;
+        *p = Rgb([
+            acc[i3].clamp(0.0, 1.0),
+            acc[i3 + 1].clamp(0.0, 1.0),
+            acc[i3 + 2].clamp(0.0, 1.0),
+        ]);
+    }
+    out
+}
+
+pub fn run_ai_denoise(
+    rgb_img: &Rgb32FImage,
+    intensity: f32,
+    session: &Mutex<Session>,
+    app_handle: &tauri::AppHandle,
+) -> Result<DynamicImage> {
+    let (width, height) = rgb_img.dimensions();
+    let params = select_tile_params(intensity);
+
+    let _ = app_handle.emit("denoise-progress", "Denoising (AI NIND)...");
+    let mut accumulator = vec![0.0f32; width as usize * height as usize * 3];
+    run_native_denoise(
+        rgb_img,
+        session,
+        &mut accumulator,
+        width as usize,
+        height as usize,
+        app_handle,
+        params,
+    )?;
+
+    let out_img_buffer = accumulator_to_rgb32f(&accumulator, width, height);
+    Ok(DynamicImage::ImageRgb32F(out_img_buffer))
 }
 
 pub fn generate_image_embeddings(
@@ -335,13 +666,14 @@ pub fn generate_image_embeddings(
 
     let resized_image = image.resize(new_width, new_height, FilterType::Triangle);
     let rgb_image = resized_image.into_rgb8();
+    let (actual_width, actual_height) = rgb_image.dimensions();
     let raw_pixels = rgb_image.as_raw();
 
     let mut input_tensor: Array<u8, _> =
         Array::zeros((1, 3, SAM_INPUT_SIZE as usize, SAM_INPUT_SIZE as usize));
 
-    let w_usize = new_width as usize;
-    for y in 0..(new_height as usize) {
+    let w_usize = actual_width as usize;
+    for y in 0..(actual_height as usize) {
         for x in 0..w_usize {
             let idx = (y * w_usize + x) * 3;
             input_tensor[[0, 0, y, x]] = raw_pixels[idx];

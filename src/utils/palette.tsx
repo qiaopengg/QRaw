@@ -42,18 +42,30 @@ export const generatePaletteFromImage = (imageUrl: string) => {
 
       const accentColor = bestAccentCandidate.color;
 
-      const toRgbSpace = (c: { r: number; g: number; b: number }) =>
-        `${Math.round(c.r)} ${Math.round(c.g)} ${Math.round(c.b)}`;
-      const borderColor = {
-        r: Math.min(255, accentColor.r + 40),
-        g: Math.min(255, accentColor.g + 40),
-        b: Math.min(255, accentColor.b + 40),
-      };
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (lum < 140) {
+        const t = (1 - lum / 140) * 0.8;
+        r += (255 - r) * t;
+        g += (255 - g) * t;
+        b += (255 - b) * t;
+      }
+
+      const mx = Math.max(r, g, b);
+      const mn = Math.min(r, g, b);
+      const chroma = mx - mn;
+      if (chroma > 130) {
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        const t = ((chroma - 130) / chroma) * 0.7;
+        r += (gray - r) * t;
+        g += (gray - g) * t;
+        b += (gray - b) * t;
+      }
+
+      const accent = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 
       resolve({
-        '--color-accent': toRgbSpace(accentColor),
-        '--color-hover-color': toRgbSpace(accentColor),
-        '--color-border-color': toRgbSpace(borderColor),
+        '--app-accent': accent,
+        '--app-hover-color': accent,
       });
     };
 

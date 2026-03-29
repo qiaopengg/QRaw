@@ -11,7 +11,9 @@ use serde_json::json;
 use std::f32::consts::PI;
 use std::sync::Arc;
 
-pub use crate::gpu_processing::{get_or_init_gpu_context, process_and_get_dynamic_image};
+pub use crate::gpu_processing::{
+    RenderRequest, get_or_init_gpu_context, process_and_get_dynamic_image,
+};
 use crate::{AppState, mask_generation::MaskDefinition};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
@@ -319,19 +321,28 @@ fn build_transform_matrices(
     (forward, cx, cy, half_diagonal)
 }
 
-#[inline(always)]
-fn interpolate_pixel_with_tca(
-    src_raw: &[f32],
+struct TcaContext<'a> {
+    src_raw: &'a [f32],
     src_width: usize,
     src_height: usize,
     cx: f32,
     cy: f32,
+}
+
+#[inline(always)]
+fn interpolate_pixel_with_tca(
+    tca: &TcaContext,
     base_x: f32,
     base_y: f32,
     vr: f32,
     vb: f32,
     pixel_out: &mut [f32],
 ) {
+    let src_raw = tca.src_raw;
+    let src_width = tca.src_width;
+    let src_height = tca.src_height;
+    let cx = tca.cx;
+    let cy = tca.cy;
     let gx = base_x;
     let gy = base_y;
 
@@ -514,7 +525,7 @@ pub fn warp_image_geometry(image: &DynamicImage, params: GeometryParams) -> Dyna
     let origin_vec = NaVector3::new(inv[(0, 2)], inv[(1, 2)], inv[(2, 2)]);
 
     let max_radius_sq_inv = 1.0 / ((cx * cx + cy * cy) as f64);
-    let hd = half_diagonal as f64;
+    let hd = half_diagonal;
 
     let k_distortion = (params.distortion as f64 / 100.0) * 2.5;
     let lk1 = params.lens_dist_k1 as f64;
@@ -555,6 +566,13 @@ pub fn warp_image_geometry(image: &DynamicImage, params: GeometryParams) -> Dyna
     let src_raw = src_img.as_raw();
     let width_usize = width as usize;
     let height_usize = height as usize;
+    let tca_ctx = TcaContext {
+        src_raw,
+        src_width: width_usize,
+        src_height: height_usize,
+        cx,
+        cy,
+    };
 
     out_buffer
         .par_chunks_exact_mut(width_usize * 3)
@@ -616,18 +634,7 @@ pub fn warp_image_geometry(image: &DynamicImage, params: GeometryParams) -> Dyna
                     }
 
                     if has_tca {
-                        interpolate_pixel_with_tca(
-                            src_raw,
-                            width_usize,
-                            height_usize,
-                            cx,
-                            cy,
-                            src_x,
-                            src_y,
-                            vr,
-                            vb,
-                            pixel,
-                        );
+                        interpolate_pixel_with_tca(&tca_ctx, src_x, src_y, vr, vb, pixel);
                     } else {
                         interpolate_pixel(src_raw, width_usize, height_usize, src_x, src_y, pixel);
                     }
@@ -670,7 +677,7 @@ pub fn unwarp_image_geometry(warped_image: &DynamicImage, params: GeometryParams
     let (forward_transform, cx, cy, half_diagonal) =
         build_transform_matrices(&params, width as f32, height as f32);
     let max_radius_sq_inv = 1.0 / ((cx * cx + cy * cy) as f64);
-    let hd = half_diagonal as f64;
+    let hd = half_diagonal;
 
     let k_distortion = (params.distortion as f64 / 100.0) * 2.5;
     let lk1 = params.lens_dist_k1 as f64;
@@ -1380,9 +1387,9 @@ fn calculate_agx_matrices() -> (GpuMat3, GpuMat3) {
     let xyz_to_base_profile = base_profile_to_xyz.inverse();
     let pipe_to_base = xyz_to_base_profile * pipe_work_profile_to_xyz;
 
-    let inset = [0.29462451, 0.25861925, 0.14641371];
+    let inset = [0.294_624_5, 0.25861925, 0.14641371];
     let rotation = [0.03540329, -0.02108586, -0.06305724];
-    let outset = [0.290776401758, 0.263155400753, 0.045810721815];
+    let outset = [0.290_776_4, 0.263_155_4, 0.045_810_72];
     let unrotation = [0.03540329, -0.02108586, -0.06305724];
     let master_outset_ratio = 1.0;
     let master_unrotation_ratio = 0.0;
@@ -1796,7 +1803,7 @@ pub fn get_all_adjustments_from_json(
     let mask_definitions: Vec<MaskDefinition> = js_adjustments
         .get("masks")
         .and_then(|m| serde_json::from_value(m.clone()).ok())
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     for (i, mask_def) in mask_definitions
         .iter()
@@ -1885,7 +1892,7 @@ pub fn remove_raw_artifacts_and_enhance(image: &mut DynamicImage) {
                 let mut w_sum = 0.0;
 
                 for (ki, &ky) in OFFSETS.iter().enumerate() {
-                    let sy = y_isize + ky as isize;
+                    let sy = y_isize + ky;
                     if sy < 0 || sy >= h_isize {
                         continue;
                     }
@@ -1894,7 +1901,7 @@ pub fn remove_raw_artifacts_and_enhance(image: &mut DynamicImage) {
                     let ky_sq_div_50 = OFFSET_SQUARES[ki] * 0.02;
 
                     for (kj, &kx) in OFFSETS.iter().enumerate() {
-                        let sx = (x as isize) + kx as isize;
+                        let sx = (x as isize) + kx;
                         if sx < 0 || sx >= w_isize {
                             continue;
                         }
@@ -1963,7 +1970,7 @@ fn apply_gentle_detail_enhance(
         .enumerate()
         .for_each(|(y, row)| {
             let row_offset = y * w;
-            for x in 0..w {
+            for (x, row_val) in row.iter_mut().enumerate() {
                 let mut sum = 0.0;
                 let mut count = 0;
                 for kx in -radius..=radius {
@@ -1971,7 +1978,7 @@ fn apply_gentle_detail_enhance(
                     sum += ycbcr_source[(row_offset + sx) * 3];
                     count += 1;
                 }
-                row[x] = sum / count as f32;
+                *row_val = sum / count as f32;
             }
         });
 
@@ -2129,7 +2136,7 @@ pub fn calculate_histogram_from_image(image: &DynamicImage) -> Result<HistogramD
     })
 }
 
-fn apply_gaussian_smoothing(histogram: &mut Vec<f32>, sigma: f32) {
+fn apply_gaussian_smoothing(histogram: &mut [f32], sigma: f32) {
     if sigma <= 0.0 {
         return;
     }
@@ -2144,10 +2151,10 @@ fn apply_gaussian_smoothing(histogram: &mut Vec<f32>, sigma: f32) {
     let mut kernel_sum = 0.0;
 
     let two_sigma_sq = 2.0 * sigma * sigma;
-    for i in 0..kernel_size {
+    for (i, kernel_val) in kernel.iter_mut().enumerate() {
         let x = (i as i32 - kernel_radius as i32) as f32;
         let val = (-x * x / two_sigma_sq).exp();
-        kernel[i] = val;
+        *kernel_val = val;
         kernel_sum += val;
     }
 
@@ -2157,27 +2164,27 @@ fn apply_gaussian_smoothing(histogram: &mut Vec<f32>, sigma: f32) {
         }
     }
 
-    let original = histogram.clone();
+    let original = histogram.to_owned();
     let len = histogram.len();
 
-    for i in 0..len {
+    for (i, hist_val) in histogram.iter_mut().enumerate() {
         let mut smoothed_val = 0.0;
-        for k in 0..kernel_size {
+        for (k, &kernel_val) in kernel.iter().enumerate() {
             let offset = k as i32 - kernel_radius as i32;
             let sample_index = i as i32 + offset;
             let clamped_index = sample_index.clamp(0, len as i32 - 1) as usize;
-            smoothed_val += original[clamped_index] * kernel[k];
+            smoothed_val += original[clamped_index] * kernel_val;
         }
-        histogram[i] = smoothed_val;
+        *hist_val = smoothed_val;
     }
 }
 
-fn normalize_histogram_range(histogram: &mut Vec<f32>, percentile_clip: f32) {
+fn normalize_histogram_range(histogram: &mut [f32], percentile_clip: f32) {
     if histogram.is_empty() {
         return;
     }
 
-    let mut sorted_data = histogram.clone();
+    let mut sorted_data = histogram.to_owned();
     sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let clip_index = ((sorted_data.len() - 1) as f32 * percentile_clip).round() as usize;
@@ -2294,13 +2301,13 @@ pub fn calculate_waveform_from_image(
             let stride = orig_w as usize * 3;
             for y in 0..(orig_h as usize) {
                 let row = y * stride;
-                for x in 0..(orig_w as usize) {
+                for (x, &x_bucket) in x_buckets.iter().enumerate() {
                     let i = row + x * 3;
                     process_pixel(
                         (raw[i].clamp(0.0, 1.0) * 255.0) as u8,
                         (raw[i + 1].clamp(0.0, 1.0) * 255.0) as u8,
                         (raw[i + 2].clamp(0.0, 1.0) * 255.0) as u8,
-                        x_buckets[x],
+                        x_bucket,
                         x,
                     );
                 }
@@ -2312,9 +2319,9 @@ pub fn calculate_waveform_from_image(
             let stride = orig_w as usize * 3;
             for y in 0..(orig_h as usize) {
                 let row = y * stride;
-                for x in 0..(orig_w as usize) {
+                for (x, &x_bucket) in x_buckets.iter().enumerate() {
                     let i = row + x * 3;
-                    process_pixel(raw[i], raw[i + 1], raw[i + 2], x_buckets[x], x);
+                    process_pixel(raw[i], raw[i + 1], raw[i + 2], x_bucket, x);
                 }
             }
         }
@@ -2414,7 +2421,7 @@ pub fn calculate_waveform_from_image(
             if x < 82 {
                 rgba_parade[off] = 255;
                 rgba_parade[off + 3] = bright;
-            } else if x >= 87 && x < 169 {
+            } else if (87..169).contains(&x) {
                 rgba_parade[off + 1] = 255;
                 rgba_parade[off + 3] = bright;
             } else if x >= 174 {
@@ -2554,8 +2561,8 @@ pub fn perform_auto_analysis(image: &DynamicImage) -> AutoAdjustmentResults {
     let mut white_point = 255;
     let clip_threshold = (total_pixels * 0.001) as u32;
     let mut cumulative_sum = 0u32;
-    for i in 0..256 {
-        cumulative_sum += luma_hist[i];
+    for (i, &hist_val) in luma_hist.iter().enumerate() {
+        cumulative_sum += hist_val;
         if cumulative_sum > clip_threshold {
             black_point = i;
             break;

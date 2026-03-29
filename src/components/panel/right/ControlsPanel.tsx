@@ -170,8 +170,8 @@ export default function Controls({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('adjustments.panelTitle')}</h2>
+      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Adjustments</h2>
         <div className="flex items-center gap-1">
           <button
             className="p-2 rounded-full hover:bg-surface disabled:cursor-not-allowed transition-colors"
@@ -191,7 +191,38 @@ export default function Controls({
           </button>
         </div>
       </div>
-      <div className="flex-grow overflow-y-auto p-4 flex flex-col gap-2">
+
+      <AnimatePresence initial={false}>
+        {isWaveformVisible && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: waveformHeight || 256, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: isResizingWaveform ? 0 : 0.2, ease: 'easeOut' }}
+            className="shrink-0 flex flex-col relative border-b border-surface overflow-hidden"
+          >
+            <div className="grow w-full h-full p-4 pb-2 min-h-0">
+              <Waveform
+                waveformData={waveform || null}
+                histogram={histogram}
+                displayMode={activeWaveformChannel || 'luma'}
+                setDisplayMode={setActiveWaveformChannel || (() => {})}
+                showClipping={adjustments.showClipping || false}
+                onToggleClipping={() => {
+                  setAdjustments((prev: Adjustments) => ({
+                    ...prev,
+                    showClipping: !prev.showClipping,
+                  }));
+                }}
+                theme={theme}
+              />
+            </div>
+            <Resizer direction={Orientation.Horizontal} onMouseDown={handleWaveformResize} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="grow overflow-y-auto p-4 flex flex-col gap-2">
         {Object.keys(ADJUSTMENT_SECTIONS).map((sectionName: string) => {
           const SectionComponent = (
             {
@@ -209,7 +240,7 @@ export default function Controls({
           const sectionVisibility = adjustments.sectionVisibility || INITIAL_ADJUSTMENTS.sectionVisibility;
 
           return (
-            <div className="flex-shrink-0 group" key={sectionName}>
+            <div className="shrink-0 group" key={sectionName}>
               <CollapsibleSection
                 isContentVisible={sectionVisibility[sectionName]}
                 isOpen={collapsibleState[sectionName]}

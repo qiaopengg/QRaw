@@ -696,8 +696,8 @@ export default function SettingsPanel({
     <>
       <ConfirmModal {...confirmModalState} onClose={closeConfirmModal} />
       <div className="flex flex-col h-full w-full text-text-primary">
-        <header className="flex-shrink-0 flex flex-wrap items-center justify-between gap-y-4 mb-8 pt-4">
-          <div className="flex items-center flex-shrink-0">
+        <header className="shrink-0 flex flex-wrap items-center justify-between gap-y-4 mb-8 pt-4">
+          <div className="flex items-center shrink-0">
             <Button
               className="mr-4 hover:bg-surface text-text-primary rounded-full"
               onClick={onBack}
@@ -735,7 +735,7 @@ export default function SettingsPanel({
                   />
                 )}
                 <span className="relative z-10 flex items-center">
-                  <category.icon size={16} className="mr-2 flex-shrink-0" />
+                  <category.icon size={16} className="mr-2 shrink-0" />
                   <span className="truncate">{category.label}</span>
                 </span>
               </button>
@@ -1047,8 +1047,8 @@ export default function SettingsPanel({
                                             animate="visible"
                                             exit="exit"
                                             onClick={() => handleRemoveAiTag(tag)}
-                                            data-tooltip={t('settings.removeTag', { tag })}
-                                            className="flex items-center gap-1 bg-surface px-2 py-1 rounded group cursor-pointer"
+                                            data-tooltip={`Remove tag "${tag}"`}
+                                            className="flex items-center gap-1 bg-surface px-2 py-1 rounded-sm group cursor-pointer"
                                           >
                                             <Text variant={TextVariants.label} color={TextColors.primary}>
                                               {tag}
@@ -1125,8 +1125,8 @@ export default function SettingsPanel({
                                   animate="visible"
                                   exit="exit"
                                   onClick={() => handleRemoveShortcut(shortcut)}
-                                  data-tooltip={t('settings.removeShortcut', { shortcut })}
-                                  className="flex items-center gap-1 bg-surface px-2 py-1 rounded group cursor-pointer"
+                                  data-tooltip={`Remove shortcut "${shortcut}"`}
+                                  className="flex items-center gap-1 bg-surface px-2 py-1 rounded-sm group cursor-pointer"
                                 >
                                   <Text variant={TextVariants.label} color={TextColors.primary}>
                                     {shortcut}
@@ -1205,6 +1205,99 @@ export default function SettingsPanel({
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <Text variant={TextVariants.title} color={TextColors.accent} className="mb-6">
+                    Special Thanks
+                  </Text>
+                  <Text className="mb-4">
+                    A huge thank you to the following projects that were very important in the development of RapidRAW:
+                  </Text>
+                  <Text as="ul" className="space-y-3 list-disc ml-5 pl-1">
+                    <li>
+                      <a
+                        href="https://github.com/dnglab/dnglab/tree/main/rawler"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        rawler
+                      </a>
+                      : For the excellent Rust crate that provides the foundation for RAW file processing in this
+                      project.
+                    </li>
+                    <li>
+                      <a
+                        href="https://lensfun.github.io/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        lensfun
+                      </a>
+                      : For its invaluable open-source library and comprehensive database for automatic lens correction.
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/marcinz606/NegPy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        NegPy
+                      </a>
+                      : For the inspiration behind the negative conversion logic.
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/facebookresearch/sam2"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        SAM 2
+                      </a>
+                      : For providing the foundation model used for the AI subject detection capabilities.
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/xuebinqin/U-2-Net"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        U-2-Net
+                      </a>
+                      : For providing the robust architecture used for the AI sky and foreground detection capabilities.
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/trougnouf/nind-denoise"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        nind-denoise
+                      </a>
+                      : For providing AI models that power the AI noise reduction capabilities in RapidRAW.
+                    </li>
+                    <li>
+                      <a
+                        href="https://github.com/darktable-org/darktable"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        darktable & co.
+                      </a>
+                      : For some reference implementations that guided parts of this work.
+                    </li>
+                    <li>
+                      <span className="font-semibold text-accent">You</span>: For using and supporting RapidRAW. Your
+                      interest keeps this project alive and evolving.
+                    </li>
+                  </Text>
                 </div>
               </motion.div>
             )}
@@ -1493,7 +1586,7 @@ export default function SettingsPanel({
                             >
                               <div className="flex items-center gap-2">
                                 <Input
-                                  className="flex-grow"
+                                  className="grow"
                                   id="ai-connector-address"
                                   onBlur={() =>
                                     onSettingsChange({ ...appSettings, aiConnectorAddress: aiConnectorAddress })
@@ -1614,10 +1707,10 @@ export default function SettingsPanel({
                       description={
                         <Text as="span" variant={TextVariants.small}>
                           This will delete all{' '}
-                          <code className="bg-bg-primary px-1 rounded text-text-primary">.qcr</code> files (containing
-                          your edits) within the current base folder:
-                          <span className="block font-mono bg-bg-primary p-2 rounded mt-2 break-all border border-border-color">
-                            {effectiveRootPath || t('settings.noFolderSelected')}
+                          <code className="bg-bg-primary px-1 rounded-sm text-text-primary">.rrdata</code> files
+                          (containing your edits) within the current base folder:
+                          <span className="block font-mono bg-bg-primary p-2 rounded-sm mt-2 break-all border border-border-color">
+                            {effectiveRootPath || 'No folder selected'}
                           </span>
                         </Text>
                       }
@@ -1647,9 +1740,9 @@ export default function SettingsPanel({
                       buttonText={t('common.open')}
                       description={
                         <Text as="span" variant={TextVariants.small}>
-                          {t('settings.viewApplicationLogsDescription')}
-                          <span className="block font-mono bg-bg-primary p-2 rounded mt-2 break-all border border-border-color">
-                            {logPath || t('common.loading')}
+                          View the application's log file for troubleshooting. The log is located at:
+                          <span className="block font-mono bg-bg-primary p-2 rounded-sm mt-2 break-all border border-border-color">
+                            {logPath || 'Loading...'}
                           </span>
                         </Text>
                       }
@@ -1716,23 +1809,30 @@ export default function SettingsPanel({
                         <KeybindItem keys={['←', '→']} description={t('settings.shortcut_prevNextImage')} />
                         <KeybindItem keys={['↑', '↓']} description={t('settings.shortcut_zoomInOut')} />
                         <KeybindItem
+                          keys={['Shift/Alt', '+', 'Drag Slider']}
+                          description="Fine adjustment mode (0.2× sensitivity)"
+                        />
+                        <KeybindItem
                           keys={['Shift', '+', 'Mouse Wheel']}
                           description={t('settings.shortcut_adjustSlider')}
                         />
-                        <KeybindItem keys={['Ctrl/Cmd', '+', '+']} description={t('settings.shortcut_zoomIn')} />
-                        <KeybindItem keys={['Ctrl/Cmd', '+', '-']} description={t('settings.shortcut_zoomOut')} />
-                        <KeybindItem keys={['Ctrl/Cmd', '+', '0']} description={t('settings.shortcut_zoomToFit')} />
-                        <KeybindItem keys={['Ctrl/Cmd', '+', '1']} description={t('settings.shortcut_zoomTo100')} />
-                        <KeybindItem keys={['F']} description={t('settings.shortcut_toggleFullscreen')} />
-                        <KeybindItem keys={['B']} description={t('settings.shortcut_showOriginal')} />
-                        <KeybindItem keys={['D']} description={t('settings.shortcut_toggleAdjustments')} />
-                        <KeybindItem keys={['R']} description={t('settings.shortcut_toggleCrop')} />
-                        <KeybindItem keys={['M']} description={t('settings.shortcut_toggleMasks')} />
-                        <KeybindItem keys={['K']} description={t('settings.shortcut_toggleAi')} />
-                        <KeybindItem keys={['P']} description={t('settings.shortcut_togglePresets')} />
-                        <KeybindItem keys={['I']} description={t('settings.shortcut_toggleMetadata')} />
-                        <KeybindItem keys={['W']} description={t('settings.shortcut_toggleWaveform')} />
-                        <KeybindItem keys={['E']} description={t('settings.shortcut_toggleExport')} />
+                        <KeybindItem keys={['Ctrl/Cmd', '+', '+']} description="Zoom in" />
+                        <KeybindItem keys={['Ctrl/Cmd', '+', '-']} description="Zoom out" />
+                        <KeybindItem keys={['Ctrl/Cmd', '+', '0']} description="Zoom to fit" />
+                        <KeybindItem keys={['Ctrl/Cmd', '+', '1']} description="Zoom to 100%" />
+                        <KeybindItem keys={['[']} description="Rotate 90° counter-clockwise" />
+                        <KeybindItem keys={[']']} description="Rotate 90° clockwise" />
+                        <KeybindItem keys={['F']} description="Toggle fullscreen" />
+                        <KeybindItem keys={['B']} description="Show original (before/after)" />
+                        <KeybindItem keys={['S']} description="Straighten Image" />
+                        <KeybindItem keys={['D']} description="Toggle Adjustments panel" />
+                        <KeybindItem keys={['R']} description="Toggle Crop panel" />
+                        <KeybindItem keys={['M']} description="Toggle Masks panel" />
+                        <KeybindItem keys={['K']} description="Toggle AI panel" />
+                        <KeybindItem keys={['P']} description="Toggle Presets panel" />
+                        <KeybindItem keys={['I']} description="Toggle Metadata panel" />
+                        <KeybindItem keys={['A']} description="Toggle Analytics display" />
+                        <KeybindItem keys={['E']} description="Toggle Export panel" />
                       </div>
                     </div>
                   </div>

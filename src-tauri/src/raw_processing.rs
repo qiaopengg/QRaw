@@ -53,10 +53,10 @@ fn develop_internal(
     cancel_token: Option<(Arc<AtomicUsize>, usize)>,
 ) -> Result<(DynamicImage, Orientation)> {
     let check_cancel = || -> Result<()> {
-        if let Some((tracker, generation)) = &cancel_token {
-            if tracker.load(Ordering::SeqCst) != *generation {
-                return Err(anyhow!("Load cancelled"));
-            }
+        if let Some((tracker, generation)) = &cancel_token
+            && tracker.load(Ordering::SeqCst) != *generation
+        {
+            return Err(anyhow!("Load cancelled"));
         }
         Ok(())
     };
@@ -88,13 +88,13 @@ fn develop_internal(
     let original_white_level = raw_image
         .whitelevel
         .0
-        .get(0)
+        .first()
         .cloned()
         .unwrap_or(u16::MAX as u32) as f32;
     let original_black_level = raw_image
         .blacklevel
         .levels
-        .get(0)
+        .first()
         .map(|r| r.as_f32())
         .unwrap_or(0.0);
 
@@ -154,10 +154,8 @@ fn develop_internal(
 
                 let (final_r, final_g, final_b) = if max_c > 1.0 {
                     let min_c = r.min(g).min(b);
-                    let compression_factor = (1.0
-                        - (max_c - 1.0) / (safe_highlight_compression - 1.0))
-                        .max(0.0)
-                        .min(1.0);
+                    let compression_factor =
+                        (1.0 - (max_c - 1.0) / (safe_highlight_compression - 1.0)).clamp(0.0, 1.0);
                     let compressed_r = min_c + (r - min_c) * compression_factor;
                     let compressed_g = min_c + (g - min_c) * compression_factor;
                     let compressed_b = min_c + (b - min_c) * compression_factor;
@@ -231,17 +229,17 @@ pub fn get_fast_demosaic_scale_factor(
     decoded_height: u32,
 ) -> f32 {
     let source = RawSource::new_from_slice(file_bytes);
-    if let Ok(decoder) = rawler::get_decoder(&source) {
-        if let Ok(raw_img) = decoder.raw_image(&source, &RawDecodeParams::default(), true) {
-            let max_orig = (raw_img.width as f32).max(raw_img.height as f32);
-            let max_comp = (decoded_width as f32).max(decoded_height as f32);
-            if max_orig > 0.0 {
-                let ratio = max_comp / max_orig;
-                if ratio > 0.1 && ratio < 0.35 {
-                    return 0.25;
-                } else if ratio >= 0.35 && ratio < 0.75 {
-                    return 0.5;
-                }
+    if let Ok(decoder) = rawler::get_decoder(&source)
+        && let Ok(raw_img) = decoder.raw_image(&source, &RawDecodeParams::default(), true)
+    {
+        let max_orig = (raw_img.width as f32).max(raw_img.height as f32);
+        let max_comp = (decoded_width as f32).max(decoded_height as f32);
+        if max_orig > 0.0 {
+            let ratio = max_comp / max_orig;
+            if ratio > 0.1 && ratio < 0.35 {
+                return 0.25;
+            } else if (0.35..0.75).contains(&ratio) {
+                return 0.5;
             }
         }
     }

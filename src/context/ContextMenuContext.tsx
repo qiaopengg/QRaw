@@ -121,7 +121,7 @@ function SubMenu({ cancelCloseSubmenu, closeSubmenu, hideContextMenu, options, p
     <>
       {safeAreaPath && (
         <svg
-          className="fixed top-0 left-0 w-full h-full pointer-events-none z-[100]"
+          className="fixed top-0 left-0 w-full h-full pointer-events-none z-100"
           style={{ width: '100vw', height: '100vh' }}
         >
           <path
@@ -135,7 +135,7 @@ function SubMenu({ cancelCloseSubmenu, closeSubmenu, hideContextMenu, options, p
 
       <motion.div
         animate={{ opacity: 1, scale: 1 }}
-        className="fixed z-[101]"
+        className="fixed z-101"
         exit={{ opacity: 0, scale: 0.95 }}
         initial={{ opacity: 0, scale: 0.95 }}
         onContextMenu={(e: React.MouseEvent) => e.preventDefault()}
@@ -219,6 +219,15 @@ function MenuItem({ option, path, hideContextMenu }: MenuItemProps) {
         onClick={() => {
           if (!option.disabled && !option.submenu && option.onClick) {
             option.onClick();
+            hideContextMenu();
+          }
+        }}
+        onMouseDown={(event) => {
+          if (event.button !== 2) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!option.disabled && !option.submenu && option.onRightClick) {
+            option.onRightClick();
             hideContextMenu();
           }
         }}

@@ -124,10 +124,10 @@ pub fn load_image_with_orientation(
     cancel_token: Option<(Arc<AtomicUsize>, usize)>,
 ) -> Result<DynamicImage> {
     let check_cancel = || -> Result<()> {
-        if let Some((tracker, generation)) = &cancel_token {
-            if tracker.load(Ordering::SeqCst) != *generation {
-                return Err(anyhow!("Load cancelled"));
-            }
+        if let Some((tracker, generation)) = &cancel_token
+            && tracker.load(Ordering::SeqCst) != *generation
+        {
+            return Err(anyhow!("Load cancelled"));
         }
         Ok(())
     };
@@ -192,7 +192,7 @@ pub fn composite_patches_on_image(
                 .get("patchData")
                 .and_then(|data| data.get("color"))
                 .and_then(|color| color.as_str())
-                .map_or(false, |s| !s.is_empty())
+                .is_some_and(|s| !s.is_empty())
         })
         .collect();
 
@@ -269,11 +269,11 @@ pub fn composite_patches_on_image(
                         let alpha = mask_value as f32 / 255.0;
                         let one_minus_alpha = 1.0 - alpha;
 
-                        let base_r = row[x * 4 + 0];
+                        let base_r = row[x * 4];
                         let base_g = row[x * 4 + 1];
                         let base_b = row[x * 4 + 2];
 
-                        row[x * 4 + 0] = patch_pixel[0] * alpha + base_r * one_minus_alpha;
+                        row[x * 4] = patch_pixel[0] * alpha + base_r * one_minus_alpha;
                         row[x * 4 + 1] = patch_pixel[1] * alpha + base_g * one_minus_alpha;
                         row[x * 4 + 2] = patch_pixel[2] * alpha + base_b * one_minus_alpha;
                     }

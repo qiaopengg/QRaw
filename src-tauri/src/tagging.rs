@@ -5,7 +5,6 @@ use ndarray::{Array, Axis};
 use ort::session::Session;
 use ort::value::Tensor;
 use rayon::prelude::*;
-use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,12 +14,11 @@ use tokenizers::Tokenizer;
 use tokio::task::JoinHandle;
 use walkdir::WalkDir;
 
-use crate::AppState;
-use crate::candidates::TAG_CANDIDATES;
 use crate::file_management::{self, parse_virtual_path};
 use crate::formats::is_supported_image_file;
 use crate::hierarchy::TAG_HIERARCHY;
 use crate::image_processing::ImageMetadata;
+use crate::{AppState, candidates::TAG_CANDIDATES};
 
 pub const COLOR_TAG_PREFIX: &str = "color:";
 pub const USER_TAG_PREFIX: &str = "user:";
@@ -31,7 +29,7 @@ fn preprocess_clip_image(image: &DynamicImage) -> Array<f32, ndarray::Dim<[usize
     let rgb_image = resized.to_rgb8();
 
     let mean = [0.48145466, 0.4578275, 0.40821073];
-    let std = [0.26862954, 0.26130258, 0.27577711];
+    let std = [0.26862954, 0.261_302_6, 0.275_777_1];
 
     let mut array = Array::zeros((1, 3, input_size as usize, input_size as usize));
     for (x, y, pixel) in rgb_image.enumerate_pixels() {
@@ -104,12 +102,12 @@ pub fn extract_color_tags(image: &DynamicImage) -> Vec<String> {
             }
         } else {
             match h {
-                _ if h >= 340.0 || h < 20.0 => "red".to_string(),
-                _ if h >= 20.0 && h < 45.0 => "orange".to_string(),
-                _ if h >= 45.0 && h < 70.0 => "yellow".to_string(),
-                _ if h >= 70.0 && h < 160.0 => "green".to_string(),
-                _ if h >= 160.0 && h < 260.0 => "blue".to_string(),
-                _ if h >= 260.0 && h < 340.0 => "purple".to_string(),
+                _ if !(20.0..340.0).contains(&h) => "red".to_string(),
+                _ if (20.0..45.0).contains(&h) => "orange".to_string(),
+                _ if (45.0..70.0).contains(&h) => "yellow".to_string(),
+                _ if (70.0..160.0).contains(&h) => "green".to_string(),
+                _ if (160.0..260.0).contains(&h) => "blue".to_string(),
+                _ if (260.0..340.0).contains(&h) => "purple".to_string(),
                 _ => "unknown".to_string(),
             }
         };
@@ -270,7 +268,7 @@ pub async fn start_background_indexing(
     let custom_ai_tags = settings.custom_ai_tags.clone();
     let ai_tag_count = settings.ai_tag_count.unwrap_or(10) as usize;
 
-    let models = crate::ai_processing::get_or_init_ai_models(
+    let clip_models = crate::ai_processing::get_or_init_clip_models(
         &app_handle,
         &state.ai_state,
         &state.ai_init_lock,
@@ -296,7 +294,7 @@ pub async fn start_background_indexing(
                 .filter_map(Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
-                    path.is_file() && is_supported_image_file(&path.to_string_lossy().as_ref())
+                    path.is_file() && is_supported_image_file(path.to_string_lossy().as_ref())
                 })
                 .collect(),
             Err(e) => {
@@ -324,7 +322,7 @@ pub async fn start_background_indexing(
         stream::iter(image_paths)
             .for_each_concurrent(max_concurrent_tasks, |path| {
                 let app_handle_inner = app_handle_clone.clone();
-                let models_inner = models.clone();
+                let clip_models_inner = clip_models.clone();
                 let gpu_context_inner = gpu_context.clone();
                 let processed_count_inner = Arc::clone(&processed_count);
                 let tags_inner = Arc::clone(&custom_ai_tags_shared);
@@ -356,36 +354,31 @@ pub async fn start_background_indexing(
                             gpu_context_inner.as_ref(),
                         ) {
                             Ok(image) => {
-                                if let (Some(clip_model), Some(clip_tokenizer)) =
-                                    (&models_inner.clip_model, &models_inner.clip_tokenizer)
-                                {
-                                    if let Ok(ai_tags) = generate_tags_with_clip(
-                                        &image,
-                                        clip_model,
-                                        clip_tokenizer,
-                                        (*tags_inner).clone(),
-                                        ai_tag_count,
-                                    ) {
-                                        println!("Found AI tags for {}: {:?}", path_str, ai_tags);
+                                if let Ok(ai_tags) = generate_tags_with_clip(
+                                    &image,
+                                    &clip_models_inner.model,
+                                    &clip_models_inner.tokenizer,
+                                    (*tags_inner).clone(),
+                                    ai_tag_count,
+                                ) {
+                                    println!("Found AI tags for {}: {:?}", path_str, ai_tags);
 
-                                        let mut existing_tags: HashSet<String> =
-                                            metadata.tags.unwrap_or_default().into_iter().collect();
+                                    let mut existing_tags: HashSet<String> =
+                                        metadata.tags.unwrap_or_default().into_iter().collect();
 
-                                        for tag in ai_tags {
-                                            existing_tags.insert(tag);
-                                        }
+                                    for tag in ai_tags {
+                                        existing_tags.insert(tag);
+                                    }
 
-                                        let mut final_tags: Vec<String> =
-                                            existing_tags.into_iter().collect();
-                                        final_tags.sort_unstable();
+                                    let mut final_tags: Vec<String> =
+                                        existing_tags.into_iter().collect();
+                                    final_tags.sort_unstable();
 
-                                        metadata.tags = Some(final_tags);
+                                    metadata.tags = Some(final_tags);
 
-                                        if let Ok(json_string) =
-                                            serde_json::to_string_pretty(&metadata)
-                                        {
-                                            let _ = fs::write(sidecar_path, json_string);
-                                        }
+                                    if let Ok(json_string) = serde_json::to_string_pretty(&metadata)
+                                    {
+                                        let _ = fs::write(sidecar_path, json_string);
                                     }
                                 }
                             }
@@ -441,7 +434,7 @@ fn modify_tags_for_path(
         ImageMetadata::default()
     };
 
-    let mut tags = metadata.tags.unwrap_or_else(Vec::new);
+    let mut tags = metadata.tags.unwrap_or_default();
     modify_fn(&mut tags);
 
     tags.sort_unstable();
@@ -496,27 +489,26 @@ pub fn clear_ai_tags(root_path: String) -> Result<usize, String> {
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("qcr") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content) {
-                    if let Some(tags) = &mut metadata.tags {
-                        let original_len = tags.len();
-                        // Keep color tags and user tags, remove others (AI tags)
-                        tags.retain(|tag| {
-                            tag.starts_with(COLOR_TAG_PREFIX) || tag.starts_with(USER_TAG_PREFIX)
-                        });
+        if path.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("rrdata")
+            && let Ok(content) = fs::read_to_string(path)
+            && let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content)
+            && let Some(tags) = &mut metadata.tags
+        {
+            let original_len = tags.len();
+            // Keep color tags and user tags, remove others (AI tags)
+            tags.retain(|tag| {
+                tag.starts_with(COLOR_TAG_PREFIX) || tag.starts_with(USER_TAG_PREFIX)
+            });
 
-                        if tags.len() < original_len {
-                            if tags.is_empty() {
-                                metadata.tags = None;
-                            }
-                            if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
-                                if fs::write(path, json_string).is_ok() {
-                                    updated_count += 1;
-                                }
-                            }
-                        }
-                    }
+            if tags.len() < original_len {
+                if tags.is_empty() {
+                    metadata.tags = None;
+                }
+                if let Ok(json_string) = serde_json::to_string_pretty(&metadata)
+                    && fs::write(path, json_string).is_ok()
+                {
+                    updated_count += 1;
                 }
             }
         }
@@ -535,25 +527,24 @@ pub fn clear_all_tags(root_path: String) -> Result<usize, String> {
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("qcr") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content) {
-                    if let Some(tags) = &mut metadata.tags {
-                        let original_len = tags.len();
-                        // Keep only color tags, remove AI and user tags
-                        tags.retain(|tag| tag.starts_with(COLOR_TAG_PREFIX));
+        if path.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("rrdata")
+            && let Ok(content) = fs::read_to_string(path)
+            && let Ok(mut metadata) = serde_json::from_str::<ImageMetadata>(&content)
+            && let Some(tags) = &mut metadata.tags
+        {
+            let original_len = tags.len();
+            // Keep only color tags, remove AI and user tags
+            tags.retain(|tag| tag.starts_with(COLOR_TAG_PREFIX));
 
-                        if tags.len() < original_len {
-                            if tags.is_empty() {
-                                metadata.tags = None;
-                            }
-                            if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
-                                if fs::write(path, json_string).is_ok() {
-                                    updated_count += 1;
-                                }
-                            }
-                        }
-                    }
+            if tags.len() < original_len {
+                if tags.is_empty() {
+                    metadata.tags = None;
+                }
+                if let Ok(json_string) = serde_json::to_string_pretty(&metadata)
+                    && fs::write(path, json_string).is_ok()
+                {
+                    updated_count += 1;
                 }
             }
         }

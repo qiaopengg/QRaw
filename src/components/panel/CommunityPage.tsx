@@ -196,7 +196,7 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
 
   return (
     <div className="flex-1 flex flex-col h-full min-w-0 bg-bg-secondary rounded-lg overflow-hidden p-4">
-      <header className="flex-shrink-0 flex items-center justify-between mb-4 flex-wrap gap-4">
+      <header className="shrink-0 flex items-center justify-between mb-4 flex-wrap gap-4">
         <div className="flex items-center">
           <Button
             className="mr-4 hover:bg-surface text-text-primary rounded-full"
@@ -268,10 +268,10 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
                   >
                     <div className="relative w-full aspect-square bg-bg-primary flex items-center justify-center text-text-secondary">
                       {previewUrl ? (
-                        <img
-                          src={previewUrl}
-                          alt={preset.name}
-                          className="w-full h-full object-cover transition-all duration-300 group-hover:blur-sm group-hover:brightness-75"
+                        <img 
+                          src={previewUrl} 
+                          alt={preset.name} 
+                          className="w-full h-full object-cover transition-all duration-300 group-hover:blur-xs group-hover:brightness-75" 
                         />
                       ) : (
                         <Loader2 className="h-6 w-6 animate-spin" />

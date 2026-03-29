@@ -88,12 +88,12 @@ fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
         return 0.0;
     }
     let mean = sum / laplacian_values.len() as f64;
-    let variance = laplacian_values
+
+    laplacian_values
         .iter()
         .map(|v| (v - mean).powi(2))
         .sum::<f64>()
-        / laplacian_values.len() as f64;
-    variance
+        / laplacian_values.len() as f64
 }
 
 fn calculate_exposure_metric(image: &GrayImage) -> f64 {
