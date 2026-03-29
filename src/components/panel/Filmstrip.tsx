@@ -24,8 +24,8 @@ interface ItemData {
   thumbnails: Record<string, string> | undefined;
   thumbnailAspectRatio: ThumbnailAspectRatio;
   onRequestThumbnails?: (paths: string[]) => void;
-  onContextMenu?: (event: any, path: string) => void;
-  onImageSelect?: (path: string, event: any) => void;
+  onContextMenu?: (event: React.MouseEvent, path: string) => void;
+  onImageSelect?: (path: string, event: React.MouseEvent) => void;
   itemHeight: number;
   setSize: (index: number, width: number) => void;
 }
@@ -565,8 +565,8 @@ interface FilmStripProps {
   isLoading: boolean;
   multiSelectedPaths: Array<string>;
   onClearSelection?(): void;
-  onContextMenu?(event: any, path: string): void;
-  onImageSelect?(path: string, event: any): void;
+  onContextMenu?(event: React.MouseEvent, path: string): void;
+  onImageSelect?(path: string, event: React.MouseEvent): void;
   onRequestThumbnails?(paths: string[]): void;
   selectedImage?: SelectedImage;
   thumbnails: Record<string, string> | undefined;

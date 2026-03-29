@@ -16,15 +16,12 @@ import {
 } from '@dnd-kit/core';
 import {
   Circle,
-  ClipboardPaste,
-  Copy,
   Eye,
   EyeOff,
   FileEdit,
   Loader2,
   Minus,
   Plus,
-  PlusSquare,
   RotateCcw,
   Trash2,
   Wand2,
@@ -46,13 +43,11 @@ import {
   SubMaskMode,
   ToolType,
   MASK_ICON_MAP,
-  AI_PANEL_CREATION_TYPES,
-  AI_SUB_MASK_COMPONENT_TYPES,
-  formatMaskTypeName,
-  getSubMaskName,
+  getAiPanelCreationTypes,
+  getAiSubMaskComponentTypes,
 } from './Masks';
 import { Adjustments, AiPatch } from '../../../utils/adjustments';
-import { BrushSettings, OPTION_SEPARATOR, SelectedImage } from '../../ui/AppProperties';
+import { BrushSettings, SelectedImage } from '../../ui/AppProperties';
 import { createSubMask } from '../../../utils/maskUtils';
 
 interface AiPanelProps {
@@ -86,6 +81,13 @@ interface DragData {
   item?: AiPatch | SubMask;
   maskType?: Mask;
   parentId?: string;
+}
+
+function formatMaskTypeName(type: string, t: (key: string) => string) {
+  if (type === Mask.AiSubject) return t('masking.aiSubject');
+  if (type === Mask.AiForeground) return t('masking.aiForeground');
+  if (type === Mask.AiSky) return t('masking.aiSky');
+  return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
 const PLACEHOLDER_PATCH: AiPatch = {
@@ -274,15 +276,12 @@ export default function AIPanel({
   const [isSettingsPanelEverOpened, setIsSettingsPanelEverOpened] = useState(false);
   const hasPerformedInitialSelection = useRef(false);
   const [analyzingSubMaskId, setAnalyzingSubMaskId] = useState<string | null>(null);
-  const [copiedPatch, setCopiedPatch] = useState<AiPatch | null>(null);
-  const [copiedSubMask, setCopiedSubMask] = useState<SubMask | null>(null);
 
   const [collapsibleState, setCollapsibleState] = useState({
     generative: true,
     properties: true,
   });
 
-  const { showContextMenu } = useContextMenu();
   const { setNodeRef: setRootDroppableRef, isOver: isRootOver } = useDroppable({ id: 'ai-list-root' });
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -492,20 +491,7 @@ export default function AIPanel({
     if (type === Mask.AiForeground) onGenerateAiForegroundMask(subMask.id);
   };
 
-  const handleGridClick = (type: Mask, forceNewPatchContainer: boolean = false) => {
-    if (!forceNewPatchContainer && activePatchContainerId) handleAddSubMask(activePatchContainerId, type);
-    else handleAddAiPatchContainer(type);
-  };
-
-  const handleGridRightClick = (event: React.MouseEvent, type: Mask | null) => {
-    if (event.button !== 2) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (!type) return;
-    handleGridClick(type, true);
-  };
-
-  const updatePatch = (id: string, data: any) =>
+  const updatePatch = (id: string, data: Partial<AiPatch>) =>
     setAdjustments((prev: Adjustments) => ({
       ...prev,
       aiPatches: prev.aiPatches.map((p) => (p.id === id ? { ...p, ...data } : p)),
@@ -533,141 +519,6 @@ export default function AIPanel({
         p.id === containerId ? { ...p, subMasks: p.subMasks.filter((sm) => sm.id !== subMaskId) } : p,
       ),
     }));
-  };
-
-  const clonePatchData = (container: AiPatch, options: { invert?: boolean; rename?: boolean } = {}): AiPatch => {
-    const clonedContainer = JSON.parse(JSON.stringify(container));
-
-    clonedContainer.id = uuidv4();
-    clonedContainer.invert = options.invert ? !clonedContainer.invert : clonedContainer.invert;
-    clonedContainer.isLoading = false;
-    clonedContainer.name = options.rename === false ? clonedContainer.name : `${container.name} Copy`;
-    clonedContainer.patchData = null;
-    clonedContainer.subMasks = clonedContainer.subMasks.map((subMask: SubMask) => ({
-      ...subMask,
-      id: uuidv4(),
-    }));
-
-    return clonedContainer;
-  };
-
-  const cloneSubMaskData = (subMask: SubMask, options: { invert?: boolean; rename?: boolean } = {}): SubMask => {
-    const clonedSubMask = JSON.parse(JSON.stringify(subMask));
-
-    clonedSubMask.id = uuidv4();
-    clonedSubMask.invert = options.invert ? !clonedSubMask.invert : clonedSubMask.invert;
-    clonedSubMask.name = options.rename === false ? clonedSubMask.name : `${getSubMaskName(subMask)} Copy`;
-
-    return clonedSubMask;
-  };
-
-  const copyPatchToClipboard = (container: AiPatch) => {
-    setCopiedPatch(JSON.parse(JSON.stringify(container)));
-  };
-
-  const copySubMaskToClipboard = (subMask: SubMask) => {
-    setCopiedSubMask(JSON.parse(JSON.stringify(subMask)));
-  };
-
-  const insertPatchContainer = (container: AiPatch, insertIndex?: number) => {
-    if ((adjustments.aiPatches || []).length === 0) setIsPatchListEmpty(false);
-
-    setAdjustments((prev: Adjustments) => {
-      const newPatches = [...(prev.aiPatches || [])];
-      const targetIndex = Math.max(0, Math.min(insertIndex ?? newPatches.length, newPatches.length));
-
-      newPatches.splice(targetIndex, 0, container);
-      return { ...prev, aiPatches: newPatches };
-    });
-
-    onSelectPatchContainer(container.id);
-    onSelectSubMask(null);
-    setExpandedContainers((prev) => new Set(prev).add(container.id));
-  };
-
-  const insertSubMaskIntoContainer = (containerId: string, subMask: SubMask, insertIndex?: number) => {
-    setAdjustments((prev: Adjustments) => ({
-      ...prev,
-      aiPatches: (prev.aiPatches || []).map((container) => {
-        if (container.id !== containerId) {
-          return container;
-        }
-
-        const newSubMasks = [...container.subMasks];
-        const targetIndex = Math.max(0, Math.min(insertIndex ?? newSubMasks.length, newSubMasks.length));
-
-        newSubMasks.splice(targetIndex, 0, subMask);
-        return { ...container, subMasks: newSubMasks };
-      }),
-    }));
-
-    onSelectPatchContainer(containerId);
-    onSelectSubMask(subMask.id);
-    setExpandedContainers((prev) => new Set(prev).add(containerId));
-  };
-
-  const handleDuplicatePatchContainer = (container: AiPatch) => {
-    const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
-    const duplicatedContainer = clonePatchData(container, { rename: true });
-
-    insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
-  };
-
-  const handleDuplicateAndInvertPatchContainer = (container: AiPatch) => {
-    const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
-    const duplicatedContainer = clonePatchData(container, { invert: true, rename: true });
-
-    insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
-  };
-
-  const handlePastePatch = (insertAfterContainerId?: string) => {
-    if (!copiedPatch) {
-      return;
-    }
-
-    const pastedContainer = clonePatchData(copiedPatch, { rename: false });
-    const patchIndex = insertAfterContainerId
-      ? (adjustments.aiPatches || []).findIndex((patch) => patch.id === insertAfterContainerId)
-      : -1;
-
-    insertPatchContainer(pastedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
-  };
-
-  const handleDuplicateSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
-    const duplicatedSubMask = cloneSubMaskData(subMask, { rename: true });
-    insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
-  };
-
-  const handleDuplicateAndInvertSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
-    const duplicatedSubMask = cloneSubMaskData(subMask, { invert: true, rename: true });
-    insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
-  };
-
-  const handlePasteSubMask = (containerId: string, insertIndex?: number) => {
-    if (!copiedSubMask) {
-      return;
-    }
-
-    const pastedSubMask = cloneSubMaskData(copiedSubMask, { rename: false });
-    insertSubMaskIntoContainer(containerId, pastedSubMask, insertIndex);
-  };
-
-  const handlePanelContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (!selectedImage) {
-      return;
-    }
-
-    const newEditSubMenu = AI_PANEL_CREATION_TYPES.filter((maskType) => !maskType.disabled).map((maskType) => ({
-      label: maskType.name,
-      icon: maskType.icon,
-      onClick: () => handleAddAiPatchContainer(maskType.type),
-    }));
-
-    showContextMenu(e.clientX, e.clientY, [
-      { label: 'Paste Edit', icon: ClipboardPaste, disabled: !copiedPatch, onClick: () => handlePastePatch() },
-      { label: 'Add New Edit', icon: Plus, submenu: newEditSubMenu },
-    ]);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -809,13 +660,9 @@ export default function AIPanel({
       onDragEnd={handleDragEnd}
       collisionDetection={pointerWithin}
     >
-      <div
-        className="flex flex-col h-full select-none overflow-hidden"
-        onClick={handleDeselect}
-        onContextMenu={handlePanelContextMenu}
-      >
-        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-          <h2 className="text-xl font-bold text-primary text-shadow-shiny">Inpainting</h2>
+      <div className="flex flex-col h-full select-none overflow-hidden" onClick={handleDeselect}>
+        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface h-[69px]">
+          <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('ai.title')}</h2>
           <button
             className="p-2 rounded-full hover:bg-surface transition-colors"
             onClick={handleResetAllAiEdits}
@@ -826,7 +673,7 @@ export default function AIPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
-          <div className="p-4 pb-2 z-10 shrink-0">
+          <div className="p-4 pb-2 z-10 flex-shrink-0">
             {!selectedImage && <p className="text-center text-text-tertiary mt-4">No image selected.</p>}
 
             {selectedImage && (
@@ -850,8 +697,12 @@ export default function AIPanel({
                         maskType={typeToRender}
                         isGenerating={isGeneratingAi}
                         activePatchContainerId={activePatchContainerId}
-                        onClick={() => handleGridClick(typeToRender.type)}
-                        onRightClick={(e) => handleGridRightClick(e, typeToRender.type)}
+                        onClick={() =>
+                          typeToRender.type &&
+                          (isComponentMode
+                            ? handleAddSubMask(activePatchContainerId, typeToRender.type)
+                            : handleAddAiPatchContainer(typeToRender.type))
+                        }
                       />
                     );
                   })}
@@ -903,23 +754,12 @@ export default function AIPanel({
                       setTempName={setTempName}
                       updateContainer={updatePatch}
                       handleDelete={handleDeleteContainer}
-                      handleDuplicate={handleDuplicatePatchContainer}
-                      handleDuplicateAndInvert={handleDuplicateAndInvertPatchContainer}
-                      handlePastePatch={handlePastePatch}
-                      copyPatchToClipboard={copyPatchToClipboard}
-                      copiedPatch={copiedPatch}
-                      setAdjustments={setAdjustments}
                       activeDragItem={activeDragItem}
                       activeSubMaskId={activeSubMaskId}
                       onSelectContainer={onSelectPatchContainer}
                       onSelectSubMask={onSelectSubMask}
                       updateSubMask={updateSubMask}
                       handleDeleteSubMask={handleDeleteSubMask}
-                      handleDuplicateSubMask={handleDuplicateSubMask}
-                      handleDuplicateAndInvertSubMask={handleDuplicateAndInvertSubMask}
-                      handlePasteSubMask={handlePasteSubMask}
-                      copySubMaskToClipboard={copySubMaskToClipboard}
-                      copiedSubMask={copiedSubMask}
                       analyzingSubMaskId={analyzingSubMaskId}
                     />
                   ))}
@@ -972,7 +812,7 @@ export default function AIPanel({
 
       <DragOverlay dropAnimation={{ duration: 150, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
         {activeDragItem ? (
-          <div className="w-(--sidebar-width,280px) pointer-events-none">
+          <div className="w-[var(--sidebar-width,280px)] pointer-events-none">
             {activeDragItem.type === 'Container' && activeDragItem.item && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10">
                 <div className="text-text-secondary">
@@ -988,10 +828,10 @@ export default function AIPanel({
                 {(() => {
                   const sm = activeDragItem.item as SubMask;
                   const Icon = MASK_ICON_MAP[sm.type] || Circle;
-                  return <Icon size={16} className="text-text-secondary shrink-0 ml-1" />;
+                  return <Icon size={16} className="text-text-secondary flex-shrink-0 ml-1" />;
                 })()}
                 <span className="text-sm text-text-primary flex-1 truncate">
-                  {getSubMaskName(activeDragItem.item as SubMask)}
+                  {formatMaskTypeName((activeDragItem.item as SubMask).type, t)}
                 </span>
               </div>
             )}
@@ -1033,7 +873,17 @@ function NewMaskDropZone({ isOver }: { isOver: boolean }) {
   );
 }
 
-function DraggableGridItem({ maskType, isGenerating, onClick, onRightClick, activePatchContainerId }: any) {
+function DraggableGridItem({
+  maskType,
+  isGenerating,
+  onClick,
+  activePatchContainerId,
+}: {
+  maskType: MaskType;
+  isGenerating: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  activePatchContainerId: string | null;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `create-ai-${maskType.type}`,
     data: { type: 'Creation', maskType: maskType.type },
@@ -1046,14 +896,6 @@ function DraggableGridItem({ maskType, isGenerating, onClick, onRightClick, acti
       {...attributes}
       disabled={maskType.disabled || isGenerating}
       onClick={onClick}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onMouseDown={(event) => {
-        if (event.button !== 2) return;
-        onRightClick(event);
-      }}
       className={`bg-surface text-text-primary rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 aspect-square transition-colors
               ${maskType.disabled || isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-card-active active:bg-accent/20'}
               ${isDragging ? 'opacity-50' : ''}`}
@@ -1061,7 +903,7 @@ function DraggableGridItem({ maskType, isGenerating, onClick, onRightClick, acti
         maskType.disabled
           ? 'Coming Soon'
           : activePatchContainerId
-            ? `Add ${maskType.name} to Current Edit or Create New (Right-click)`
+            ? `Add ${maskType.name} to Current Edit`
             : `Create New ${maskType.name} Edit`
       }
     >
@@ -1083,22 +925,12 @@ function ContainerRow({
   setTempName,
   updateContainer,
   handleDelete,
-  handleDuplicate,
-  handleDuplicateAndInvert,
-  handlePastePatch,
-  copyPatchToClipboard,
-  copiedPatch,
   activeDragItem,
   activeSubMaskId,
   onSelectContainer,
   onSelectSubMask,
   updateSubMask,
   handleDeleteSubMask,
-  handleDuplicateSubMask,
-  handleDuplicateAndInvertSubMask,
-  handlePasteSubMask,
-  copySubMaskToClipboard,
-  copiedSubMask,
   analyzingSubMaskId,
 }: {
   container: AiPatch;
@@ -1163,16 +995,6 @@ function ContainerRow({
           setTempName(container.name);
         },
       },
-      { label: 'Duplicate Edit', icon: PlusSquare, onClick: () => handleDuplicate(container) },
-      { label: 'Duplicate and Invert Edit', icon: RotateCcw, onClick: () => handleDuplicateAndInvert(container) },
-      { label: 'Copy Edit', icon: Copy, onClick: () => copyPatchToClipboard(container) },
-      {
-        label: 'Paste Edit',
-        icon: ClipboardPaste,
-        disabled: !copiedPatch,
-        onClick: () => handlePastePatch(container.id),
-      },
-      { type: OPTION_SEPARATOR },
       {
         label: t('ai.resetSelection'),
         icon: RotateCcw,
@@ -1238,7 +1060,7 @@ function ContainerRow({
           {renamingId === container.id ? (
             <input
               autoFocus
-              className="bg-bg-primary text-sm w-full rounded-sm px-1 outline-hidden border border-accent"
+              className="bg-bg-primary text-sm w-full rounded px-1 outline-none border border-accent"
               value={tempName}
               onChange={(e) => setTempName(e.target.value)}
               onBlur={handleRenameSubmit}
@@ -1311,16 +1133,7 @@ function ContainerRow({
                   }}
                   updateSubMask={updateSubMask}
                   handleDelete={() => handleDeleteSubMask(container.id, subMask.id)}
-                  handleDuplicate={() => handleDuplicateSubMask(container.id, subMask, index + 1)}
-                  handleDuplicateAndInvert={() => handleDuplicateAndInvertSubMask(container.id, subMask, index + 1)}
-                  handlePaste={() => handlePasteSubMask(container.id, index + 1)}
-                  handleCopy={() => copySubMaskToClipboard(subMask)}
-                  hasCopiedSubMask={!!copiedSubMask}
                   analyzingSubMaskId={analyzingSubMaskId}
-                  renamingId={renamingId}
-                  setRenamingId={setRenamingId}
-                  tempName={tempName}
-                  setTempName={setTempName}
                   isParentLoading={container.isLoading}
                 />
               ))}
@@ -1352,17 +1165,8 @@ function SubMaskRow({
   onSelect,
   updateSubMask,
   handleDelete,
-  handleDuplicate,
-  handleDuplicateAndInvert,
-  handlePaste,
-  handleCopy,
-  hasCopiedSubMask,
   activeDragItem,
   analyzingSubMaskId,
-  renamingId,
-  setRenamingId,
-  tempName,
-  setTempName,
   isParentLoading,
 }: {
   subMask: SubMask;
@@ -1414,32 +1218,11 @@ function SubMaskRow({
     };
   }, []);
 
-  const handleRenameSubmit = () => {
-    if (tempName.trim()) {
-      const newName = tempName.trim();
-      updateSubMask(subMask.id, { name: newName });
-    }
-    setRenamingId(null);
-  };
-
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
-      {
-        label: 'Rename',
-        icon: FileEdit,
-        onClick: () => {
-          setRenamingId(subMask.id);
-          setTempName(getSubMaskName(subMask));
-        },
-      },
-      { label: 'Duplicate Component', icon: PlusSquare, onClick: handleDuplicate },
-      { label: 'Duplicate and Invert Component', icon: RotateCcw, onClick: handleDuplicateAndInvert },
-      { label: 'Copy Component', icon: Copy, onClick: handleCopy },
-      { label: 'Paste Component', icon: ClipboardPaste, disabled: !hasCopiedSubMask, onClick: handlePaste },
-      { type: OPTION_SEPARATOR },
-      { label: 'Delete Component', icon: Trash2, isDestructive: true, onClick: handleDelete },
+      { label: t('ai.deleteComponent'), icon: Trash2, isDestructive: true, onClick: handleDelete },
     ]);
   };
   const showNumber = isHovered && totalCount > 1;
@@ -1468,7 +1251,7 @@ function SubMaskRow({
       }}
       onContextMenu={onContextMenu}
     >
-      <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
+      <div className="relative w-4 h-4 ml-1 flex-shrink-0 flex items-center justify-center">
         <AnimatePresence mode="wait" initial={false}>
           {isAnalyzing ? (
             <motion.div
@@ -1506,22 +1289,12 @@ function SubMaskRow({
           )}
         </AnimatePresence>
       </div>
-      {renamingId === subMask.id ? (
-        <input
-          autoFocus
-          className="bg-bg-primary text-sm w-full rounded px-1 outline-none border border-accent"
-          value={tempName}
-          onChange={(e) => setTempName(e.target.value)}
-          onBlur={handleRenameSubmit}
-          onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit()}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : (
-        <span className="text-sm text-text-primary flex-1 truncate select-none">{getSubMaskName(subMask)}</span>
-      )}
+      <span className="text-sm text-text-primary flex-1 truncate select-none">
+        {formatMaskTypeName(subMask.type, t)}
+      </span>
       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
-          className="p-1 hover:bg-bg-primary rounded-sm text-text-secondary"
+          className="p-1 hover:bg-bg-primary rounded text-text-secondary"
           data-tooltip={subMask.mode === SubMaskMode.Additive ? 'Switch to Subtract' : 'Switch to Add'}
           onClick={(e) => {
             e.stopPropagation();
@@ -1666,7 +1439,7 @@ function SettingsPanel({
               >
                 <div className="flex items-center gap-2">
                   <Input
-                    className="grow"
+                    className="flex-grow"
                     disabled={isGeneratingAi || displayContainer.isLoading}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       setPrompt(e.target.value);
@@ -1706,7 +1479,7 @@ function SettingsPanel({
       </CollapsibleSection>
 
       <CollapsibleSection
-        title={isComponentMode ? `${getSubMaskName(activeSubMask)} Properties` : 'Selection Properties'}
+        title={isComponentMode ? `${formatMaskTypeName(activeSubMask.type, t)} Properties` : 'Selection Properties'}
         isOpen={collapsibleState.properties}
         onToggle={() => handleToggleSection('properties')}
         canToggleVisibility={false}
@@ -1727,7 +1500,7 @@ function SettingsPanel({
             <>
               {isAiMask && aiModelDownloadStatus && (
                 <div className="p-3 mb-4 bg-card-active rounded-md border border-surface flex items-center gap-3">
-                  <Loader2 size={16} className="text-accent animate-spin shrink-0" />
+                  <Loader2 size={16} className="text-accent animate-spin flex-shrink-0" />
                   <div className="text-xs text-text-secondary leading-relaxed">
                     AI Model Downloading: <span className="text-accent font-medium">{aiModelDownloadStatus}</span>
                   </div>

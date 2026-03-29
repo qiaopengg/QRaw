@@ -9,13 +9,8 @@ import Text from '../../ui/Text';
 import { TextVariants } from '../../../types/typography';
 
 interface WaveformProps {
-  waveformData: WaveformData | null;
-  histogram?: any;
-  displayMode: string;
-  setDisplayMode: (mode: string) => void;
-  showClipping?: boolean;
-  onToggleClipping?: () => void;
-  theme?: string;
+  onClose(): void;
+  waveformData: WaveformData;
 }
 
 const modeButtons = [
@@ -51,275 +46,12 @@ const useRawRgbaCanvas = (
   }, [canvasRef, base64Data, width, height]);
 };
 
-const WaveformCanvas = ({
-  base64Data,
-  width,
-  height,
-  isVectorscope,
-}: {
-  base64Data: string;
-  width: number;
-  height: number;
-  isVectorscope: boolean;
-}) => {
+export default function Waveform({ waveformData, onClose }: WaveformProps) {
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(DisplayMode.Rgb);
+  const nodeRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useRawRgbaCanvas(canvasRef, base64Data, width, height);
+  const { t } = useTranslation();
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className={`w-full h-full ${isVectorscope ? 'object-contain' : ''}`}
-    />
-  );
-};
-
-const FakeWaveformLoader = ({ mode }: { mode: string }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastTimeRef = useRef<number>(0);
-  const spawnAccumulatorRef = useRef<number>(0);
-
-  const MAX_PARTICLES = 10000;
-  const particles = useRef(
-    Array.from({ length: MAX_PARTICLES }, () => ({
-      x: 0,
-      y: 0,
-      targetX: 0,
-      targetY: 0,
-      life: 0,
-      maxLife: 1,
-      r: 255,
-      g: 255,
-      b: 255,
-      active: false,
-    })),
-  ).current;
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: true });
-    if (!ctx) return;
-
-    const WIDTH = 256;
-    const HEIGHT = 256;
-    canvas.width = WIDTH;
-    canvas.height = HEIGHT;
-
-    particles.forEach((p) => (p.active = false));
-    lastTimeRef.current = 0;
-    spawnAccumulatorRef.current = 0;
-    let isPrewarmed = false;
-
-    const imgData = ctx.createImageData(WIDTH, HEIGHT);
-    const data = imgData.data;
-
-    const gridBuffer = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-    if (mode === DisplayMode.Vectorscope) {
-      for (let py = 0; py < HEIGHT; py++) {
-        for (let px = 0; px < WIDTH; px++) {
-          const dx = px - 128.0;
-          const dy = 128.0 - py;
-          const min_d = Math.min(Math.abs(dx), Math.abs(dy));
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const off = (py * WIDTH + px) * 4;
-
-          if (min_d <= 1.0) {
-            const alpha = Math.max(0, 40.0 - min_d * 30.0);
-            gridBuffer[off] = 255;
-            gridBuffer[off + 1] = 255;
-            gridBuffer[off + 2] = 255;
-            gridBuffer[off + 3] = alpha;
-          } else if (Math.abs(dist - 127.0) < 0.8 || Math.abs(dist - 64.0) < 0.8) {
-            gridBuffer[off] = 255;
-            gridBuffer[off + 1] = 255;
-            gridBuffer[off + 2] = 255;
-            gridBuffer[off + 3] = 15;
-          } else if (dx < 0.0 && dy > 0.0 && Math.abs(dy + 1.53 * dx) < 1.0) {
-            gridBuffer[off] = 255;
-            gridBuffer[off + 1] = 200;
-            gridBuffer[off + 2] = 150;
-            gridBuffer[off + 3] = 120;
-          }
-        }
-      }
-    }
-
-    let animationFrameId: number;
-
-    const render = (time: number) => {
-      if (lastTimeRef.current === 0) lastTimeRef.current = time;
-      let dt = (time - lastTimeRef.current) / 1000;
-      lastTimeRef.current = time;
-
-      if (dt > 0.05) dt = 0.05;
-
-      let frameDt = dt;
-
-      if (!isPrewarmed) {
-        frameDt = 0.5;
-        isPrewarmed = true;
-      }
-
-      data.set(gridBuffer);
-
-      const SPAWN_RATE = 1000;
-      spawnAccumulatorRef.current += SPAWN_RATE * frameDt;
-
-      const dotsToSpawn = Math.floor(spawnAccumulatorRef.current);
-      if (dotsToSpawn > 0) {
-        spawnAccumulatorRef.current -= dotsToSpawn;
-        let spawnedCount = 0;
-
-        for (let i = 0; i < MAX_PARTICLES && spawnedCount < dotsToSpawn; i++) {
-          const p = particles[i];
-          if (!p.active) {
-            p.active = true;
-
-            if (mode !== DisplayMode.Vectorscope) {
-              p.x = Math.random() * WIDTH;
-              p.targetX = p.x;
-
-              p.y = HEIGHT - Math.random() * 2;
-
-              const isPot = Math.random() < 0.4;
-
-              if (isPot) {
-                p.targetY = HEIGHT - Math.random() * 6;
-              } else {
-                const randomCurve = Math.pow(Math.random(), 1.2);
-                p.targetY = HEIGHT - randomCurve * HEIGHT;
-              }
-
-              if (mode === DisplayMode.Parade) {
-                const section = Math.floor((p.x / WIDTH) * 3);
-                if (section === 0) {
-                  p.r = 255;
-                  p.g = 70;
-                  p.b = 70;
-                } else if (section === 1) {
-                  p.r = 70;
-                  p.g = 255;
-                  p.b = 70;
-                } else {
-                  p.r = 70;
-                  p.g = 150;
-                  p.b = 255;
-                }
-              } else if (mode === DisplayMode.Rgb) {
-                const rand = Math.random();
-                if (rand > 0.85) {
-                  p.r = 255;
-                  p.g = 80;
-                  p.b = 80;
-                } else if (rand > 0.7) {
-                  p.r = 80;
-                  p.g = 255;
-                  p.b = 80;
-                } else if (rand > 0.55) {
-                  p.r = 80;
-                  p.g = 150;
-                  p.b = 255;
-                } else {
-                  p.r = 255;
-                  p.g = 255;
-                  p.b = 255;
-                }
-              } else {
-                p.r = 255;
-                p.g = 255;
-                p.b = 255;
-              }
-            }
-
-            const life = Math.random() * 5.0 + 8.0;
-            p.life = life;
-            p.maxLife = life;
-
-            spawnedCount++;
-          }
-        }
-      }
-
-      const speedMultiplier = 1;
-      const interpolation = 1 - Math.exp(-speedMultiplier * frameDt);
-
-      for (let i = 0; i < MAX_PARTICLES; i++) {
-        const p = particles[i];
-        if (p.active) {
-          p.life -= frameDt;
-
-          if (p.life <= 0) {
-            p.active = false;
-            continue;
-          }
-
-          p.x += (p.targetX - p.x) * interpolation;
-          p.y += (p.targetY - p.y) * interpolation;
-
-          const lifeRatio = p.life / p.maxLife;
-
-          let opacity = 1.0;
-          if (lifeRatio > 0.8) {
-            opacity = (1 - lifeRatio) / 0.12;
-          } else if (lifeRatio < 0.2) {
-            opacity = lifeRatio / 0.2;
-          }
-
-          const alpha = opacity * 0.18;
-
-          const px = Math.floor(p.x);
-          const py = Math.floor(p.y);
-
-          for (let dy = 0; dy < 3; dy++) {
-            for (let dx = 0; dx < 1.5; dx++) {
-              const cx = px + dx;
-              const cy = py + dy;
-
-              if (cx >= 0 && cx < WIDTH && cy >= 0 && cy < HEIGHT) {
-                const idx = (cy * WIDTH + cx) * 4;
-                data[idx] = Math.min(255, data[idx] + p.r * alpha);
-                data[idx + 1] = Math.min(255, data[idx + 1] + p.g * alpha);
-                data[idx + 2] = Math.min(255, data[idx + 2] + p.b * alpha);
-                data[idx + 3] = Math.min(255, data[idx + 3] + alpha * 255);
-              }
-            }
-          }
-        }
-      }
-
-      ctx.putImageData(imgData, 0, 0);
-      animationFrameId = requestAnimationFrame(render);
-    };
-
-    animationFrameId = requestAnimationFrame(render);
-
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [mode, particles]);
-
-  return (
-    <canvas ref={canvasRef} className={`w-full h-full ${mode === DisplayMode.Vectorscope ? 'object-contain' : ''}`} />
-  );
-};
-
-export default function Waveform({
-  waveformData,
-  histogram,
-  displayMode,
-  setDisplayMode,
-  showClipping,
-  onToggleClipping,
-  theme,
-}: WaveformProps) {
-  const [isHovered, setIsHovered] = useState(false);
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const isLightTheme = theme ? ['light', 'snow', 'arctic'].includes(theme) : false;
-  const isHistogram = displayMode === DisplayMode.Histogram;
-  const isVectorscope = displayMode === DisplayMode.Vectorscope;
-  const isReady = isHistogram ? !!(histogram && histogram.red) : !!waveformData;
-  const hadDataOnMount = useRef(isReady);
   const width = waveformData?.width || 256;
   const height = waveformData?.height || 256;
 
@@ -332,135 +64,47 @@ export default function Waveform({
           ? waveformData?.vectorscope
           : waveformData?.rgb;
 
-  const handleMouseEnter = () => {
-    hoverTimeoutRef.current = setTimeout(() => {
-      setIsHovered(true);
-    }, 250);
-  };
-
-  const handleMouseLeave = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    setIsHovered(false);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
-    };
-  }, []);
+  useRawRgbaCanvas(canvasRef, activeData || '', width, height);
 
   const baseButtonClass =
-    'relative grow text-center px-1.5 py-1 text-xs rounded-lg font-medium transition-colors duration-150';
+    'flex-grow text-center px-2 py-1 text-xs rounded-lg font-medium transition-colors duration-150';
   const inactiveButtonClass = 'text-text-primary hover:bg-bg-tertiary';
 
   return (
-    <div
-      className="relative w-full h-full bg-surface rounded-lg overflow-hidden border-border-color shadow-inner"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      <div
-        className="absolute inset-0 z-0 pointer-events-none"
-        style={{
-          isolation: 'isolate',
-          filter: isLightTheme ? 'invert(1) hue-rotate(180deg)' : 'none',
-          transition: 'filter 0.3s ease',
-        }}
-      >
-        <AnimatePresence initial={!hadDataOnMount.current} mode="sync">
-          {isReady ? (
-            isHistogram ? (
-              <motion.div
-                key="waveform-histogram"
-                initial={{ opacity: 0, scaleY: 0 }}
-                animate={{ opacity: 1, scaleY: 1 }}
-                exit={{ opacity: 0, scaleY: 0 }}
-                transition={{
-                  duration: 0.5,
-                  ease: [0.22, 1, 0.36, 1],
-                  opacity: { duration: 0.4 },
-                }}
-                style={{ transformOrigin: 'bottom' }}
-                className="absolute inset-0 z-10"
-              >
-                <HistogramView histogram={histogram} />
-              </motion.div>
-            ) : (
-              <motion.div
-                key={`waveform-canvas-${displayMode}`}
-                initial={{ opacity: 0, ...(isVectorscope ? {} : { scaleY: 0 }) }}
-                animate={{ opacity: 1, ...(isVectorscope ? {} : { scaleY: 1 }) }}
-                exit={{ opacity: 0, ...(isVectorscope ? {} : { scaleY: 0 }) }}
-                transition={{
-                  duration: 0.5,
-                  ease: [0.22, 1, 0.36, 1],
-                  opacity: { duration: 0.4 },
-                }}
-                style={{ transformOrigin: 'bottom' }}
-                className="absolute inset-0 z-10"
-              >
-                <WaveformCanvas
-                  base64Data={activeData || ''}
+    <Draggable nodeRef={nodeRef} handle=".handle" bounds="parent">
+      <div ref={nodeRef} className="absolute top-20 left-20 z-50">
+        <motion.div
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-surface/90 backdrop-blur-md border border-text-secondary/10 shadow-xl rounded-lg overflow-hidden"
+          exit={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.95 }}
+          key="waveform-content"
+          style={{ transformOrigin: 'top left' }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          <div className="handle flex items-center justify-between p-3 cursor-move">
+            <div className="flex items-center gap-2">
+              <Waves size={16} />
+              <Text variant={TextVariants.heading}>{t('waveform.waveform')}</Text>
+            </div>
+            <button
+              className="p-1 rounded-lg text-text-secondary hover:bg-bg-primary hover:text-text-primary transition-colors"
+              onClick={onClose}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="p-2 pt-0">
+            <div className="relative w-[256px] h-[256px] bg-black/60 rounded overflow-hidden">
+              {!!activeData && (
+                <canvas
+                  ref={canvasRef}
                   width={width}
                   height={height}
-                  isVectorscope={isVectorscope}
+                  className="absolute inset-0 w-full h-full"
+                  style={{ imageRendering: 'pixelated' }}
                 />
-              </motion.div>
-            )
-          ) : isLoaderMode ? (
-            <motion.div
-              key={`waveform-loader-${displayMode}`}
-              initial={{ opacity: 0 }}
-              animate={{
-                opacity: 1,
-                transition: { duration: 0.6, ease: 'easeOut' },
-              }}
-              exit={{
-                opacity: 0,
-                transition: { duration: 0.2, ease: 'easeIn' },
-              }}
-              className="absolute inset-0 pointer-events-none z-0"
-            >
-              {isHistogram ? <FakeHistogramLoader /> : <FakeWaveformLoader mode={displayMode} />}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-      </div>
-
-      <AnimatePresence>
-        {isHovered && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute inset-x-0 bottom-0 p-2 pt-6 bg-linear-to-t from-black/80 to-transparent flex justify-center z-20"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.1, ease: 'easeOut', delay: 0.05 }}
-              className="flex items-center justify-center gap-1 p-1 bg-surface/90 backdrop-blur-md rounded-lg w-full shadow-lg border border-white/5"
-            >
-              {onToggleClipping && (
-                <>
-                  <button
-                    onClick={onToggleClipping}
-                    data-tooltip={showClipping ? 'Hide Clipping Warnings' : 'Show Clipping Warnings'}
-                    className={`relative flex items-center justify-center w-7 h-7 shrink-0 rounded-lg transition-colors duration-150 ${
-                      showClipping ? 'bg-accent text-button-text' : 'text-text-primary hover:bg-bg-tertiary'
-                    }`}
-                  >
-                    <AlertOctagon size={14} />
-                  </button>
-                  <div className="w-px h-5 bg-white/20 mx-1 shrink-0"></div>
-                </>
               )}
             </div>
             <div className="flex justify-center gap-1 mt-2 p-1 bg-bg-primary rounded-lg">

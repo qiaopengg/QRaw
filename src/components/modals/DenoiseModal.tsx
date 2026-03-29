@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CheckCircle, XCircle, Loader2, Save, RefreshCw, ZoomIn, ZoomOut, Move, Grip } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
+import { CheckCircle, XCircle, Loader2, Save, Grip, RefreshCw, ZoomIn, ZoomOut, Move } from 'lucide-react';
 import Button from '../ui/Button';
-import Dropdown from '../ui/Dropdown';
 import Slider from '../ui/Slider';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
@@ -10,7 +9,7 @@ import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 interface DenoiseModalProps {
   isOpen: boolean;
   onClose(): void;
-  onDenoise(intensity: number, method: 'ai' | 'bm3d'): void;
+  onDenoise(intensity: number): void;
   onSave(): Promise<string>;
   onOpenFile(path: string): void;
   error: string | null;
@@ -18,14 +17,7 @@ interface DenoiseModalProps {
   originalBase64: string | null;
   isProcessing: boolean;
   progressMessage: string | null;
-  isRaw: boolean;
-  loadingImageUrl?: string | null;
 }
-
-const methodOptions: Array<{ label: string; value: 'ai' | 'bm3d' }> = [
-  { label: 'NIND (AI - Best for RAW)', value: 'ai' },
-  { label: 'BM3D (Traditional - All formats)', value: 'bm3d' },
-];
 
 const ImageCompare = ({ original, denoised }: { original: string; denoised: string }) => {
   const { t } = useTranslation();
@@ -90,6 +82,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
     if (!containerRef.current) return;
 
     const rect = containerRef.current.getBoundingClientRect();
+
     const mouseX = e.clientX - rect.left - rect.width / 2;
     const mouseY = e.clientY - rect.top - rect.height / 2;
 
@@ -114,7 +107,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#111] rounded-lg overflow-hidden border border-surface">
+    <div className="flex flex-col h-full bg-[#1a1a1a] rounded-md overflow-hidden border border-surface">
       <div className="h-9 bg-bg-primary border-b border-surface flex items-center justify-between px-3">
         <Text as="div" variant={TextVariants.small} className="flex items-center gap-2">
           <Move size={14} /> <span>{t('denoise.panZoomEnabled')}</span>
@@ -178,9 +171,9 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
           style={{ left: `${sliderPosition}%` }}
           onMouseDown={handleSliderMouseDown}
         >
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center gap-0.5">
-            <div className="w-0.5 h-3 bg-black/40 rounded-full"></div>
-            <div className="w-0.5 h-3 bg-black/40 rounded-full"></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full shadow-md flex items-center justify-center">
+            <div className="w-0.5 h-3 bg-black/50 mx-0.5"></div>
+            <div className="w-0.5 h-3 bg-black/50 mx-0.5"></div>
           </div>
         </div>
 
@@ -189,7 +182,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
           variant={TextVariants.small}
           color={TextColors.white}
           weight={TextWeights.medium}
-          className="absolute top-3 left-3 bg-black/60 backdrop-blur-xs px-2.5 py-1 rounded-md pointer-events-none z-0"
+          className="absolute top-3 left-3 bg-black/70 px-2 py-1 rounded pointer-events-none z-0"
         >
           {t('denoise.original')}
         </Text>
@@ -198,7 +191,7 @@ const ImageCompare = ({ original, denoised }: { original: string; denoised: stri
           variant={TextVariants.small}
           color={TextColors.button}
           weight={TextWeights.medium}
-          className="absolute top-3 right-3 bg-accent/90 backdrop-blur-xs px-2.5 py-1 rounded-md pointer-events-none z-0"
+          className="absolute top-3 right-3 bg-accent/90 px-2 py-1 rounded pointer-events-none z-0"
         >
           {t('denoise.denoised')}
         </Text>
@@ -218,13 +211,10 @@ export default function DenoiseModal({
   originalBase64,
   isProcessing,
   progressMessage,
-  isRaw,
-  loadingImageUrl,
 }: DenoiseModalProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
   const [intensity, setIntensity] = useState<number>(15);
-  const [method, setMethod] = useState<'ai' | 'bm3d'>('ai');
   const [isSaving, setIsSaving] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const { t } = useTranslation();
@@ -233,8 +223,6 @@ export default function DenoiseModal({
 
   useEffect(() => {
     if (isOpen) {
-      setMethod(isRaw ? 'ai' : 'bm3d');
-      setIntensity(isRaw ? 50 : 15);
       setIsMounted(true);
       const timer = setTimeout(() => setShow(true), 10);
       return () => clearTimeout(timer);
@@ -247,7 +235,7 @@ export default function DenoiseModal({
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, isRaw]);
+  }, [isOpen]);
 
   const handleClose = useCallback(() => {
     if (isSaving) return;
@@ -267,7 +255,8 @@ export default function DenoiseModal({
 
   const handleRunDenoise = () => {
     setSavedPath(null);
-    onDenoise(intensity / 100, method);
+    // Convert 0-100 back to 0-1 for the processing function
+    onDenoise(intensity / 100);
   };
 
   const handleSave = async () => {
@@ -292,16 +281,12 @@ export default function DenoiseModal({
   const renderContent = () => {
     if (error) {
       return (
-        <div className="flex flex-col items-center justify-center py-10 h-[460px]">
-          <div className="flex items-center justify-center mb-6">
-            <XCircle className="w-12 h-12 text-red-500" />
-          </div>
+        <div className="flex flex-col items-center justify-center py-10 h-[400px]">
+          <XCircle className="w-16 h-16 text-red-500 mb-4" />
           <Text variant={TextVariants.title} className="mb-2 text-center">
             {t('denoise.processingFailed')}
           </Text>
-          <Text className="text-center p-4 rounded-lg bg-bg-primary max-w-md mt-2 leading-relaxed">
-            {String(error)}
-          </Text>
+          <Text className="text-center p-2 rounded-md max-w-md">{String(error)}</Text>
         </div>
       );
     }
@@ -311,17 +296,15 @@ export default function DenoiseModal({
         <div className="w-full h-[500px]">
           <ImageCompare original={originalBase64} denoised={previewBase64} />
           {savedPath && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-              <Text
-                as="div"
-                variant={TextVariants.heading}
-                color={TextColors.success}
-                className="flex items-center justify-center gap-2 mt-4"
-              >
-                <CheckCircle className="w-5 h-5" />
-                <span>Image Saved Successfully!</span>
-              </Text>
-            </motion.div>
+            <Text
+              as="div"
+              variant={TextVariants.heading}
+              color={TextColors.success}
+              className="flex items-center justify-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2"
+            >
+              <CheckCircle className="w-5 h-5" />
+              <span>{t('denoise.imageSaved')}</span>
+            </Text>
           )}
         </div>
       );
@@ -329,68 +312,23 @@ export default function DenoiseModal({
 
     if (isProcessing) {
       return (
-        <div className="flex h-[460px] overflow-hidden rounded-lg border border-surface">
-          <div className="w-2/5 relative overflow-hidden shrink-0 bg-[#0a0a0a] flex items-center justify-center">
-            {loadingImageUrl ? (
-              <img src={loadingImageUrl} alt="Selected preview" className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full bg-surface/50" />
-            )}
-          </div>
-          <div className="flex-1 flex flex-col items-center justify-center px-12 bg-bg-primary">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
-              className="flex flex-col items-center w-full"
-            >
-              <Text variant={TextVariants.title} className="mb-2 text-center">
-                Denoising in Progress
-              </Text>
-              <Text className="text-center font-mono h-6 flex justify-center items-center">
-                {progressMessage || 'Initializing...'}
-              </Text>
-
-              <div className="mt-8 w-64 relative">
-                <div className="h-1 bg-surface rounded-full overflow-hidden relative w-full shadow-xs">
-                  <motion.div
-                    className="absolute inset-y-0 w-[80%] bg-linear-to-r from-transparent via-accent to-transparent mix-blend-screen"
-                    style={{ filter: 'blur(3px)' }}
-                    animate={{ x: ['-150%', '150%'] }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: [0.4, 0, 0.2, 1] }}
-                  />
-                  <motion.div
-                    className="absolute inset-y-0 w-[40%] bg-linear-to-r from-transparent via-white/90 to-transparent"
-                    style={{ filter: 'blur(1px)' }}
-                    animate={{ x: ['-250%', '250%'] }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: [0.4, 0, 0.2, 1] }}
-                  />
-                </div>
-              </div>
-
-              <Text
-                variant={TextVariants.small}
-                data-tooltip="NIND Denoise does not yet support GPU acceleration due to dependency limitations."
-                className="mt-6 text-center max-w-xs opacity-60"
-              >
-                This may take a few minutes depending on image size and selected method.
-              </Text>
-            </motion.div>
-          </div>
+        <div className="flex flex-col items-center justify-center py-12 h-[400px]">
+          <Loader2 className="w-16 h-16 text-accent animate-spin mb-4" />
+          <Text variant={TextVariants.title} className="mb-2 text-center">
+            {t('denoise.denoising')}
+          </Text>
+          <Text className="text-center h-6 font-mono w-64 flex justify-center items-center">
+            {progressMessage || t('denoise.initializing')}
+          </Text>
         </div>
       );
     }
 
     return (
-      <div className="flex flex-col items-center justify-center h-[460px]">
-        <div className="flex items-center justify-center mb-6">
-          <Grip className="w-12 h-12 text-accent" />
-        </div>
-        <Text variant={TextVariants.title} className="mb-3 text-center">
-          Denoise Image
-        </Text>
-        <Text className="text-center max-w-md leading-relaxed text-text-secondary">
-          Remove noise from your image using AI-powered or traditional denoising.
+      <div className="flex flex-col items-center justify-center h-[400px] text-text-secondary">
+        <Grip className="w-16 h-16 mb-4" />
+        <Text variant={TextVariants.title} className="mb-2 text-center">
+          {t('denoise.title')}
         </Text>
         <Text className="text-center max-w-sm">{t('denoise.description')}</Text>
       </div>
@@ -423,38 +361,23 @@ export default function DenoiseModal({
     const disabled = isProcessing || isSaving;
 
     return (
-      <div className={`w-full flex items-center gap-4 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="flex-1 flex items-center gap-6">
-          <div className="flex flex-col gap-1 w-[280px] mt-2 shrink-0">
-            <Text variant={TextVariants.body} weight={TextWeights.medium}>
-              Method
-            </Text>
-            <Dropdown
-              options={methodOptions}
-              value={method}
-              onChange={(val) => {
-                setMethod(val);
-                setIntensity(val === 'ai' ? 50 : 15);
-              }}
-            />
-          </div>
-          <div className="flex-1 max-w-[280px]">
-            <Slider
-              label={method === 'ai' ? 'Quality / Tile Size' : 'Strength'}
-              value={intensity}
-              min={0}
-              max={100}
-              step={1}
-              defaultValue={method === 'ai' ? 50 : 15}
-              onChange={(e) => setIntensity(Number(e.target.value))}
-              trackClassName="bg-bg-secondary"
-            />
-          </div>
+      <div className="w-full flex items-center gap-4">
+        <div className={`flex-1 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+          <Slider
+            label={t('denoise.strength')}
+            value={intensity}
+            min={0}
+            max={100}
+            step={1}
+            defaultValue={15}
+            onChange={(e) => setIntensity(Number(e.target.value))}
+            trackClassName="bg-bg-secondary"
+          />
         </div>
 
-        <div className="h-10 w-px bg-surface shrink-0" />
+        <div className="h-8 w-px bg-surface mx-2" />
 
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2">
           <button
             onClick={handleClose}
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors text-sm"
@@ -476,7 +399,7 @@ export default function DenoiseModal({
           {previewBase64 && (
             <Button onClick={handleSave} disabled={isSaving || isProcessing}>
               {isSaving ? <Loader2 className="animate-spin mr-2" size={16} /> : <Save className="mr-2" size={16} />}
-              Save
+              {t('denoise.saveImage')}
             </Button>
           )}
         </div>
@@ -488,22 +411,24 @@ export default function DenoiseModal({
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center z-50 bg-black/40 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${
+      className={`fixed inset-0 flex items-center justify-center z-50 bg-black/30 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${
         show ? 'opacity-100' : 'opacity-0'
       }`}
       onMouseDown={handleBackdropMouseDown}
       onClick={handleBackdropClick}
     >
       <div
-        className={`bg-surface rounded-xl shadow-2xl p-6 w-full max-w-4xl transform transition-all duration-300 ease-out ${
+        className={`bg-surface rounded-lg shadow-xl p-6 w-full max-w-4xl transform transition-all duration-300 ease-out ${
           show ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 -translate-y-4'
         }`}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex flex-col">
           {renderContent()}
-          <div className={`mt-4 flex justify-end gap-3 ${savedPath ? '' : 'pt-4 border-t border-surface/50'}`}>
-            {renderButtons()}
-          </div>
+
+          {!savedPath && <div className="mt-4 pt-4 flex justify-end gap-3">{renderButtons()}</div>}
+          {savedPath && <div className="mt-4 flex justify-end gap-3">{renderButtons()}</div>}
         </div>
       </div>
     </div>

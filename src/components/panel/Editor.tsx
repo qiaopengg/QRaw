@@ -9,7 +9,6 @@ import debounce from 'lodash.debounce';
 import { AnimatePresence } from 'framer-motion';
 import { ImageDimensions, useImageRenderSize } from '../../hooks/useImageRenderSize';
 import { Adjustments, AiPatch, Coord, MaskContainer } from '../../utils/adjustments';
-import { calculateCenteredCrop, getOrientedDimensions } from '../../utils/cropUtils';
 import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas from './editor/ImageCanvas';
 import Waveform from './editor/Waveform';
@@ -59,7 +58,18 @@ interface EditorProps {
   transformedOriginalUrl: string | null;
   uncroppedAdjustedPreviewUrl: string | null;
   updateSubMask(id: string | null, subMask: Partial<SubMask>): void;
-  onDisplaySizeChange?(size: any): void;
+  waveform: WaveformData | null;
+  onDisplaySizeChange?(size: {
+    width: number;
+    height: number;
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    containerWidth: number;
+    containerHeight: number;
+  }): void;
+  onInitialFitScale?(scale: number): void;
+  onZoomChange?(zoomValue: number, fitToWindow?: boolean): void;
   originalSize?: ImageDimensions;
   baseRenderSize?: ImageDimensions;
   isLoadingFullRes?: boolean;
@@ -117,6 +127,7 @@ export default function Editor({
   updateSubMask,
   waveform,
   onDisplaySizeChange,
+  onInitialFitScale,
   originalSize,
   isWbPickerActive = false,
   onWbPicked,
@@ -368,6 +379,12 @@ export default function Editor({
     }
   }, [imageRenderSize, transformState.scale, onDisplaySizeChange]);
 
+  useEffect(() => {
+    if (onInitialFitScale && imageRenderSize.scale > 0) {
+      onInitialFitScale(imageRenderSize.scale);
+    }
+  }, [imageRenderSize.scale, onInitialFitScale]);
+
   const processOverlayQueue = useCallback(async () => {
     if (isGeneratingOverlayRef.current || !pendingOverlayRequestRef.current) return;
 
@@ -509,25 +526,30 @@ export default function Editor({
     const needsRecalc = currentAdjCrop === null || geometryChanged || isDraggingRotation;
 
     if (needsRecalc) {
-      const { width: W, height: H } = getOrientedDimensions(
-        selectedImage.width,
-        selectedImage.height,
-        orientationSteps,
-      );
+      const { width: imgWidth, height: imgHeight } = selectedImage;
+      const isSwapped = orientationSteps === 1 || orientationSteps === 3;
+      const W = isSwapped ? imgHeight : imgWidth;
+      const H = isSwapped ? imgWidth : imgHeight;
       const A = aspectRatio || W / H;
 
       if (isNaN(A) || A <= 0) {
         return;
       }
 
-      const maxPixelCrop = calculateCenteredCrop(
-        selectedImage.width,
-        selectedImage.height,
-        orientationSteps,
-        A,
-        effectiveRotation,
-      );
-      if (!maxPixelCrop) return;
+      const angle = Math.abs(effectiveRotation);
+      const rad = ((angle % 180) * Math.PI) / 180;
+      const sin = Math.sin(rad);
+      const cos = Math.cos(rad);
+
+      const h_c = Math.min(H / (A * sin + cos), W / (A * cos + sin));
+      const w_c = A * h_c;
+
+      const maxPixelCrop = {
+        x: Math.round((W - w_c) / 2),
+        y: Math.round((H - h_c) / 2),
+        width: Math.round(w_c),
+        height: Math.round(h_c),
+      };
 
       if (isDraggingRotation) {
         setCrop({
@@ -773,7 +795,7 @@ export default function Editor({
 
       <div
         className={clsx(
-          'shrink-0',
+          'flex-shrink-0',
           !isInstantTransition && 'transition-all duration-300 ease-in-out',
           isFullScreen ? 'max-h-0 opacity-0 m-0' : 'max-h-[100px] opacity-100',
           toolbarOverflowVisible ? 'overflow-visible' : 'overflow-hidden',

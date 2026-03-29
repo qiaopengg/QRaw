@@ -250,7 +250,7 @@ export interface Option {
   label?: string;
   onClick?(): void;
   onRightClick?(): void;
-  submenu?: any;
+  submenu?: Option[];
   type?: string;
 }
 

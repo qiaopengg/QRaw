@@ -11,7 +11,7 @@ export function useThumbnails() {
   const loadingCountRef = useRef(0);
 
   useEffect(() => {
-    let unlistenComplete: any;
+    let unlistenComplete: (() => void) | undefined;
     const setupListener = async () => {
       unlistenComplete = await listen('thumbnail-generation-complete', () => {
         loadingCountRef.current = Math.max(0, loadingCountRef.current - 1);

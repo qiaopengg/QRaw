@@ -7,8 +7,8 @@ import { platform } from '@tauri-apps/plugin-os';
 import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import debounce from 'lodash.debounce';
+import { ClerkProvider } from '@clerk/clerk-react';
 import { ImageLRUCache, ImageCacheEntry } from './utils/ImageLRUCache';
-import { ClerkProvider } from '@clerk/react';
 import { ToastContainer, toast, Slide } from 'react-toastify';
 import clsx from 'clsx';
 import {
@@ -43,8 +43,8 @@ import {
 } from 'lucide-react';
 import TitleBar from './window/TitleBar';
 import CommunityPage from './components/panel/CommunityPage';
-import MainLibrary, { ColumnWidths } from './components/panel/MainLibrary';
-import FolderTree from './components/panel/FolderTree';
+import MainLibrary from './components/panel/MainLibrary';
+import FolderTree, { FolderTree as FolderTreeType } from './components/panel/FolderTree';
 import Editor from './components/panel/Editor';
 import Controls from './components/panel/right/ControlsPanel';
 import { useThumbnails } from './hooks/useThumbnails';
@@ -88,7 +88,6 @@ import {
   PasteMode,
   CopyPasteSettings,
 } from './utils/adjustments';
-import { calculateCenteredCrop } from './utils/cropUtils';
 import { generatePaletteFromImage } from './utils/palette';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import GlobalTooltip from './components/ui/GlobalTooltip';
@@ -159,7 +158,6 @@ interface PanoramaModalState {
   error: string | null;
   finalImageBase64: string | null;
   isOpen: boolean;
-  isProcessing: boolean;
   progressMessage: string | null;
   stitchingSourcePaths: Array<string>;
 }
@@ -168,7 +166,6 @@ interface HdrModalState {
   error: string | null;
   finalImageBase64: string | null;
   isOpen: boolean;
-  isProcessing: boolean;
   progressMessage: string | null;
   stitchingSourcePaths: Array<string>;
 }
@@ -181,7 +178,6 @@ interface DenoiseModalState {
   error: string | null;
   targetPath: string | null;
   progressMessage: string | null;
-  isRaw: boolean;
 }
 
 interface NegativeConversionModalState {
@@ -227,31 +223,6 @@ const getParentDir = (filePath: string): string => {
     return '';
   }
   return filePath.substring(0, lastSeparatorIndex);
-};
-
-const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[]): any => {
-  if (!node) return null;
-
-  if (node.path === targetPath) {
-    const mergedChildren = newChildren.map((newChild: any) => {
-      const existingChild = node.children?.find((c: any) => c.path === newChild.path);
-      if (existingChild && existingChild.children && existingChild.children.length > 0) {
-        return { ...newChild, children: existingChild.children };
-      }
-      return newChild;
-    });
-
-    return { ...node, children: mergedChildren };
-  }
-
-  if (node.children && node.children.length > 0) {
-    return {
-      ...node,
-      children: node.children.map((child: any) => insertChildrenIntoTree(child, targetPath, newChildren)),
-    };
-  }
-
-  return node;
 };
 
 function App() {
@@ -340,11 +311,13 @@ function App() {
     (ImageDimensions & { offsetX?: number; offsetY?: number; containerWidth?: number; containerHeight?: number }) | null
   >(null);
   const [originalSize, setOriginalSize] = useState<ImageDimensions>({ width: 0, height: 0 });
+  const [_isLoadingFullRes, _setIsLoadingFullRes] = useState(false);
   const [isRotationActive, setIsRotationActive] = useState(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('thirds');
   const [overlayRotation, setOverlayRotation] = useState(0);
   const [transformedOriginalUrl, setTransformedOriginalUrl] = useState<string | null>(null);
   const patchesSentToBackend = useRef<Set<string>>(new Set());
+  const [_initialFitScale, setInitialFitScale] = useState<number | null>(null);
   const imageCacheRef = useRef(new ImageLRUCache(20));
   const isBackendReadyRef = useRef(true);
   const cachedEditStateRef = useRef<ImageCacheEntry | null>(null);
@@ -404,7 +377,6 @@ function App() {
     error: null,
     finalImageBase64: null,
     isOpen: false,
-    isProcessing: false,
     progressMessage: '',
     stitchingSourcePaths: [],
   });
@@ -412,7 +384,6 @@ function App() {
     error: null,
     finalImageBase64: null,
     isOpen: false,
-    isProcessing: false,
     progressMessage: '',
     stitchingSourcePaths: [],
   });
@@ -427,7 +398,6 @@ function App() {
     error: null,
     targetPath: null,
     progressMessage: null,
-    isRaw: false,
   });
   const [cullingModalState, setCullingModalState] = useState<CullingModalState>({
     isOpen: false,
@@ -446,17 +416,10 @@ function App() {
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isMaskControlHovered, setIsMaskControlHovered] = useState(false);
   const [libraryScrollTop, setLibraryScrollTop] = useState<number>(0);
-  const [listColumnWidths, setListColumnWidths] = useState<ColumnWidths>({
-    thumbnail: 4,
-    name: 32,
-    date: 30,
-    rating: 15,
-    color: 15,
-  });
   const { showContextMenu } = useContextMenu();
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
-  const { loading: isThumbnailsLoading, requestThumbnails, clearThumbnailQueue } = useThumbnails();
-  const transformWrapperRef = useRef<any>(null);
+  const { loading: isThumbnailsLoading } = useThumbnails();
+  const transformWrapperRef = useRef<ReactZoomPanPinchRef | null>(null);
   const isProgrammaticZoom = useRef(false);
   const currentResRef = useRef<number>(1280);
   const currentOriginalResRef = useRef<number>(0);
@@ -554,30 +517,6 @@ function App() {
     [debouncedSetHistory],
   );
 
-  const handleRotate = useCallback(
-    (degrees: number) => {
-      const increment = degrees > 0 ? 1 : 3;
-      setAdjustments((prev: Adjustments) => {
-        const newAspectRatio = prev.aspectRatio && prev.aspectRatio !== 0 ? 1 / prev.aspectRatio : null;
-        const newOrientationSteps = ((prev.orientationSteps || 0) + increment) % 4;
-
-        const newCrop =
-          selectedImage?.width && selectedImage?.height
-            ? calculateCenteredCrop(selectedImage.width, selectedImage.height, newOrientationSteps, newAspectRatio)
-            : null;
-
-        return {
-          ...prev,
-          aspectRatio: newAspectRatio,
-          orientationSteps: newOrientationSteps,
-          rotation: 0,
-          crop: newCrop,
-        };
-      });
-    },
-    [setAdjustments, selectedImage],
-  );
-
   const handleStraighten = useCallback(
     (angleCorrection: number) => {
       setAdjustments((prev: Partial<Adjustments>) => {
@@ -586,6 +525,17 @@ function App() {
       });
 
       setIsStraightenActive(false);
+    },
+    [setAdjustments],
+  );
+
+  const handleRotate = useCallback(
+    (degrees: number) => {
+      setAdjustments((prev: Partial<Adjustments>) => ({
+        ...prev,
+        rotation: (prev.rotation || 0) + degrees,
+        crop: null,
+      }));
     },
     [setAdjustments],
   );
@@ -1330,7 +1280,7 @@ function App() {
           containerHeight: size.containerHeight || 0,
         };
         baseRenderSizeRef.current = newSize;
-        setBaseRenderSize(newSize as any);
+        setBaseRenderSize({ width: baseWidth, height: baseHeight });
       }
     },
     [],
@@ -1453,7 +1403,9 @@ function App() {
               const img = new Image();
               img.src = url;
               await img.decode();
-            } catch (_) {}
+            } catch {
+              void 0;
+            }
             if (currentPath !== selectedImagePathRef.current || jobId < latestRenderedJobIdRef.current) {
               URL.revokeObjectURL(url);
               return;
@@ -1664,7 +1616,7 @@ function App() {
               expandedFolders: settings.lastFolderState?.expandedFolders || [],
               showImageCounts: settings.enableFolderImageCounts ?? false,
             });
-            setPinnedFolderTrees(trees);
+            setPinnedFolderTrees(trees as FolderTreeType[]);
           } catch (err) {
             console.error('Failed to load pinned folder trees:', err);
           }
@@ -1824,42 +1776,35 @@ function App() {
     return () => clearTimeout(timer);
   }, [theme]);
 
-  const refreshAllFolderTrees = useCallback(
-    async (currentExpanded?: Set<string>) => {
-      const activeExpanded = currentExpanded || expandedFolders;
-      const expandedArr = Array.from(activeExpanded);
-      const showCounts = appSettings?.enableFolderImageCounts ?? false;
-
-      if (rootPath) {
-        try {
-          const treeData = await invoke(Invokes.GetFolderTree, {
-            path: rootPath,
-            expandedFolders: expandedArr,
-            showImageCounts: showCounts,
-          });
-          setFolderTree(treeData);
-        } catch (err) {
-          console.error('Failed to refresh main folder tree:', err);
-          setError(`Failed to refresh folder tree: ${err}.`);
-        }
+  const refreshAllFolderTrees = useCallback(async () => {
+    if (rootPath) {
+      try {
+        const treeData = await invoke(Invokes.GetFolderTree, {
+          path: rootPath,
+          expandedFolders: Array.from(expandedFolders),
+          showImageCounts: appSettings?.enableFolderImageCounts ?? false,
+        });
+        setFolderTree(treeData as FolderTreeType);
+      } catch (err) {
+        console.error('Failed to refresh main folder tree:', err);
+        setError(`Failed to refresh folder tree: ${err}.`);
       }
+    }
 
-      const currentPins = appSettings?.pinnedFolders || [];
-      if (currentPins.length > 0) {
-        try {
-          const trees = await invoke(Invokes.GetPinnedFolderTrees, {
-            paths: currentPins,
-            expandedFolders: expandedArr,
-            showImageCounts: showCounts,
-          });
-          setPinnedFolderTrees(trees);
-        } catch (err) {
-          console.error('Failed to refresh pinned folder trees:', err);
-        }
+    const currentPins = appSettings?.pinnedFolders || [];
+    if (currentPins.length > 0) {
+      try {
+        const trees = await invoke(Invokes.GetPinnedFolderTrees, {
+          paths: currentPins,
+          expandedFolders: Array.from(expandedFolders),
+          showImageCounts: appSettings?.enableFolderImageCounts ?? false,
+        });
+        setPinnedFolderTrees(trees as FolderTreeType[]);
+      } catch (err) {
+        console.error('Failed to refresh pinned folder trees:', err);
       }
-    },
-    [rootPath, appSettings?.pinnedFolders, appSettings?.enableFolderImageCounts, expandedFolders],
-  );
+    }
+  }, [rootPath, expandedFolders, appSettings?.pinnedFolders, appSettings?.enableFolderImageCounts]);
 
   const pinnedFolders = useMemo(() => appSettings?.pinnedFolders || [], [appSettings]);
 
@@ -1879,13 +1824,17 @@ function App() {
       handleSettingsChange({ ...appSettings, pinnedFolders: newPins });
 
       try {
-        const trees = await invoke(Invokes.GetPinnedFolderTrees, { paths: newPins });
+        const trees = await invoke(Invokes.GetPinnedFolderTrees, {
+          paths: newPins,
+          expandedFolders: Array.from(expandedFolders),
+          showImageCounts: appSettings?.enableFolderImageCounts ?? false,
+        });
         setPinnedFolderTrees(trees as FolderTreeType[]);
       } catch (err) {
         console.error('Failed to refresh pinned folders:', err);
       }
     },
-    [appSettings, handleSettingsChange],
+    [appSettings, expandedFolders, handleSettingsChange],
   );
 
   const handleActiveTreeSectionChange = (section: string | null) => {
@@ -1898,7 +1847,6 @@ function App() {
   const handleSelectSubfolder = useCallback(
     async (path: string | null, isNewRoot = false, preloadedImages?: ImageFile[]) => {
       await invoke('cancel_thumbnail_generation');
-      clearThumbnailQueue();
       setIsViewLoading(true);
       setSearchCriteria({ tags: [], text: '', mode: 'OR' });
       setLibraryScrollTop(0);
@@ -1946,10 +1894,10 @@ function App() {
           try {
             const treeData = await invoke(Invokes.GetFolderTree, {
               path,
-              expandedFolders: [path],
+              expandedFolders: Array.from(expandedFolders),
               showImageCounts: appSettings?.enableFolderImageCounts ?? false,
             });
-            setFolderTree(treeData);
+            setFolderTree(treeData as FolderTreeType);
           } catch (err) {
             console.error('Failed to load folder tree:', err);
             setError(`Failed to load folder tree: ${err}. Some sub-folders might be inaccessible.`);
@@ -2092,36 +2040,17 @@ function App() {
     }
   }, [currentFolderPath, sortCriteria.key, appSettings?.enableExifReading, libraryViewMode]);
 
-  const handleToggleFolder = useCallback(
-    async (path: string) => {
-      const isExpanding = !expandedFolders.has(path);
-      setExpandedFolders((prev) => {
-        const newSet = new Set(prev);
-        if (isExpanding) {
-          newSet.add(path);
-        } else {
-          newSet.delete(path);
-        }
-        return newSet;
-      });
-      if (!isExpanding) return;
-      try {
-        const showCounts = appSettings?.enableFolderImageCounts ?? false;
-        const newChildren: any[] = await invoke(Invokes.GetFolderChildren, {
-          path,
-          showImageCounts: showCounts,
-        });
-        setFolderTree((prevTree: any) => insertChildrenIntoTree(prevTree, path, newChildren));
-        setPinnedFolderTrees((prevTrees: any[]) =>
-          prevTrees.map((tree) => insertChildrenIntoTree(tree, path, newChildren)),
-        );
-      } catch (err) {
-        console.error('Failed to fetch folder children:', err);
-        setError(`Failed to load folder: ${err}`);
+  const handleToggleFolder = useCallback((path: string) => {
+    setExpandedFolders((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(path)) {
+        newSet.delete(path);
+      } else {
+        newSet.add(path);
       }
-    },
-    [expandedFolders, appSettings?.enableFolderImageCounts],
-  );
+      return newSet;
+    });
+  }, []);
 
   useEffect(() => {
     if (isInitialMount.current || !appSettings || !rootPath) {
@@ -2213,7 +2142,7 @@ function App() {
         resetAdjustmentsHistory(cached.adjustments);
         prevAdjustmentsRef.current = { path, adjustments: cached.adjustments };
 
-        setHistogram(cached.histogram);
+        setHistogram(cached.histogram as ChannelConfig | null);
         setWaveform(cached.waveform);
         setFinalPreviewUrl(cached.finalPreviewUrl);
         setUncroppedAdjustedPreviewUrl(cached.uncroppedPreviewUrl);
@@ -2224,13 +2153,14 @@ function App() {
         currentResRef.current = Infinity;
 
         invoke('load_image', { path })
-          .then((_result: any) => {
+          .then((result) => {
+            const _result = result as { width: number; height: number };
             if (selectedImagePathRef.current !== path) return;
             isBackendReadyRef.current = true;
             currentResRef.current = 0;
             setOriginalSize({ width: _result.width, height: _result.height });
           })
-          .catch((err: any) => {
+          .catch((err: unknown) => {
             if (String(err).includes('cancelled')) return;
             console.error('Background load_image failed on cache hit:', err);
             isBackendReadyRef.current = true;
@@ -2238,7 +2168,8 @@ function App() {
           });
 
         invoke(Invokes.LoadMetadata, { path })
-          .then((metadata: any) => {
+          .then((rawMetadata) => {
+            const metadata = rawMetadata as { adjustments?: Adjustments & { is_null?: boolean } };
             if (selectedImagePathRef.current !== path) return;
             let freshAdjustments: Adjustments;
             if (metadata.adjustments && !metadata.adjustments.is_null) {
@@ -2275,6 +2206,7 @@ function App() {
       setPreviewSize({ width: 0, height: 0 });
       setIsViewLoading(true);
       setHistogram(null);
+      setFinalPreviewUrl(null);
       setWaveform(null);
       setUncroppedAdjustedPreviewUrl(null);
 
@@ -2986,8 +2918,8 @@ function App() {
     handlePasteAdjustments,
     handlePasteFiles,
     handleRate,
-    handleRightPanelSelect,
     handleRotate,
+    handleRightPanelSelect,
     handleSetColorLabel,
     handleToggleFullScreen,
     handleZoomChange,
@@ -3023,9 +2955,14 @@ function App() {
           setUncroppedAdjustedPreviewUrl(event.payload);
         }
       }),
-      listen('histogram-update', (event: any) => {
-        if (isEffectActive && event.payload.path === selectedImagePathRef.current) {
-          setHistogram(event.payload.data);
+      listen('histogram-update', (event: { payload: unknown }) => {
+        if (!isEffectActive) return;
+        const payload = event.payload;
+        if (payload && typeof payload === 'object' && 'path' in payload) {
+          const wrapped = payload as { path?: string; data?: ChannelConfig };
+          if (wrapped.path && wrapped.path !== selectedImagePathRef.current) return;
+          setHistogram(wrapped.data ?? null);
+          return;
         }
         setHistogram((payload as ChannelConfig) ?? null);
       }),
@@ -3034,9 +2971,14 @@ function App() {
           setInitialFileToOpen(event.payload as string);
         }
       }),
-      listen('waveform-update', (event: any) => {
-        if (isEffectActive && event.payload.path === selectedImagePathRef.current) {
-          setWaveform(event.payload.data);
+      listen('waveform-update', (event: { payload: unknown }) => {
+        if (!isEffectActive) return;
+        const payload = event.payload;
+        if (payload && typeof payload === 'object' && 'path' in payload) {
+          const wrapped = payload as { path?: string; data?: WaveformData };
+          if (wrapped.path && wrapped.path !== selectedImagePathRef.current) return;
+          setWaveform(wrapped.data ?? null);
+          return;
         }
         setWaveform((payload as WaveformData) ?? null);
       }),
@@ -3237,13 +3179,13 @@ function App() {
 
     const unlistenProgress = listen<string>('panorama-progress', (event) => {
       if (isEffectActive) {
-        setPanoramaModalState((prev: PanoramaModalState) => {
-          if (prev.finalImageBase64 || prev.error) return prev;
-          return {
-            ...prev,
-            progressMessage: event.payload,
-          };
-        });
+        setPanoramaModalState((prev: PanoramaModalState) => ({
+          ...prev,
+          error: null,
+          finalImageBase64: null,
+          isOpen: true,
+          progressMessage: event.payload,
+        }));
       }
     });
 
@@ -3254,8 +3196,7 @@ function App() {
           ...prev,
           error: null,
           finalImageBase64: base64,
-          isProcessing: false,
-          progressMessage: null,
+          progressMessage: t('app.panoramaReady'),
         }));
       }
     });
@@ -3266,8 +3207,7 @@ function App() {
           ...prev,
           error: String(event.payload),
           finalImageBase64: null,
-          isProcessing: false,
-          progressMessage: null,
+          progressMessage: t('app.anErrorOccurred'),
         }));
       }
     });
@@ -3302,8 +3242,7 @@ function App() {
           ...prev,
           error: null,
           finalImageBase64: base64,
-          isProcessing: false,
-          progressMessage: 'Hdr Ready',
+          progressMessage: t('app.hdrReady'),
         }));
       }
     });
@@ -3314,8 +3253,7 @@ function App() {
           ...prev,
           error: String(event.payload),
           finalImageBase64: null,
-          isProcessing: false,
-          progressMessage: 'An error occurred.',
+          progressMessage: t('app.anErrorOccurred'),
         }));
       }
     });
@@ -3370,23 +3308,6 @@ function App() {
     };
   }, []);
 
-  const handleStartPanorama = (paths: string[]) => {
-    setPanoramaModalState((prev: PanoramaModalState) => ({
-      ...prev,
-      isProcessing: true,
-      error: null,
-      finalImageBase64: null,
-      progressMessage: 'Starting panorama process...',
-    }));
-    invoke(Invokes.StitchPanorama, { paths }).catch((err) => {
-      setPanoramaModalState((prev: PanoramaModalState) => ({
-        ...prev,
-        isProcessing: false,
-        error: String(err),
-      }));
-    });
-  };
-
   const handleSavePanorama = async (): Promise<string> => {
     if (panoramaModalState.stitchingSourcePaths.length === 0) {
       const err = 'Source paths for panorama not found.';
@@ -3405,23 +3326,6 @@ function App() {
       setPanoramaModalState((prev: PanoramaModalState) => ({ ...prev, error: String(err) }));
       throw err;
     }
-  };
-
-  const handleStartHdr = (paths: string[]) => {
-    setHdrModalState((prev: HdrModalState) => ({
-      ...prev,
-      isProcessing: true,
-      error: null,
-      finalImageBase64: null,
-      progressMessage: 'Starting HDR process...',
-    }));
-    invoke(Invokes.MergeHdr, { paths }).catch((err) => {
-      setHdrModalState((prev: HdrModalState) => ({
-        ...prev,
-        isProcessing: false,
-        error: String(err),
-      }));
-    });
   };
 
   const handleSaveHdr = async (): Promise<string> => {
@@ -3445,7 +3349,7 @@ function App() {
   };
 
   const handleApplyDenoise = useCallback(
-    async (intensity: number, method: 'ai' | 'bm3d') => {
+    async (intensity: number) => {
       if (!denoiseModalState.targetPath) return;
 
       setDenoiseModalState((prev) => ({
@@ -3459,7 +3363,6 @@ function App() {
         await invoke(Invokes.ApplyDenoising, {
           path: denoiseModalState.targetPath,
           intensity: intensity,
-          method: method,
         });
       } catch (err) {
         setDenoiseModalState((prev) => ({
@@ -3554,12 +3457,9 @@ function App() {
           treeData = await preloadedDataRef.current.tree;
           console.log('Preload cache hit for folder tree.');
         } else {
-          const expandedArr = folderState?.expandedFolders
-            ? Array.from(new Set([...folderState.expandedFolders, root]))
-            : [root];
           treeData = await invoke(Invokes.GetFolderTree, {
             path: root,
-            expandedFolders: expandedArr,
+            expandedFolders: folderState?.expandedFolders || [root],
             showImageCounts: appSettings?.enableFolderImageCounts ?? false,
           });
         }
@@ -4039,7 +3939,12 @@ function App() {
             disabled: !selectedImage?.isReady,
           },
           {
-            label: 'Denoise Image',
+            icon: CopyPlus,
+            label: t('app.createVirtualCopy'),
+            onClick: () => handleCreateVirtualCopy(selectedImage.path),
+          },
+          {
+            label: t('app.denoise'),
             icon: Grip,
             onClick: () => {
               setDenoiseModalState({
@@ -4049,7 +3954,6 @@ function App() {
                 error: null,
                 targetPath: selectedImage.path,
                 progressMessage: null,
-                isRaw: selectedImage?.isRaw,
               });
             },
           },
@@ -4297,11 +4201,9 @@ function App() {
         if (selectedImage.path !== path) {
           handleImageSelect(path);
         }
-        setMultiSelectedPaths(finalSelection);
         setRenderedRightPanel(Panel.Export);
         setActiveRightPanel(Panel.Export);
       } else {
-        setMultiSelectedPaths(finalSelection);
         setIsLibraryExportPanelVisible(true);
       }
     };
@@ -4371,7 +4273,13 @@ function App() {
             onClick: handleApplyAutoAdjustmentsToSelection,
           },
           {
-            label: 'Denoise Image',
+            disabled: !isSingleSelection,
+            icon: CopyPlus,
+            label: t('app.createVirtualCopy'),
+            onClick: () => handleCreateVirtualCopy(finalSelection[0]),
+          },
+          {
+            label: t('app.denoise'),
             icon: Grip,
             disabled: !isSingleSelection,
             onClick: () => {
@@ -4382,7 +4290,6 @@ function App() {
                 error: null,
                 targetPath: finalSelection[0],
                 progressMessage: null,
-                isRaw: selectedImage?.isRaw || false,
               });
             },
           },
@@ -4406,9 +4313,16 @@ function App() {
                 error: null,
                 finalImageBase64: null,
                 isOpen: true,
-                isProcessing: false,
-                progressMessage: null,
+                progressMessage: t('app.startingPanorama'),
                 stitchingSourcePaths: finalSelection,
+              });
+              invoke(Invokes.StitchPanorama, { paths: finalSelection }).catch((err) => {
+                setPanoramaModalState((prev: PanoramaModalState) => ({
+                  ...prev,
+                  error: String(err),
+                  isOpen: true,
+                  progressMessage: t('app.failedToStart'),
+                }));
               });
             },
           },
@@ -4421,9 +4335,16 @@ function App() {
                 error: null,
                 finalImageBase64: null,
                 isOpen: true,
-                isProcessing: false,
-                progressMessage: null,
+                progressMessage: t('app.startingHdr'),
                 stitchingSourcePaths: finalSelection,
+              });
+              invoke(Invokes.MergeHdr, { paths: finalSelection }).catch((err) => {
+                setHdrModalState((prev: HdrModalState) => ({
+                  ...prev,
+                  error: String(err),
+                  isOpen: true,
+                  progressMessage: t('app.failedToStart'),
+                }));
               });
             },
           },
@@ -4464,29 +4385,18 @@ function App() {
         },
       },
       {
-        icon: CopyPlus,
-        label: 'Duplicate Image',
         disabled: !isSingleSelection,
-        submenu: [
-          {
-            label: 'Physical Copy',
-            icon: Copy,
-            onClick: async () => {
-              try {
-                await invoke(Invokes.DuplicateFile, { path: finalSelection[0] });
-                await refreshImageList();
-              } catch (err) {
-                console.error('Failed to duplicate file:', err);
-                setError(`Failed to duplicate file: ${err}`);
-              }
-            },
-          },
-          {
-            label: 'Virtual Copy',
-            icon: CopyPlus,
-            onClick: () => handleCreateVirtualCopy(finalSelection[0]),
-          },
-        ],
+        icon: CopyPlus,
+        label: t('app.duplicateImage'),
+        onClick: async () => {
+          try {
+            await invoke(Invokes.DuplicateFile, { path: finalSelection[0] });
+            await refreshImageList();
+          } catch (err) {
+            console.error('Failed to duplicate file:', err);
+            setError(`Failed to duplicate file: ${err}`);
+          }
+        },
       },
       { icon: FileEdit, label: renameLabel, onClick: () => handleRenameFiles(finalSelection) },
       { type: OPTION_SEPARATOR },
@@ -4769,7 +4679,7 @@ function App() {
       rootPath && (
         <div
           className={clsx(
-            'flex h-full overflow-hidden shrink-0',
+            'flex h-full overflow-hidden flex-shrink-0',
             !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
           )}
           style={{
@@ -4818,13 +4728,12 @@ function App() {
       copiedFilePaths,
       isFullScreen,
       isInstantTransition,
-      appSettings?.enableFolderImageCounts,
     ],
   );
 
   const memoizedLibraryView = useMemo(
     () => (
-      <div className="flex flex-row grow h-full min-h-0">
+      <div className="flex flex-row flex-grow h-full min-h-0">
         <div className="flex-1 flex flex-col min-w-0 gap-2">
           {activeView === 'community' ? (
             <CommunityPage
@@ -4863,7 +4772,6 @@ function App() {
               onSettingsChange={handleSettingsChange}
               onThumbnailAspectRatioChange={setThumbnailAspectRatio}
               onThumbnailSizeChange={setThumbnailSize}
-              onRequestThumbnails={requestThumbnails}
               rootPath={rootPath}
               searchCriteria={searchCriteria}
               setFilterCriteria={setFilterCriteria}
@@ -4877,8 +4785,6 @@ function App() {
               thumbnails={thumbnails}
               thumbnailSize={thumbnailSize}
               onNavigateToCommunity={() => setActiveView('community')}
-              listColumnWidths={listColumnWidths}
-              setListColumnWidths={setListColumnWidths}
             />
           )}
           {rootPath && (
@@ -4937,7 +4843,6 @@ function App() {
       libraryActiveAdjustments,
       supportedTypes,
       copiedFilePaths,
-      listColumnWidths,
     ],
   );
 
@@ -4961,7 +4866,7 @@ function App() {
 
     if (selectedImage) {
       return (
-        <div className="flex flex-row grow h-full min-h-0">
+        <div className="flex flex-row flex-grow h-full min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
             <Editor
               activeAiPatchContainerId={activeAiPatchContainerId}
@@ -5008,6 +4913,8 @@ function App() {
               updateSubMask={updateSubMask}
               waveform={waveform}
               onDisplaySizeChange={handleDisplaySizeChange}
+              onInitialFitScale={setInitialFitScale}
+              onZoomChange={handleZoomChange}
               originalSize={originalSize}
               isRotationActive={isRotationActive}
               overlayMode={overlayMode}
@@ -5020,7 +4927,7 @@ function App() {
             />
             <div
               className={clsx(
-                'flex flex-col w-full overflow-hidden shrink-0',
+                'flex flex-col w-full overflow-hidden flex-shrink-0',
                 !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
               )}
               style={{
@@ -5055,7 +4962,6 @@ function App() {
                 onImageSelect={handleImageClick}
                 onPaste={() => handlePasteAdjustments()}
                 onRate={handleRate}
-                onRequestThumbnails={requestThumbnails}
                 onZoomChange={handleZoomChange}
                 rating={adjustments.rating || 0}
                 selectedImage={selectedImage}
@@ -5072,7 +4978,7 @@ function App() {
 
           <div
             className={clsx(
-              'flex h-full overflow-hidden shrink-0',
+              'flex h-full overflow-hidden flex-shrink-0',
               !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
             )}
             style={{
@@ -5271,7 +5177,7 @@ function App() {
     >
       <div
         className={clsx(
-          'shrink-0 overflow-hidden z-50',
+          'flex-shrink-0 overflow-hidden z-50',
           !isInstantTransition && 'transition-all duration-300 ease-in-out',
           isFullScreen ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[60px] opacity-100',
         )}
@@ -5288,7 +5194,7 @@ function App() {
           ],
         )}
       >
-        <div className="flex flex-row grow h-full min-h-0">
+        <div className="flex flex-row flex-grow h-full min-h-0">
           {memoizedFolderTree}
           <div className="flex-1 flex flex-col min-w-0">{renderContent()}</div>
           {!selectedImage && isLibraryExportPanelVisible && (
@@ -5299,7 +5205,7 @@ function App() {
           )}
           <div
             className={clsx(
-              'shrink-0 overflow-hidden',
+              'flex-shrink-0 overflow-hidden',
               !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
             )}
             style={{ width: isLibraryExportPanelVisible && !isFullScreen ? `${rightPanelWidth}px` : '0px' }}
@@ -5328,48 +5234,29 @@ function App() {
       <PanoramaModal
         error={panoramaModalState.error}
         finalImageBase64={panoramaModalState.finalImageBase64}
-        imageCount={panoramaModalState.stitchingSourcePaths.length}
         isOpen={panoramaModalState.isOpen}
-        isProcessing={panoramaModalState.isProcessing}
-        loadingImageUrl={
-          panoramaModalState.stitchingSourcePaths.length > 0
-            ? thumbnails[
-                panoramaModalState.stitchingSourcePaths[Math.floor(panoramaModalState.stitchingSourcePaths.length / 2)]
-              ] || null
-            : null
-        }
         onClose={() =>
           setPanoramaModalState({
             isOpen: false,
-            isProcessing: false,
             progressMessage: '',
             finalImageBase64: null,
             error: null,
             stitchingSourcePaths: [],
           })
         }
-        onOpenFile={(path: string) => handleImageSelect(path)}
+        onOpenFile={(path: string) => {
+          handleImageSelect(path);
+        }}
         onSave={handleSavePanorama}
-        onStitch={() => handleStartPanorama(panoramaModalState.stitchingSourcePaths)}
         progressMessage={panoramaModalState.progressMessage}
       />
       <HdrModal
         error={hdrModalState.error}
         finalImageBase64={hdrModalState.finalImageBase64}
-        imageCount={hdrModalState.stitchingSourcePaths.length}
         isOpen={hdrModalState.isOpen}
-        isProcessing={hdrModalState.isProcessing}
-        loadingImageUrl={
-          hdrModalState.stitchingSourcePaths.length > 0
-            ? thumbnails[
-                hdrModalState.stitchingSourcePaths[Math.floor(hdrModalState.stitchingSourcePaths.length / 2)]
-              ] || null
-            : null
-        }
         onClose={() =>
           setHdrModalState({
             isOpen: false,
-            isProcessing: false,
             progressMessage: '',
             finalImageBase64: null,
             error: null,
@@ -5380,7 +5267,6 @@ function App() {
           handleImageSelect(path);
         }}
         onSave={handleSaveHdr}
-        onMerge={() => handleStartHdr(hdrModalState.stitchingSourcePaths)}
         progressMessage={hdrModalState.progressMessage}
       />
       <NegativeConversionModal
@@ -5406,13 +5292,6 @@ function App() {
         isProcessing={denoiseModalState.isProcessing}
         error={denoiseModalState.error}
         progressMessage={denoiseModalState.progressMessage}
-        isRaw={denoiseModalState.isRaw}
-        loadingImageUrl={
-          denoiseModalState.targetPath
-            ? thumbnails[denoiseModalState.targetPath] ||
-              (selectedImage?.path === denoiseModalState.targetPath ? finalPreviewUrl : null)
-            : null
-        }
       />
       <CreateFolderModal
         isOpen={isCreateFolderModalOpen}
@@ -5484,7 +5363,7 @@ function App() {
         toastClassName={() =>
           clsx(
             'relative flex min-h-16 p-4 rounded-lg justify-between overflow-hidden cursor-pointer mb-4',
-            'bg-surface! text-text-primary! border! border-border-color! shadow-2xl! max-w-[420px]!',
+            '!bg-surface !text-text-primary !border !border-border-color !shadow-2xl !max-w-[420px]',
           )
         }
       />

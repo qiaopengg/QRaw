@@ -78,7 +78,7 @@ export default function CreateFolderModal({ isOpen, onClose, onSave }: FolderMod
         <input
           autoFocus
           className="w-full bg-bg-primary text-text-primary border border-border rounded-md px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-accent"
-          onChange={(e: any) => setName(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('modals.enterFolderName')}
           type="text"

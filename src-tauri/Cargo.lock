@@ -24,6 +24,8 @@ dependencies = [
  "image_hasher",
  "imageproc",
  "io",
+ "jxl-encoder",
+ "jxl-oxide",
  "kamadak-exif",
  "libc",
  "little_exif",
@@ -64,6 +66,7 @@ dependencies = [
  "trash",
  "uuid",
  "walkdir",
+ "webp",
  "wgpu",
 ]
 
@@ -198,12 +201,33 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "archmage"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61bd463aee29794a0318115ab857c2486842b28956c3f75365b304f1047b4758"
+dependencies = [
+ "archmage-macros 0.7.0",
+ "safe_unaligned_simd",
+]
+
+[[package]]
+name = "archmage"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fd400bfe079970d495bda0865afa8e3ba6f1604812f003c1ddcedc4d7a55a7e"
 dependencies = [
- "archmage-macros",
+ "archmage-macros 0.9.5",
  "safe_unaligned_simd",
+]
+
+[[package]]
+name = "archmage-macros"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02b01e2d131ffadba47bdff5d5e1d5d8a3b9743dc6b3d6ce4847ae2d6d306058"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -671,6 +695,22 @@ name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
+
+[[package]]
+name = "butteraugli"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60d2d63e05316513a1385e0e3f680d24abb22d46c1eca4b20da9265f5d5d893c"
+dependencies = [
+ "archmage 0.7.0",
+ "imgref",
+ "magetypes",
+ "multiversed",
+ "multiversion",
+ "rgb",
+ "simd_aligned",
+ "wide 0.7.33",
+]
 
 [[package]]
 name = "byte-slice-cast"
@@ -1572,6 +1612,12 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
+
+[[package]]
+name = "enough"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65641ff0923e45cf34a4cb0115080cb7fc8bf4fd419c2207670d5722bab4c581"
 
 [[package]]
 name = "enum-iterator"
@@ -3370,6 +3416,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl-encoder"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0925f41cdcc51570d14d058ae45e17f2ed08a852e82cc7708adaa7489e3b6e8f"
+dependencies = [
+ "archmage 0.7.0",
+ "butteraugli",
+ "bytemuck",
+ "enough",
+ "hashbrown 0.16.1",
+ "imgref",
+ "jxl-encoder-simd",
+ "once_cell",
+ "rgb",
+ "thiserror 2.0.18",
+ "whereat",
+]
+
+[[package]]
+name = "jxl-encoder-simd"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79f4e84d9956c1ffe6bc7cdc1718f14faaf922f560403aba178d630af2e39c8e"
+dependencies = [
+ "archmage 0.7.0",
+ "magetypes",
+]
+
+[[package]]
 name = "jxl-frame"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3446,6 +3521,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee8ecd2678ed70c1eda42b811ccb2e25ab836edeb18e7f1178c1f917ed36b772"
 dependencies = [
  "brotli-decompressor",
+ "bytemuck",
+ "image",
  "jxl-bitstream",
  "jxl-color",
  "jxl-frame",
@@ -3702,6 +3779,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libwebp-sys"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54cd30df7c7165ce74a456e4ca9732c603e8dc5e60784558c1c6dc047f876733"
+dependencies = [
+ "cc",
+ "glob",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3784,6 +3871,15 @@ name = "macro_rules_attribute-proc_macro"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
+
+[[package]]
+name = "magetypes"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d55dd4e83507ff9fe129b01669adca1e302ef346dac252ef59139c78def312a"
+dependencies = [
+ "archmage 0.7.0",
+]
 
 [[package]]
 name = "malloc_buf"
@@ -3991,7 +4087,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5137d0ba204fc9ccc0ff4c49fee2087688b1df947233fa08f0326eb482edb532"
 dependencies = [
- "archmage",
+ "archmage 0.9.5",
  "bytemuck",
  "imgref",
  "rgb",
@@ -4019,6 +4115,17 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "multiversed"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dabf9b113e96ba60fa3958fdaf4aba3d8ed9f9b67c14fbcb1b0e99708715ca8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -5422,7 +5529,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6021,7 +6128,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6586,6 +6693,15 @@ name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+
+[[package]]
+name = "simd_aligned"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43bb409d114ccef278270a2ccde8fc8ee444d1863e6419c4c75aab6525c1b8cc"
+dependencies = [
+ "wide 0.7.33",
+]
 
 [[package]]
 name = "simd_helpers"
@@ -8353,6 +8469,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "webp"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c071456adef4aca59bf6a583c46b90ff5eb0b4f758fc347cea81290288f37ce1"
+dependencies = [
+ "image",
+ "libwebp-sys",
+]
+
+[[package]]
 name = "webpki-root-certs"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8552,6 +8678,12 @@ dependencies = [
  "log",
  "web-sys",
 ]
+
+[[package]]
+name = "whereat"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab90f361db038ba3135da12c938c328fb43a012992101879e3d6ebccb4d7eba8"
 
 [[package]]
 name = "wide"

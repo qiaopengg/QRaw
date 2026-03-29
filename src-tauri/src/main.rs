@@ -84,7 +84,7 @@ use crate::image_processing::{
     get_all_adjustments_from_json, get_or_init_gpu_context, process_and_get_dynamic_image,
     warp_image_geometry,
 };
-use crate::lut_processing::Lut;
+use crate::lut_processing::{Lut, convert_image_to_cube_lut, generate_identity_lut_image};
 use crate::mask_generation::{AiPatchDefinition, MaskDefinition, generate_mask_bitmap};
 use tagging_utils::{candidates, hierarchy};
 
@@ -1032,6 +1032,8 @@ fn process_preview_job(
     let new_transform_hash = calculate_transform_hash(&adjustments_clone);
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
     let hq_live = settings.enable_high_quality_live_previews.unwrap_or(false);
+    let compute_waveform = settings.is_waveform_visible.unwrap_or(false);
+    let channel_filter = settings.active_waveform_channel.clone();
 
     let default_preview_dim = settings.editor_preview_resolution.unwrap_or(1920);
     let preview_dim = target_resolution.unwrap_or(default_preview_dim);
@@ -1190,7 +1192,7 @@ fn process_preview_job(
         if !(is_interactive && pixel_roi.is_some()) {
             let analytics_job = AnalyticsJob {
                 path: loaded_image.path.clone(),
-                image: Arc::clone(&final_processed_image),
+                image: Arc::new(final_processed_image.clone()),
                 compute_waveform,
                 active_waveform_channel: channel_filter,
             };
@@ -4569,19 +4571,13 @@ fn main() {
                         state.y = position.y;
                     }
 
-                        if let Ok(position) = window_for_handler.outer_position() {
-                            state.x = position.x;
-                            state.y = position.y;
-                        }
-
-                        if !maximized && !fullscreen
-                            && let Ok(size) = window_for_handler.outer_size()
-                                && size.width >= 200 && size.height >= 150 {
-                                    state.width = size.width;
-                                    state.height = size.height;
-                                }
-
-                        *pending_state_for_handler.lock().unwrap() = Some(state);
+                    if !maximized && !fullscreen
+                        && let Ok(size) = window_for_handler.outer_size()
+                        && size.width >= 200
+                        && size.height >= 150
+                    {
+                        state.width = size.width;
+                        state.height = size.height;
                     }
 
                     *pending_state_for_handler.lock().unwrap() = Some(state);

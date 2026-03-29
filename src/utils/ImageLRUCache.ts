@@ -1,12 +1,13 @@
 import type { Adjustments } from './adjustments';
+import type { SelectedImage, WaveformData } from '../components/ui/AppProperties';
 
 export interface ImageCacheEntry {
   adjustments: Adjustments;
-  histogram: any;
-  waveform: any;
+  histogram: unknown;
+  waveform: WaveformData | null;
   finalPreviewUrl: string | null;
   uncroppedPreviewUrl: string | null;
-  selectedImage: any;
+  selectedImage: SelectedImage | null;
   originalSize: { width: number; height: number };
   previewSize: { width: number; height: number };
 }

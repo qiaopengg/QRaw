@@ -22,7 +22,7 @@ interface InputProps {
  * @param {string} type - The type of the input (e.g., 'text', 'password', 'email').
  * @param {object} props - Other standard input props (value, onChange, placeholder, etc.).
  */
-const Input = React.forwardRef(({ className, type = 'text', ...props }: InputProps, ref: any) => {
+const Input = React.forwardRef<HTMLInputElement, InputProps>(({ className, type = 'text', ...props }, ref) => {
   return (
     <input
       className={clsx(
