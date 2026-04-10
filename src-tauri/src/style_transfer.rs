@@ -2785,8 +2785,8 @@ fn generate_matched_curves(
             prev_y = monotonic_y;
 
             points.push(serde_json::json!({
-                "x": x_val as f64 / 255.0,
-                "y": monotonic_y / 255.0
+                "x": x_val as f64,
+                "y": monotonic_y
             }));
         }
         curves.insert(ch_name.to_string(), serde_json::json!(points));
