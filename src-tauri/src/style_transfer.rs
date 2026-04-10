@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
-use tauri::Emitter;
 
 const EARLY_EXIT_STYLE_DISTANCE_THRESHOLD: f64 = 0.22;
 const LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD: f64 = 0.68;
@@ -404,7 +403,37 @@ fn run_algorithm_pipeline(
             }
         }
     }
-    AlgorithmPipelineResult {
+    
+    if let Some(lut_data) = generate_3d_lut_with_ot_tps(&ctx.cur_img, &ctx.ref_img, 17) {
+        adjustments.push(StyleTransferSuggestion {
+            key: "lutSize".to_string(),
+            value: 17.0,
+            complex_value: None,
+            label: "LUT Size".to_string(),
+            min: 0.0,
+            max: 64.0,
+            reason: "".to_string(),
+        });
+        adjustments.push(StyleTransferSuggestion {
+            key: "lutData".to_string(),
+            value: 1.0,
+            complex_value: Some(serde_json::json!(lut_data)),
+            label: "AI 色彩映射 (3D LUT)".to_string(),
+            min: 0.0,
+            max: 1.0,
+            reason: "基于最优传输算法和薄板样条插值(TPS)生成的 3D 色彩查找表，用于精准匹配参考图的非线性色彩风格".to_string(),
+        });
+        adjustments.push(StyleTransferSuggestion {
+            key: "lutIntensity".to_string(),
+            value: 100.0,
+            complex_value: None,
+            label: "LUT Intensity".to_string(),
+            min: 0.0,
+            max: 100.0,
+            reason: "".to_string(),
+        });
+    }
+AlgorithmPipelineResult {
         adjustments,
         style_debug,
     }
@@ -3734,4 +3763,82 @@ mod tests {
         assert!(feat_white.waveform_low_band <= feat_white.waveform_mid_band);
         assert!(feat_white.waveform_mid_band <= feat_white.waveform_high_band);
     }
+}
+
+use crate::color_matching::{kmeans_plus_plus, sinkhorn_ot, TPS, rgb_to_lab, lab_to_rgb};
+use nalgebra::{DMatrix, DVector, Vector3};
+
+fn extract_lab_pixels_downsampled(img: &image::DynamicImage) -> Vec<Vector3<f64>> {
+    use image::GenericImageView;
+    let (width, height) = img.dimensions();
+    let step = (width * height / 5000).max(1);
+    let mut pixels = Vec::new();
+    
+    for (i, (_, _, pixel)) in img.pixels().enumerate() {
+        if i as u32 % step == 0 {
+            let rgb = Vector3::new(
+                pixel[0] as f64 / 255.0,
+                pixel[1] as f64 / 255.0,
+                pixel[2] as f64 / 255.0,
+            );
+            pixels.push(rgb_to_lab(&rgb));
+        }
+    }
+    pixels
+}
+
+fn generate_3d_lut_with_ot_tps(cur_img: &image::DynamicImage, ref_img: &image::DynamicImage, lut_size: usize) -> Option<Vec<f32>> {
+    let cur_pixels = extract_lab_pixels_downsampled(cur_img);
+    let ref_pixels = extract_lab_pixels_downsampled(ref_img);
+
+    let k = 32;
+    let (cur_centroids, _) = kmeans_plus_plus(&cur_pixels, k, 50);
+    let (ref_centroids, _) = kmeans_plus_plus(&ref_pixels, k, 50);
+
+    let mu = DVector::from_element(k, 1.0 / k as f64);
+    let nu = DVector::from_element(k, 1.0 / k as f64);
+    let mut cost_matrix = DMatrix::zeros(k, k);
+    for i in 0..k {
+        for j in 0..k {
+            cost_matrix[(i, j)] = (cur_centroids[i] - ref_centroids[j]).norm_squared();
+        }
+    }
+    let p_mat = sinkhorn_ot(&mu, &nu, &cost_matrix, 0.1, 1000, 1e-5);
+
+    let mut src_points = Vec::with_capacity(k);
+    let mut dst_points = Vec::with_capacity(k);
+    for i in 0..k {
+        let mut target = Vector3::zeros();
+        let mut weight_sum = 0.0;
+        for j in 0..k {
+            target += ref_centroids[j] * p_mat[(i, j)];
+            weight_sum += p_mat[(i, j)];
+        }
+        if weight_sum > 0.0 { target /= weight_sum; }
+        src_points.push(cur_centroids[i]);
+        dst_points.push(target);
+    }
+
+    let tps = TPS::fit(&src_points, &dst_points)?;
+
+    let mut lut_data = Vec::with_capacity(lut_size * lut_size * lut_size * 3);
+    for b in 0..lut_size {
+        for g in 0..lut_size {
+            for r in 0..lut_size {
+                let rgb = Vector3::new(
+                    r as f64 / (lut_size - 1) as f64,
+                    g as f64 / (lut_size - 1) as f64,
+                    b as f64 / (lut_size - 1) as f64,
+                );
+                let lab = rgb_to_lab(&rgb);
+                let mapped_lab = tps.transform(&lab);
+                let mapped_rgb = lab_to_rgb(&mapped_lab);
+                
+                lut_data.push(mapped_rgb[0].clamp(0.0, 1.0) as f32);
+                lut_data.push(mapped_rgb[1].clamp(0.0, 1.0) as f32);
+                lut_data.push(mapped_rgb[2].clamp(0.0, 1.0) as f32);
+            }
+        }
+    }
+    Some(lut_data)
 }

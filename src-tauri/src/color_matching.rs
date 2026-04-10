@@ -1,5 +1,5 @@
 use nalgebra::{DMatrix, DVector, Vector3};
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::f64;
 use rand::RngExt;
