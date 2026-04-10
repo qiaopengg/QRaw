@@ -2051,9 +2051,9 @@ fn apply_reference_normalize_pass(
         1.0,
     );
     let color_conf = clamp(
-        ((ref_feat.rb_ratio - cur_feat.rb_ratio).abs() * 1.8
-            + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 1.8
-            + (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.3),
+        (ref_feat.rb_ratio - cur_feat.rb_ratio).abs() * 1.8
+                + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 1.8
+                + (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.3,
         0.0,
         1.0,
     );

@@ -13,6 +13,7 @@ mod gpu_processing;
 mod image_loader;
 mod image_processing;
 mod lens_correction;
+mod llm_chat;
 mod lut_processing;
 mod mask_generation;
 mod negative_conversion;
@@ -20,6 +21,7 @@ mod panorama_stitching;
 mod panorama_utils;
 mod preset_converter;
 mod raw_processing;
+mod style_transfer;
 mod tagging;
 mod tagging_utils;
 mod window_customizer;
@@ -96,7 +98,7 @@ extern "C" fn force_exit(_signal: libc::c_int) {
 #[cfg(target_os = "macos")]
 pub fn register_exit_handler() {
     unsafe {
-        libc::signal(libc::SIGABRT, force_exit as libc::sighandler_t);
+        libc::signal(libc::SIGABRT, force_exit as *const () as libc::sighandler_t);
     }
 }
 
@@ -4344,19 +4346,21 @@ fn frontend_ready(
 
     #[cfg(not(target_os = "android"))]
     {
+        #[allow(unused_mut)]
         let mut should_maximize = false;
+        #[allow(unused_mut)]
         let mut should_fullscreen = false;
 
         if is_first_run && let Ok(config_dir) = app_handle.path().app_config_dir() {
             let path = config_dir.join("window_state.json");
 
             if let Ok(contents) = std::fs::read_to_string(&path)
-                && let Ok(saved_state) = serde_json::from_str::<WindowState>(&contents)
+                && let Ok(_saved_state) = serde_json::from_str::<WindowState>(&contents)
             {
                 #[cfg(any(windows, target_os = "linux"))]
                 {
-                    should_maximize = saved_state.maximized;
-                    should_fullscreen = saved_state.fullscreen;
+                    should_maximize = _saved_state.maximized;
+                    should_fullscreen = _saved_state.fullscreen;
                 }
 
                 if (should_maximize || should_fullscreen)
@@ -4814,6 +4818,7 @@ pub fn run() {
             tagging::clear_all_tags,
             tagging::add_tag_for_paths,
             tagging::remove_tag_for_paths,
+            llm_chat::chat_adjust,
             culling::cull_images,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
