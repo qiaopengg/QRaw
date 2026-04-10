@@ -116,6 +116,8 @@ pub struct StyleFeatures {
 pub struct StyleTransferSuggestion {
     pub key: String,
     pub value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complex_value: Option<serde_json::Value>,
     pub label: String,
     pub min: f64,
     pub max: f64,
@@ -310,6 +312,17 @@ fn run_algorithm_pipeline(
         current_adjustments,
         ctx.tuning,
     );
+
+    let matched_curves = generate_matched_curves(&ctx.ref_img, &ctx.cur_img, ctx.tuning.style_strength);
+    adjustments.push(StyleTransferSuggestion {
+        key: "curves".to_string(),
+        value: 0.0,
+        complex_value: Some(matched_curves),
+        label: "色彩曲线 (Curves)".to_string(),
+        min: 0.0,
+        max: 1.0,
+        reason: "使用直方图匹配精准还原参考图的高级胶片色调与非线性反差".to_string(),
+    });
     let auto_refine_rounds = auto_refine_suggestions_by_error(
         &ctx.ref_features,
         &ctx.cur_features,
@@ -362,6 +375,7 @@ fn to_chat_adjustments(
         .map(|s| crate::llm_chat::AdjustmentSuggestion {
             key: s.key.clone(),
             value: s.value,
+            complex_value: s.complex_value.clone(),
             label: s.label.clone(),
             min: s.min,
             max: s.max,
@@ -839,6 +853,9 @@ fn apply_soft_dynamic_constraints_to_style_suggestions(
     window: &DynamicConstraintWindow,
 ) {
     for suggestion in suggestions.iter_mut() {
+        if suggestion.complex_value.is_some() {
+            continue;
+        }
         let Some(band) = window.bands.get(&suggestion.key) else {
             continue;
         };
@@ -903,6 +920,9 @@ pub fn apply_dynamic_constraints_to_style_suggestions(
 ) -> DynamicConstraintDebugInfo {
     let mut clamps = Vec::new();
     for suggestion in suggestions.iter_mut() {
+        if suggestion.complex_value.is_some() {
+            continue;
+        }
         if let Some(band) = window.bands.get(&suggestion.key) {
             let original = suggestion.value;
             let (clamped, reason) =
@@ -1931,6 +1951,7 @@ fn action_meta(key: &str) -> Option<(&'static str, f64, f64)> {
         "vibrance" => Some(("自然饱和度", -100.0, 100.0)),
         "clarity" => Some(("清晰度", -100.0, 100.0)),
         "vignetteAmount" => Some(("暗角", -100.0, 100.0)),
+        "curves" => Some(("色彩曲线", 0.0, 1.0)),
         _ => None,
     }
 }
@@ -1990,6 +2011,7 @@ fn upsert_suggestion_delta(
         label: label.to_string(),
         min,
         max,
+        complex_value: None,
         reason: reason.to_string(),
     });
     true
@@ -2025,6 +2047,7 @@ fn upsert_suggestion_absolute(
         label: label.to_string(),
         min,
         max,
+        complex_value: None,
         reason: reason.to_string(),
     });
     true
@@ -2639,6 +2662,77 @@ fn build_style_debug_info(
     }
 }
 
+fn generate_matched_curves(
+    ref_img: &DynamicImage,
+    cur_img: &DynamicImage,
+    strength: f64,
+) -> serde_json::Value {
+    let mut ref_hist = vec![[0u32; 256]; 4];
+    let mut cur_hist = vec![[0u32; 256]; 4];
+
+    for p in ref_img.to_rgb8().pixels() {
+        ref_hist[0][p[0] as usize] += 1;
+        ref_hist[1][p[1] as usize] += 1;
+        ref_hist[2][p[2] as usize] += 1;
+        let luma = (p[0] as f32 * 0.2126 + p[1] as f32 * 0.7152 + p[2] as f32 * 0.0722).round() as usize;
+        ref_hist[3][luma.min(255)] += 1;
+    }
+    for p in cur_img.to_rgb8().pixels() {
+        cur_hist[0][p[0] as usize] += 1;
+        cur_hist[1][p[1] as usize] += 1;
+        cur_hist[2][p[2] as usize] += 1;
+        let luma = (p[0] as f32 * 0.2126 + p[1] as f32 * 0.7152 + p[2] as f32 * 0.0722).round() as usize;
+        cur_hist[3][luma.min(255)] += 1;
+    }
+
+    let mut ref_cdf = vec![[0.0; 256]; 4];
+    let mut cur_cdf = vec![[0.0; 256]; 4];
+
+    for c in 0..4 {
+        let mut ref_sum = 0;
+        let mut cur_sum = 0;
+        let ref_total: u32 = ref_hist[c].iter().sum();
+        let cur_total: u32 = cur_hist[c].iter().sum();
+
+        for i in 0..256 {
+            ref_sum += ref_hist[c][i];
+            cur_sum += cur_hist[c][i];
+            ref_cdf[c][i] = ref_sum as f64 / (ref_total.max(1) as f64);
+            cur_cdf[c][i] = cur_sum as f64 / (cur_total.max(1) as f64);
+        }
+    }
+
+    let mut curves = serde_json::Map::new();
+    let channels = ["red", "green", "blue", "luma"];
+
+    for (c, ch_name) in channels.iter().enumerate() {
+        let mut points = Vec::new();
+        for &x_val in &[0, 64, 128, 192, 255] {
+            let target_cdf = cur_cdf[c][x_val];
+            let mut best_y = x_val;
+            let mut min_diff = 1.0;
+            for y in 0..256 {
+                let diff = (ref_cdf[c][y] - target_cdf).abs();
+                if diff < min_diff {
+                    min_diff = diff;
+                    best_y = y;
+                }
+            }
+
+            let blended_y = (x_val as f64 * (1.0 - strength)) + (best_y as f64 * strength);
+            let safe_y = blended_y.clamp((x_val as f64 - 50.0).max(0.0), (x_val as f64 + 50.0).min(255.0));
+
+            points.push(serde_json::json!({
+                "x": x_val as f64 / 255.0,
+                "y": safe_y / 255.0
+            }));
+        }
+        curves.insert(ch_name.to_string(), serde_json::json!(points));
+    }
+
+    serde_json::Value::Object(curves)
+}
+
 /// 将两组特征的差异映射为滑块调整参数（优化版：更精准的感知映射）
 fn map_features_to_adjustments(
     ref_feat: &StyleFeatures,
@@ -2731,15 +2825,16 @@ fn map_features_to_adjustments(
                 * scene_profile.tonal_gain,
             -0.56,
             positive_exposure_cap,
-        ) * tonal_gate;
+        ) * tonal_gate * 0.3; // 曲线模式下，减弱基础曝光调节
         let cur_exposure = get_current("exposure", 0.0);
-        let new_exposure = clamp(cur_exposure + exposure_delta, -2.0, 2.0);
+        let new_exposure = clamp(cur_exposure + exposure_delta, -1.0, 1.0);
         suggestions.push(StyleTransferSuggestion {
             key: "exposure".to_string(),
             value: (new_exposure * 100.0).round() / 100.0,
             label: "曝光".to_string(),
             min: -5.0,
             max: 5.0,
+            complex_value: None,
             reason: "先对齐波形中间带，建立基础亮度区间".to_string(),
         });
     }
@@ -2749,15 +2844,16 @@ fn map_features_to_adjustments(
     let spread_diff = spread_ref - spread_cur + (adain_contrast_scale - 1.0) * 0.12;
     let contrast_gate = gate(spread_diff.abs(), 0.02, 0.05);
     if contrast_gate > 0.0 {
-        let contrast_delta = clamp(spread_diff * 90.0 * tuning.style_strength, -24.0, 24.0);
+        let contrast_delta = clamp(spread_diff * 90.0 * tuning.style_strength, -12.0, 12.0) * 0.3;
         let cur_contrast = get_current("contrast", 0.0);
-        let new_contrast = clamp(cur_contrast + contrast_delta * contrast_gate, -50.0, 50.0);
+        let new_contrast = clamp(cur_contrast + contrast_delta * contrast_gate, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
             key: "contrast".to_string(),
             value: new_contrast.round(),
             label: "对比度".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: "按波形上下带间距匹配影调对比".to_string(),
         });
     }
@@ -2776,15 +2872,16 @@ fn map_features_to_adjustments(
             20.0,
         ) * (0.9 + tuning.style_strength * 0.1)
             * scene_profile.highlight_gain
-            * highlight_gate;
+            * highlight_gate * 0.3;
         let cur_hl = get_current("highlights", 0.0);
-        let new_hl = clamp(cur_hl + hl_delta, -50.0, 50.0);
+        let new_hl = clamp(cur_hl + hl_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
             key: "highlights".to_string(),
             value: new_hl.round(),
             label: "高光".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: "约束高光上沿，避免波形顶部挤压和过曝".to_string(),
         });
     }
@@ -2804,15 +2901,16 @@ fn map_features_to_adjustments(
         )
             * (0.9 + tuning.style_strength * 0.1)
             * scene_profile.shadow_gain
-            * shadow_gate;
+            * shadow_gate * 0.3;
         let cur_sh = get_current("shadows", 0.0);
-        let new_sh = clamp(cur_sh + sh_delta, -50.0, 50.0);
+        let new_sh = clamp(cur_sh + sh_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
             key: "shadows".to_string(),
             value: new_sh.round(),
             label: "阴影".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: "对齐波形低部区间，控制暗部密度".to_string(),
         });
     }
@@ -2824,15 +2922,16 @@ fn map_features_to_adjustments(
             (p99_diff * 80.0 - clip_diff * 140.0) * scene_profile.highlight_gain,
             -18.0,
             14.0,
-        ) * white_gate;
+        ) * white_gate * 0.3;
         let cur_whites = get_current("whites", 0.0);
-        let new_whites = clamp(cur_whites + whites_delta, -45.0, 45.0);
+        let new_whites = clamp(cur_whites + whites_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
             key: "whites".to_string(),
             value: new_whites.round(),
             label: "白色色阶".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: "通过 99 分位亮度匹配白场上限".to_string(),
         });
     }
@@ -2850,6 +2949,7 @@ fn map_features_to_adjustments(
             label: "黑色色阶".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: "通过 10 分位亮度匹配黑场下限".to_string(),
         });
     }
@@ -2870,15 +2970,16 @@ fn map_features_to_adjustments(
                 * color_scale,
             -30.0,
             30.0,
-        ) * temp_gate;
+        ) * temp_gate * 0.3;
         let cur_temp = get_current("temperature", 0.0);
-        let new_temp = clamp(cur_temp + temp_delta, -50.0, 50.0);
+        let new_temp = clamp(cur_temp + temp_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
             key: "temperature".to_string(),
             value: new_temp.round(),
             label: "色温".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: format!(
                 "参考图色调{}",
                 if temp_diff > 0.0 { "偏暖" } else { "偏冷" }
@@ -2894,15 +2995,16 @@ fn map_features_to_adjustments(
             (-tint_diff * 27.0 + temp_diff * 6.5 - hue_diff * 14.0) * color_scale,
             -24.0,
             24.0,
-        ) * tint_gate;
+        ) * tint_gate * 0.3;
         let cur_tint = get_current("tint", 0.0);
-        let new_tint = clamp(cur_tint + tint_delta, -40.0, 40.0);
+        let new_tint = clamp(cur_tint + tint_delta, -20.0, 20.0);
         suggestions.push(StyleTransferSuggestion {
             key: "tint".to_string(),
             value: new_tint.round(),
             label: "色调偏移".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: format!(
                 "参考图色调{}",
                 if tint_diff > 0.0 {
@@ -2931,6 +3033,7 @@ fn map_features_to_adjustments(
             label: "饱和度".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: format!(
                 "参考图色彩{}",
                 if sat_diff > 0.0 {
@@ -2959,6 +3062,7 @@ fn map_features_to_adjustments(
             label: "自然饱和度".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: format!(
                 "参考图色彩层次{}",
                 if vib_diff > 0.0 {
@@ -2983,6 +3087,7 @@ fn map_features_to_adjustments(
             label: "清晰度".to_string(),
             min: -100.0,
             max: 100.0,
+            complex_value: None,
             reason: format!(
                 "参考图纹理{}",
                 if lap_diff > 0.0 {
@@ -3011,6 +3116,7 @@ fn map_features_to_adjustments(
                 label: "暗角".to_string(),
                 min: -100.0,
                 max: 100.0,
+                complex_value: None,
                 reason: format!(
                     "参考图暗角{}",
                     if vig_diff > 0.0 {
@@ -4014,6 +4120,13 @@ pub async fn analyze_style_transfer_with_llm(
         Ok(mut llm_result) => {
             // 过滤 LLM 幻觉产生的无效调整项
             llm_result.adjustments.retain(|s| action_meta(&s.key).is_some());
+            
+            // 确保算法生成的曲线 (curves) 被保留
+            if let Some(curves_suggestion) = algo_suggestions.iter().find(|s| s.key == "curves") {
+                if !llm_result.adjustments.iter().any(|s| s.key == "curves") {
+                    llm_result.adjustments.push(curves_suggestion.clone());
+                }
+            }
             
             apply_soft_dynamic_constraints_to_style_suggestions(
                 &mut llm_result.adjustments,

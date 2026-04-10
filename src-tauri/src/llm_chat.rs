@@ -33,6 +33,8 @@ pub struct ChatMessage {
 pub struct AdjustmentSuggestion {
     pub key: String,
     pub value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complex_value: Option<serde_json::Value>,
     pub label: String,
     pub min: f64,
     pub max: f64,

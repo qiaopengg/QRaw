@@ -37,6 +37,7 @@ const PRESET_MODELS = [
 interface AdjustmentSuggestion {
   key: string;
   value: number;
+  complex_value?: any;
   label: string;
   min: number;
   max: number;
@@ -398,7 +399,7 @@ export default function ChatPanel({
       if (!msg.adjustments) return;
       const updates: Partial<Adjustments> = {};
       msg.adjustments.forEach((s) => {
-        (updates as Record<string, number>)[s.key] = s.value;
+        (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
       });
       setAdjustments((prev) => ({ ...prev, ...updates }));
     },
@@ -590,7 +591,7 @@ export default function ChatPanel({
           // 流结束，自动应用结果
           const updates: Partial<Adjustments> = {};
           result.adjustments.forEach((s) => {
-            (updates as Record<string, number>)[s.key] = s.value;
+            (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
           });
           if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
 
@@ -638,7 +639,7 @@ export default function ChatPanel({
           // 纯算法版没有流式，直接更新
           const updates: Partial<Adjustments> = {};
           result.adjustments.forEach((s) => {
-            (updates as Record<string, number>)[s.key] = s.value;
+            (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
           });
           if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
 
@@ -1113,16 +1114,25 @@ export default function ChatPanel({
                   {msg.adjustments.map((s) => (
                     <div key={s.key} className="space-y-0.5">
                       {s.reason && <p className="text-[9px] text-text-secondary opacity-60">{s.reason}</p>}
-                      <Slider
-                        label={s.label}
-                        min={s.min}
-                        max={s.max}
-                        step={s.key === 'exposure' ? 0.01 : 1}
-                        value={
-                          (adjustments[s.key as keyof Adjustments] as number) ?? msg.appliedValues?.[s.key] ?? s.value
-                        }
-                        onChange={(e) => handleSliderChange(msg.id, s.key, e)}
-                      />
+                      {s.complex_value !== undefined ? (
+                        <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">
+                          <span className="text-[10px] text-text-primary">{s.label}</span>
+                          <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                            已应用高级映射
+                          </span>
+                        </div>
+                      ) : (
+                        <Slider
+                          label={s.label}
+                          min={s.min}
+                          max={s.max}
+                          step={s.key === 'exposure' ? 0.01 : 1}
+                          value={
+                            (adjustments[s.key as keyof Adjustments] as number) ?? msg.appliedValues?.[s.key] ?? s.value
+                          }
+                          onChange={(e) => handleSliderChange(msg.id, s.key, e)}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
