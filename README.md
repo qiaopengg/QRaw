@@ -85,6 +85,10 @@ npm run tauri dev
 npm start
 ```
 
+<!-- 重启项目 -->
+
+cd src-tauri && cargo clean && cd .. && npm run tauri dev
+
 ## System Requirements
 
 - **Windows:** Windows 10 or newer

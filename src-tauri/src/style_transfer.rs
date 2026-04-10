@@ -1,6 +1,6 @@
 use crate::llm_chat::StreamChunkPayload;
 use image::codecs::jpeg::JpegEncoder;
-use image::{DynamicImage, GenericImageView, Pixel};
+use image::{DynamicImage, GenericImageView};
 use rawler::decoders::RawDecodeParams;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,9 @@ fn is_vision_model(model_name: &str) -> bool {
         || name.contains("llava")
         || name.contains("minicpm-v")
         || name.contains("internvl")
+        || name.contains("gpt-4o")
+        || name.contains("claude-3")
+        || name.contains("gemini-1.5")
 }
 
 fn encode_image_for_vision_model(img: &DynamicImage) -> Result<String, String> {
@@ -1159,10 +1162,21 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let analysis_img = if w > 600 || h > 600 {
         img.resize(600, 600, image::imageops::FilterType::Triangle)
     } else {
-        img.resize(w, h, image::imageops::FilterType::Triangle)
+        img.clone()
     };
-    let (aw, ah) = analysis_img.dimensions();
+    let analysis_rgb = analysis_img.to_rgb8();
+    let (aw, ah) = analysis_rgb.dimensions();
     let a_total = (aw as f64) * (ah as f64);
+
+    let mut linear_lut = [0.0f64; 256];
+    for i in 0..=255 {
+        let srgb = i as f64 / 255.0;
+        linear_lut[i] = if srgb <= 0.04045 {
+            srgb / 12.92
+        } else {
+            ((srgb + 0.055) / 1.055).powf(2.4)
+        };
+    }
 
     let mut sum_lum: f64 = 0.0;
     let mut sum_r: f64 = 0.0;
@@ -1201,20 +1215,10 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let mut edge_lum_sum: f64 = 0.0;
     let mut edge_count: f64 = 0.0;
 
-    for y in 0..ah {
-        for x in 0..aw {
-            let px = analysis_img.get_pixel(x, y).to_rgb();
-            let to_linear = |u: u8| -> f64 {
-                let srgb = u as f64 / 255.0;
-                if srgb <= 0.04045 {
-                    srgb / 12.92
-                } else {
-                    ((srgb + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            let r = to_linear(px[0]);
-            let g = to_linear(px[1]);
-            let b = to_linear(px[2]);
+    for (x, y, px) in analysis_rgb.enumerate_pixels() {
+        let r = linear_lut[px[0] as usize];
+        let g = linear_lut[px[1] as usize];
+        let b = linear_lut[px[2] as usize];
 
             let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             sum_lum += lum;
@@ -1325,7 +1329,6 @@ fn extract_features(img: &DynamicImage) -> StyleFeatures {
             }
             waveform_bin_values[bin_idx].push(lum);
         }
-    }
 
     let mean_lum = sum_lum / a_total;
     let mean_sat = sum_sat / a_total;
@@ -3475,19 +3478,24 @@ pub async fn analyze_style_transfer(
     validate_style_transfer_paths(&reference_path, &current_image_path)?;
     let (ref_img, cur_img) =
         load_style_transfer_images(&reference_path, &current_image_path).await?;
-    let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
-    let (early_exit_threshold, _) =
-        adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
-    if ctx.baseline_error.total < early_exit_threshold {
-        return Ok(build_style_transfer_early_exit_response(&ctx));
-    }
-    let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
-    Ok(build_algorithm_response(
-        algorithm_result.adjustments,
-        algorithm_result.style_debug,
-        "",
-        true,
-    ))
+        
+    tokio::task::spawn_blocking(move || {
+        let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
+        let (early_exit_threshold, _) =
+            adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
+        if ctx.baseline_error.total < early_exit_threshold {
+            return Ok(build_style_transfer_early_exit_response(&ctx));
+        }
+        let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
+        Ok(build_algorithm_response(
+            algorithm_result.adjustments,
+            algorithm_result.style_debug,
+            "",
+            true,
+        ))
+    })
+    .await
+    .map_err(|e| format!("分析任务失败: {}", e))?
 }
 
 /// 将特征向量格式化为 LLM 可读的文本描述
@@ -3749,11 +3757,18 @@ async fn enhance_with_llm(
         constraint_window,
     );
 
-    let user_message = if is_vision_model(llm_model) {
-        match (
-            encode_image_for_vision_model(ref_img),
-            encode_image_for_vision_model(cur_img),
-        ) {
+    let is_vision = is_vision_model(llm_model);
+    let user_message = if is_vision {
+        let ref_img_clone = ref_img.clone();
+        let cur_img_clone = cur_img.clone();
+        let b64_res = tokio::task::spawn_blocking(move || {
+            (
+                encode_image_for_vision_model(&ref_img_clone),
+                encode_image_for_vision_model(&cur_img_clone),
+            )
+        }).await.map_err(|e| format!("图像编码任务失败: {}", e))?;
+
+        match b64_res {
             (Ok(ref_b64), Ok(cur_b64)) => json!({
                 "role": "user",
                 "content": [
@@ -3833,6 +3848,9 @@ async fn enhance_with_llm(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(error) = sse_json.get("error") {
+                        return Err(format!("API 返回错误: {}", error));
+                    }
                     if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
                     {
                         if delta_content.is_empty() {
@@ -3933,17 +3951,26 @@ pub async fn analyze_style_transfer_with_llm(
         highlight_guard_strength,
         skin_protect_strength,
     );
-    let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
-    let (early_exit_threshold, llm_trigger_threshold) =
-        adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
-    if ctx.baseline_error.total < early_exit_threshold {
+    let current_adjustments_clone = current_adjustments.clone();
+    let (ctx, algo_suggestions, algo_style_debug, early_exit, llm_trigger_threshold) = 
+        tokio::task::spawn_blocking(move || {
+            let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments_clone, tuning);
+            let (early_exit_threshold, llm_trigger_threshold) =
+                adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
+            if ctx.baseline_error.total < early_exit_threshold {
+                let early_res = build_style_transfer_early_exit_response(&ctx);
+                return (ctx, vec![], early_res.style_debug.unwrap(), true, llm_trigger_threshold);
+            }
+            let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments_clone);
+            (ctx, algorithm_result.adjustments, algorithm_result.style_debug, false, llm_trigger_threshold)
+        }).await.map_err(|e| format!("算法分析任务失败: {}", e))?;
+
+    if early_exit {
         let result = build_style_transfer_early_exit_response(&ctx);
         emit_style_transfer_done(&app_handle, &result);
         return Ok(result);
     }
-    let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
-    let algo_suggestions = algorithm_result.adjustments.clone();
-    let algo_style_debug = algorithm_result.style_debug.clone();
+
     if algo_style_debug.after.total < llm_trigger_threshold {
         let result = build_algorithm_response(
             algo_suggestions.clone(),
@@ -3985,6 +4012,9 @@ pub async fn analyze_style_transfer_with_llm(
     .await
     {
         Ok(mut llm_result) => {
+            // 过滤 LLM 幻觉产生的无效调整项
+            llm_result.adjustments.retain(|s| action_meta(&s.key).is_some());
+            
             apply_soft_dynamic_constraints_to_style_suggestions(
                 &mut llm_result.adjustments,
                 &ctx.constraint_window,
