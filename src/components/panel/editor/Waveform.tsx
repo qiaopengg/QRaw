@@ -9,8 +9,13 @@ import Text from '../../ui/Text';
 import { TextVariants } from '../../../types/typography';
 
 interface WaveformProps {
-  onClose(): void;
+  onClose?(): void;
   waveformData: WaveformData;
+  histogram?: any;
+  displayMode?: string;
+  setDisplayMode?: (mode: string) => void;
+  showClipping?: boolean;
+  onToggleClipping?: () => void;
 }
 
 const modeButtons = [

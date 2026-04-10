@@ -562,7 +562,7 @@ export default function MasksPanel({
   const activeContainer = adjustments.masks.find((m) => m.id === activeMaskContainerId);
   const activeSubMaskData = activeContainer?.subMasks.find((sm) => sm.id === activeMaskId);
   const isAiMask =
-    activeSubMaskData && [Mask.AiSubject, Mask.AiForeground, Mask.AiSky, Mask.AiDepth].includes(activeSubMaskData.type);
+    activeSubMaskData && [Mask.AiSubject, Mask.AiForeground, Mask.AiSky, Mask.AiDepth].includes(activeSubMaskData.type as Mask);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -774,8 +774,8 @@ export default function MasksPanel({
     const options = OTHERS_MASK_TYPES.map((maskType) => ({
       label: maskType.name,
       icon: maskType.icon,
-      onClick: () => handleGridClick(maskType.type),
-      onRightClick: () => handleGridClick(maskType.type, true),
+      onClick: () => handleGridClick(maskType.type as Mask),
+      onRightClick: () => handleGridClick(maskType.type as Mask, true),
     }));
     showContextMenu(rect.left, rect.bottom + 5, options);
   };
@@ -792,9 +792,9 @@ export default function MasksPanel({
         disabled: maskType.disabled,
         onClick: () => {
           if (targetContainerId) {
-            handleAddSubMask(targetContainerId, maskType.type);
+            handleAddSubMask(targetContainerId, maskType.type as Mask);
           } else {
-            handleAddMaskContainer(maskType.type);
+            handleAddMaskContainer(maskType.type as Mask);
           }
         },
       }));
@@ -813,9 +813,9 @@ export default function MasksPanel({
         disabled: maskType.disabled,
         onClick: () => {
           if (targetContainerId) {
-            handleAddSubMask(targetContainerId, maskType.type);
+            handleAddSubMask(targetContainerId, maskType.type as Mask);
           } else {
-            handleAddMaskContainer(maskType.type);
+            handleAddMaskContainer(maskType.type as Mask);
           }
         },
       };
@@ -1120,7 +1120,7 @@ export default function MasksPanel({
     const newMaskSubMenu = allTypes.map((m) => ({
       label: m.name,
       icon: m.icon,
-      onClick: () => handleAddMaskContainer(m.type),
+      onClick: () => handleAddMaskContainer(m.type as Mask),
     }));
     showContextMenu(e.clientX, e.clientY, [
       { label: 'Paste Mask', icon: ClipboardPaste, disabled: !copiedMask, onClick: () => handlePasteMask() },
@@ -1175,7 +1175,7 @@ export default function MasksPanel({
               <div className="grow w-full h-full p-4 pb-2 min-h-0">
                 <Waveform
                   waveformData={waveform as WaveformData}
-                  histogram={histogram}
+                  histogram={histogram as any}
                   displayMode={activeWaveformChannel || 'luma'}
                   setDisplayMode={setActiveWaveformChannel || (() => {})}
                   showClipping={adjustments.showClipping || false}
@@ -1210,9 +1210,9 @@ export default function MasksPanel({
                       key={maskType.type || maskType.id}
                       maskType={maskType}
                       onClick={(e: any) =>
-                        maskType.id === 'others' ? handleAddOthersMask(e) : handleGridClick(maskType.type)
+                        maskType.id === 'others' ? handleAddOthersMask(e) : handleGridClick(maskType.type as Mask)
                       }
-                      onRightClick={(e: React.MouseEvent) => handleGridRightClick(e, maskType.type)}
+                      onRightClick={(e: React.MouseEvent) => handleGridRightClick(e, maskType.type as Mask)}
                       isDraggable={maskType.id !== 'others'}
                       activeMaskContainerId={activeMaskContainerId}
                     />
@@ -1324,7 +1324,7 @@ export default function MasksPanel({
                   setBrushSettings={setBrushSettings}
                   updateContainer={updateContainer}
                   updateSubMask={updateSubMask}
-                  histogram={histogram}
+                  histogram={histogram as any}
                   appSettings={appSettings}
                   isGeneratingAiMask={isGeneratingAiMask}
                   setIsMaskControlHovered={setIsMaskControlHovered}
@@ -1366,7 +1366,7 @@ export default function MasksPanel({
               <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10 ml-[15px]">
                 {(() => {
                   const sm = activeDragItem.item as SubMask;
-                  const Icon = MASK_ICON_MAP[sm.type] || Circle;
+                  const Icon = MASK_ICON_MAP[sm.type as Mask] || Circle;
                   return <Icon size={16} className="text-text-secondary shrink-0 ml-1" />;
                 })()}
                 <span className="text-sm text-text-primary flex-1 truncate">
@@ -1791,7 +1791,7 @@ function SubMaskRow({
     setNodeRef(node);
     setDroppableRef(node);
   };
-  const MaskIcon = MASK_ICON_MAP[subMask.type] || Circle;
+  const MaskIcon = MASK_ICON_MAP[subMask.type as Mask] || Circle;
   const { showContextMenu } = useContextMenu();
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2065,7 +2065,7 @@ function SettingsPanel({
     updateSubMask(activeSubMask.id, { parameters: newParams });
   };
 
-  const subMaskConfig = activeSubMask ? SUB_MASK_CONFIG[activeSubMask.type] || {} : {};
+  const subMaskConfig = activeSubMask ? SUB_MASK_CONFIG[activeSubMask.type as Mask] || {} : {};
   const isAiMask = activeSubMask && ['ai-subject', 'ai-foreground', 'ai-sky', 'ai-depth'].includes(activeSubMask.type);
   const isComponentMode = !!activeSubMask;
 
@@ -2282,7 +2282,7 @@ function SettingsPanel({
               <SectionComponent
                 adjustments={displayContainer.adjustments}
                 setAdjustments={setMaskContainerAdjustments}
-                histogram={histogram}
+                histogram={histogram as any}
                 isForMask={true}
                 appSettings={appSettings}
                 onDragStateChange={onDragStateChange}

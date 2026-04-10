@@ -187,6 +187,9 @@ export interface AppSettings {
   adjustmentVisibility?: { [key: string]: boolean };
   activeTreeSection?: string | null;
   rawHighlightCompression?: number;
+  isWaveformVisible?: boolean;
+  activeWaveformChannel?: string;
+  waveformHeight?: number;
   processingBackend?: string;
   linuxGpuOptimization?: boolean;
   exportPresets?: ExportPreset[];

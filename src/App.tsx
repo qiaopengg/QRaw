@@ -975,7 +975,7 @@ function App() {
         ?.flatMap((p: AiPatch) => p.subMasks)
         .find((sm: SubMask) => sm.id === subMaskId);
 
-      const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
+      const mergedParameters = Object.assign({}, subMask?.parameters || {}, newParameters);
       patchesSentToBackend.current.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
@@ -1030,7 +1030,7 @@ function App() {
         ?.flatMap((p: AiPatch) => p.subMasks)
         .find((sm: SubMask) => sm.id === subMaskId);
 
-      const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
+      const mergedParameters = Object.assign({}, subMask?.parameters || {}, newParameters);
       patchesSentToBackend.current.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
@@ -1079,7 +1079,7 @@ function App() {
         ?.flatMap((p: AiPatch) => p.subMasks)
         .find((sm: SubMask) => sm.id === subMaskId);
 
-      const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
+      const mergedParameters = Object.assign({}, subMask?.parameters || {}, newParameters);
       patchesSentToBackend.current.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
@@ -1128,7 +1128,7 @@ function App() {
         ?.flatMap((p: AiPatch) => p.subMasks)
         .find((sm: SubMask) => sm.id === subMaskId);
 
-      const mergedParameters = { ...(subMask?.parameters || {}), ...newParameters };
+      const mergedParameters = Object.assign({}, subMask?.parameters || {}, newParameters);
       patchesSentToBackend.current.delete(subMaskId);
       updateSubMask(subMaskId, { parameters: mergedParameters });
     } catch (error) {
@@ -1787,7 +1787,7 @@ function App() {
               expandedFolders: settings.lastFolderState?.expandedFolders || [],
               showImageCounts: settings.enableFolderImageCounts ?? false,
             });
-            setPinnedFolderTrees(trees);
+            setPinnedFolderTrees(trees as any[]);
           } catch (err) {
             console.error('Failed to load pinned folder trees:', err);
           }
@@ -1996,7 +1996,7 @@ function App() {
             expandedFolders: expandedArr,
             showImageCounts: showCounts,
           });
-          setPinnedFolderTrees(trees);
+          setPinnedFolderTrees(trees as any[]);
         } catch (err) {
           console.error('Failed to refresh pinned folder trees:', err);
         }
@@ -2028,7 +2028,7 @@ function App() {
           expandedFolders: Array.from(expandedFolders),
           showImageCounts: appSettings.enableFolderImageCounts ?? false,
         });
-        setPinnedFolderTrees(trees);
+        setPinnedFolderTrees(trees as any[]);
       } catch (err) {
         console.error('Failed to refresh pinned folders:', err);
       }
@@ -2316,7 +2316,7 @@ function App() {
       return;
     }
 
-    handleSettingsChange({ ...appSettings, lastFolderState: newFolderState });
+    handleSettingsChange({ ...appSettings, lastFolderState: newFolderState as any });
   }, [currentFolderPath, expandedFolders, rootPath, appSettings, handleSettingsChange]);
 
   useEffect(() => {
@@ -2400,7 +2400,7 @@ function App() {
         resetAdjustmentsHistory(cached.adjustments);
         prevAdjustmentsRef.current = { path, adjustments: cached.adjustments };
 
-        setHistogram(cached.histogram);
+        setHistogram(cached.histogram as any);
         setWaveform(cached.waveform);
         setFinalPreviewUrl(cached.finalPreviewUrl);
         setUncroppedAdjustedPreviewUrl(cached.uncroppedPreviewUrl);
@@ -2452,7 +2452,7 @@ function App() {
         height: 0,
         isRaw: false,
         isReady: false,
-        metadata: null,
+        metadata: undefined,
         originalUrl: null,
         path,
         thumbnailUrl: thumbnails[path],
@@ -2626,7 +2626,7 @@ function App() {
         return;
       }
 
-      const { mode, includedAdjustments } = appSettings.copyPasteSettings;
+      const { mode, includedAdjustments } = (appSettings.copyPasteSettings as any);
 
       const adjustmentsToApply: Partial<Adjustments> = {};
 
@@ -3541,6 +3541,7 @@ function App() {
           progress: { current: 0, total: event.payload, stage: 'Initializing...' },
           suggestions: null,
           error: null,
+          pathsToCull: [],
         });
       }
     });
@@ -3787,7 +3788,7 @@ function App() {
       console.error('Failed to restore session, folder might be missing:', err);
       setError('Failed to restore session. The last used folder may have been moved or deleted.');
       if (appSettings) {
-        handleSettingsChange({ ...appSettings, lastRootPath: null, lastFolderState: null });
+        handleSettingsChange({ ...appSettings, lastRootPath: null, lastFolderState: undefined });
       }
       handleGoHome();
       setIsTreeLoading(false);
@@ -4065,7 +4066,7 @@ function App() {
     [renameTargetPaths, refreshImageList, selectedImage, libraryActivePath, handleImageSelect, handleBackToLibrary],
   );
 
-  const handleStartImport = async (settings: ImportSettings) => {
+  const handleStartImport = async (settings: any) => {
     if (importSourcePaths.length > 0 && importTargetFolder) {
       invoke(Invokes.ImportFiles, {
         destinationFolder: importTargetFolder,
@@ -4261,7 +4262,7 @@ function App() {
             onClick: () => {
               setCollageModalState({
                 isOpen: true,
-                sourceImages: [selectedImage],
+                sourceImages: [selectedImage as any],
               });
             },
           },
@@ -5092,6 +5093,10 @@ function App() {
         <div className="flex flex-row grow h-full min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
             <Editor
+              isWaveformVisible={isWaveformVisible}
+              onCloseWaveform={() => setIsWaveformVisible(false)}
+              onToggleWaveform={() => setIsWaveformVisible(!isWaveformVisible)}
+              waveform={waveform as any}
               activeAiPatchContainerId={activeAiPatchContainerId}
               activeAiSubMaskId={activeAiSubMaskId}
               activeMaskContainerId={activeMaskContainerId}
@@ -5246,13 +5251,6 @@ function App() {
                             isWbPickerActive={isWbPickerActive}
                             toggleWbPicker={toggleWbPicker}
                             onDragStateChange={setIsSliderDragging}
-                            isWaveformVisible={isWaveformVisible}
-                            waveform={waveform}
-                            onToggleWaveform={handleToggleWaveform}
-                            activeWaveformChannel={activeWaveformChannel}
-                            setActiveWaveformChannel={setActiveWaveformChannel}
-                            waveformHeight={waveformHeight}
-                            setWaveformHeight={setWaveformHeight}
                           />
                         )}
                         {renderedRightPanel === Panel.Metadata && (
@@ -5303,8 +5301,7 @@ function App() {
                             setCopiedMask={setCopiedMask}
                             setCustomEscapeHandler={setCustomEscapeHandler}
                             onDragStateChange={setIsSliderDragging}
-                            isWaveformVisible={isWaveformVisible}
-                            onToggleWaveform={handleToggleWaveform}
+                                                        onToggleWaveform={handleToggleWaveform}
                             waveform={waveform}
                             activeWaveformChannel={activeWaveformChannel}
                             setActiveWaveformChannel={setActiveWaveformChannel}
@@ -5619,12 +5616,12 @@ function App() {
 }
 
 const AppWrapper = () => (
-  <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+  
     <ContextMenuProvider>
       <App />
       <GlobalTooltip />
     </ContextMenuProvider>
-  </ClerkProvider>
+  
 );
 
 export default AppWrapper;

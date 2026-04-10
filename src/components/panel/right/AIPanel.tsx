@@ -257,7 +257,7 @@ export default function AIPanel({
   const activeContainer = (adjustments.aiPatches || []).find((p) => p.id === activePatchContainerId);
   const activeSubMaskData = activeContainer?.subMasks.find((sm) => sm.id === activeSubMaskId);
   const isAiMask =
-    activeSubMaskData && [Mask.AiSubject, Mask.AiForeground, Mask.AiSky].includes(activeSubMaskData.type);
+    activeSubMaskData && [Mask.AiSubject, Mask.AiForeground, Mask.AiSky].includes(activeSubMaskData.type as Mask);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -446,9 +446,9 @@ export default function AIPanel({
         icon: maskType.icon,
         onClick: () => {
           if (targetContainerId) {
-            handleAddSubMask(targetContainerId, maskType.type);
+            handleAddSubMask(targetContainerId, maskType.type as Mask);
           } else {
-            handleAddAiPatchContainer(maskType.type);
+            handleAddAiPatchContainer(maskType.type as Mask);
           }
         },
       }));
@@ -610,7 +610,7 @@ export default function AIPanel({
     const newEditSubMenu = AI_PANEL_CREATION_TYPES.filter((maskType) => !maskType.disabled).map((maskType) => ({
       label: maskType.name,
       icon: maskType.icon,
-      onClick: () => handleAddAiPatchContainer(maskType.type),
+      onClick: () => handleAddAiPatchContainer(maskType.type as Mask),
     }));
 
     showContextMenu(e.clientX, e.clientY, [
@@ -796,7 +796,7 @@ export default function AIPanel({
                           key={maskType.type}
                           maskType={maskType}
                           isGenerating={isGeneratingAi}
-                          onClick={() => handleAddAiPatchContainer(maskType.type)}
+                          onClick={() => handleAddAiPatchContainer(maskType.type as Mask)}
                         />
                       ))}
                     </div>
@@ -935,7 +935,7 @@ export default function AIPanel({
               <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10 ml-3.75">
                 {(() => {
                   const sm = activeDragItem.item as SubMask;
-                  const Icon = MASK_ICON_MAP[sm.type] || Circle;
+                  const Icon = MASK_ICON_MAP[sm.type as Mask] || Circle;
                   return <Icon size={16} className="text-text-secondary shrink-0 ml-1" />;
                 })()}
                 <span className="text-sm text-text-primary flex-1 truncate">

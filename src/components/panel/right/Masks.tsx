@@ -70,7 +70,7 @@ export function formatMaskTypeName(type: string) {
 }
 
 export function getSubMaskName(subMask: Pick<SubMask, 'name' | 'type'>) {
-  return subMask.name?.trim() || formatMaskTypeName(subMask.type);
+  return subMask.name?.trim() || formatMaskTypeName(subMask.type as Mask);
 }
 
 export const MASK_ICON_MAP: Record<Mask, any> = {
