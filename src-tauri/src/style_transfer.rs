@@ -329,6 +329,20 @@ fn merge_shallow_objects(base: &Value, overlay: &Value) -> Value {
     }
 }
 
+fn apply_numeric_suggestions(base: &Value, suggestions: &[StyleTransferSuggestion]) -> Value {
+    let Some(obj) = base.as_object() else {
+        return base.clone();
+    };
+    let mut merged = obj.clone();
+    for s in suggestions {
+        if s.complex_value.is_some() {
+            continue;
+        }
+        merged.insert(s.key.clone(), json!(s.value));
+    }
+    Value::Object(merged)
+}
+
 fn run_algorithm_pipeline(
     ctx: &StyleTransferPreparedContext,
     current_adjustments: &Value,
@@ -364,16 +378,49 @@ fn run_algorithm_pipeline(
         ctx.tuning,
     );
     apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
-    let constraint_debug =
+    let mut constraint_debug =
         apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
-    let predicted_features =
+    let mut predicted_features =
         estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
+
+    let mut extra_refine_rounds: u32 = 0;
+    let residual = style_error_breakdown(&ctx.ref_features, &predicted_features, ctx.tuning).total;
+    if residual > 0.40 {
+        let next_adjustments_value = apply_numeric_suggestions(&seeded_adjustments, &adjustments);
+        let second_pass = map_features_to_adjustments(
+            &ctx.ref_features,
+            &predicted_features,
+            &next_adjustments_value,
+            ctx.tuning,
+        );
+        let mut keyed: HashMap<String, usize> = HashMap::new();
+        for (idx, s) in adjustments.iter().enumerate() {
+            keyed.insert(s.key.clone(), idx);
+        }
+        for s2 in second_pass {
+            if s2.complex_value.is_some() {
+                continue;
+            }
+            if let Some(idx) = keyed.get(&s2.key).copied() {
+                let base_v = adjustments[idx].value;
+                adjustments[idx].value = base_v * 0.6 + s2.value * 0.4;
+            } else {
+                keyed.insert(s2.key.clone(), adjustments.len());
+                adjustments.push(s2);
+            }
+        }
+        apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+        constraint_debug = apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+        predicted_features =
+            estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
+        extra_refine_rounds = 1;
+    }
     let style_debug = build_style_debug_info(
         &ctx.ref_features,
         &ctx.cur_features,
         &predicted_features,
         ctx.tuning,
-        auto_refine_rounds,
+        auto_refine_rounds + extra_refine_rounds,
         Some(constraint_debug),
     );
     if let Some(preset) = expert_preset {
