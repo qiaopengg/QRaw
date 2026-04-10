@@ -21,6 +21,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useTranslation } from 'react-i18next';
+import i18n, { LANGUAGES } from '../../i18n';
 import Button from '../ui/Button';
 import ConfirmModal from '../modals/ConfirmModal';
 import Dropdown, { OptionItem } from '../ui/Dropdown';
@@ -303,6 +305,7 @@ export default function SettingsPanel({
   onSettingsChange,
   rootPath,
 }: SettingsPanelProps) {
+  const { t } = useTranslation();
   const [isClearing, setIsClearing] = useState(false);
   const [clearMessage, setClearMessage] = useState('');
   const [isClearingCache, setIsClearingCache] = useState(false);
@@ -853,6 +856,14 @@ export default function SettingsPanel({
                           { value: 'system', label: 'System Default' },
                         ]}
                         value={appSettings?.fontFamily || 'poppins'}
+                      />
+                    </SettingItem>
+
+                    <SettingItem label={t('settings.language') || "Language"} description={t('settings.languageDescription') || "Change the display language of the application."}>
+                      <Dropdown
+                        onChange={(value) => i18n.changeLanguage(value)}
+                        options={LANGUAGES.map((lang) => ({ value: lang.code, label: lang.label }))}
+                        value={i18n.language}
                       />
                     </SettingItem>
                   </div>
