@@ -1,4 +1,5 @@
 use crate::llm_chat::StreamChunkPayload;
+use crate::expert_presets::{derive_style_tags, get_expert_preset_by_id, select_expert_preset};
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView};
 use rawler::decoders::RawDecodeParams;
@@ -236,6 +237,8 @@ struct StyleTransferPreparedContext {
     constraint_window: DynamicConstraintWindow,
     tuning: StyleTransferTuning,
     baseline_error: StyleTransferErrorBreakdown,
+    expert_tags: Vec<&'static str>,
+    expert_preset_id: Option<&'static str>,
 }
 
 struct AlgorithmPipelineResult {
@@ -284,6 +287,15 @@ fn build_style_transfer_context(
 ) -> StyleTransferPreparedContext {
     let ref_features = extract_features(&ref_img);
     let cur_features = extract_features(&cur_img);
+    let expert_tags = derive_style_tags(
+        ref_features.mean_luminance,
+        ref_features.p10_luminance,
+        ref_features.p90_luminance,
+        ref_features.contrast_spread,
+        ref_features.mean_saturation,
+        ref_features.rb_ratio,
+    );
+    let expert_preset_id = select_expert_preset(&expert_tags).map(|p| p.id);
     let constraint_window = build_dynamic_constraint_window_for_style_transfer(
         &cur_features,
         &ref_features,
@@ -299,6 +311,21 @@ fn build_style_transfer_context(
         constraint_window,
         tuning,
         baseline_error,
+        expert_tags,
+        expert_preset_id,
+    }
+}
+
+fn merge_shallow_objects(base: &Value, overlay: &Value) -> Value {
+    match (base.as_object(), overlay.as_object()) {
+        (Some(b), Some(o)) => {
+            let mut merged = b.clone();
+            for (k, v) in o.iter() {
+                merged.insert(k.clone(), v.clone());
+            }
+            Value::Object(merged)
+        }
+        _ => base.clone(),
     }
 }
 
@@ -306,10 +333,16 @@ fn run_algorithm_pipeline(
     ctx: &StyleTransferPreparedContext,
     current_adjustments: &Value,
 ) -> AlgorithmPipelineResult {
+    let (seeded_adjustments, expert_preset) = ctx
+        .expert_preset_id
+        .and_then(|id| get_expert_preset_by_id(id))
+        .map(|preset| (merge_shallow_objects(current_adjustments, &preset.adjustments), Some(preset)))
+        .unwrap_or_else(|| (current_adjustments.clone(), None));
+
     let mut adjustments = map_features_to_adjustments(
         &ctx.ref_features,
         &ctx.cur_features,
-        current_adjustments,
+        &seeded_adjustments,
         ctx.tuning,
     );
 
@@ -326,7 +359,7 @@ fn run_algorithm_pipeline(
     let auto_refine_rounds = auto_refine_suggestions_by_error(
         &ctx.ref_features,
         &ctx.cur_features,
-        current_adjustments,
+        &seeded_adjustments,
         &mut adjustments,
         ctx.tuning,
     );
@@ -343,6 +376,45 @@ fn run_algorithm_pipeline(
         auto_refine_rounds,
         Some(constraint_debug),
     );
+    if let Some(preset) = expert_preset {
+        let mut existing_keys: HashMap<String, bool> = HashMap::new();
+        for s in adjustments.iter() {
+            existing_keys.insert(s.key.clone(), true);
+        }
+        if let Some(map) = preset.adjustments.as_object() {
+            for (k, v) in map.iter() {
+                if existing_keys.contains_key(k) {
+                    continue;
+                }
+                if let Some(num) = v.as_f64() {
+                    if let Some((label, min, max)) = action_meta(k) {
+                        adjustments.push(StyleTransferSuggestion {
+                            key: k.clone(),
+                            value: num,
+                            complex_value: None,
+                            label: label.to_string(),
+                            min,
+                            max,
+                            reason: format!("专家预设：{}", preset.name),
+                        });
+                    }
+                } else {
+                    let label = action_meta(k)
+                        .map(|(l, _, _)| l.to_string())
+                        .unwrap_or_else(|| format!("专家预设：{}", preset.name));
+                    adjustments.push(StyleTransferSuggestion {
+                        key: k.clone(),
+                        value: 0.0,
+                        complex_value: Some(v.clone()),
+                        label,
+                        min: 0.0,
+                        max: 1.0,
+                        reason: format!("专家预设：{}", preset.name),
+                    });
+                }
+            }
+        }
+    }
     AlgorithmPipelineResult {
         adjustments,
         style_debug,
@@ -411,6 +483,20 @@ fn emit_style_transfer_done(app_handle: &tauri::AppHandle, response: &StyleTrans
             result: Some(to_chat_adjust_response(response)),
         },
     );
+}
+
+fn build_expert_preset_suffix(ctx: &StyleTransferPreparedContext) -> String {
+    if let Some(id) = ctx.expert_preset_id {
+        if let Some(preset) = get_expert_preset_by_id(id) {
+            let tags = if ctx.expert_tags.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", ctx.expert_tags.join("、"))
+            };
+            return format!("（专家预设：{}{}）", preset.name, tags);
+        }
+    }
+    String::new()
 }
 
 fn build_algorithm_understanding(adjustment_count: usize, suffix: &str) -> String {
@@ -1952,6 +2038,7 @@ fn action_meta(key: &str) -> Option<(&'static str, f64, f64)> {
         "clarity" => Some(("清晰度", -100.0, 100.0)),
         "vignetteAmount" => Some(("暗角", -100.0, 100.0)),
         "curves" => Some(("色彩曲线", 0.0, 1.0)),
+        "hsl" => Some(("HSL", 0.0, 1.0)),
         _ => None,
     }
 }
@@ -2825,7 +2912,7 @@ fn map_features_to_adjustments(
                 * scene_profile.tonal_gain,
             -0.56,
             positive_exposure_cap,
-        ) * tonal_gate * 0.3; // 曲线模式下，减弱基础曝光调节
+        ) * tonal_gate * 0.3;
         let cur_exposure = get_current("exposure", 0.0);
         let new_exposure = clamp(cur_exposure + exposure_delta, -1.0, 1.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3590,13 +3677,19 @@ pub async fn analyze_style_transfer(
         let (early_exit_threshold, _) =
             adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
         if ctx.baseline_error.total < early_exit_threshold {
-            return Ok(build_style_transfer_early_exit_response(&ctx));
+            let suffix = build_expert_preset_suffix(&ctx);
+            let mut res = build_style_transfer_early_exit_response(&ctx);
+            if !suffix.is_empty() {
+                res.understanding = format!("{}{}", res.understanding, suffix);
+            }
+            return Ok(res);
         }
         let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
+        let suffix = build_expert_preset_suffix(&ctx);
         Ok(build_algorithm_response(
             algorithm_result.adjustments,
             algorithm_result.style_debug,
-            "",
+            &suffix,
             true,
         ))
     })
@@ -4072,16 +4165,22 @@ pub async fn analyze_style_transfer_with_llm(
         }).await.map_err(|e| format!("算法分析任务失败: {}", e))?;
 
     if early_exit {
-        let result = build_style_transfer_early_exit_response(&ctx);
+        let suffix = build_expert_preset_suffix(&ctx);
+        let mut result = build_style_transfer_early_exit_response(&ctx);
+        if !suffix.is_empty() {
+            result.understanding = format!("{}{}", result.understanding, suffix);
+        }
         emit_style_transfer_done(&app_handle, &result);
         return Ok(result);
     }
 
+    let preset_suffix = build_expert_preset_suffix(&ctx);
     if algo_style_debug.after.total < llm_trigger_threshold {
+        let suffix = format!("{}{}", &preset_suffix, "（残差较低，跳过 LLM 增强）");
         let result = build_algorithm_response(
             algo_suggestions.clone(),
             algo_style_debug.clone(),
-            "（残差较低，跳过 LLM 增强）",
+            &suffix,
             false,
         );
         emit_style_transfer_done(&app_handle, &result);
@@ -4121,7 +4220,6 @@ pub async fn analyze_style_transfer_with_llm(
             // 过滤 LLM 幻觉产生的无效调整项
             llm_result.adjustments.retain(|s| action_meta(&s.key).is_some());
             
-            // 确保算法生成的曲线 (curves) 被保留
             if let Some(curves_suggestion) = algo_suggestions.iter().find(|s| s.key == "curves") {
                 if !llm_result.adjustments.iter().any(|s| s.key == "curves") {
                     llm_result.adjustments.push(curves_suggestion.clone());
@@ -4150,7 +4248,11 @@ pub async fn analyze_style_transfer_with_llm(
                 Some(llm_constraint_debug),
             );
             let result = StyleTransferResponse {
-                understanding: llm_result.understanding.clone(),
+                understanding: if preset_suffix.is_empty() {
+                    llm_result.understanding.clone()
+                } else {
+                    format!("{}{}", llm_result.understanding.clone(), preset_suffix)
+                },
                 adjustments: llm_result.adjustments.clone(),
                 style_debug: Some(llm_style_debug),
             };
@@ -4160,10 +4262,11 @@ pub async fn analyze_style_transfer_with_llm(
         Err(llm_err) => {
             // LLM 失败时回退到纯算法结果
             log::warn!("LLM 风格增强失败，回退到算法结果: {}", llm_err);
+            let suffix = format!("{}{}", &preset_suffix, "（LLM 不可用，使用纯算法分析）");
             let result = build_algorithm_response(
                 algo_suggestions.clone(),
                 algo_style_debug.clone(),
-                "（LLM 不可用，使用纯算法分析）",
+                &suffix,
                 false,
             );
             emit_style_transfer_done(&app_handle, &result);

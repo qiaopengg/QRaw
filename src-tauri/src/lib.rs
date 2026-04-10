@@ -7,6 +7,7 @@ mod ai_processing;
 mod culling;
 mod denoising;
 mod exif_processing;
+mod expert_presets;
 mod file_management;
 mod formats;
 mod gpu_processing;
