@@ -1857,7 +1857,7 @@ export default function MainLibrary({
         const currentVersion = await getVersion();
         setAppVersion(currentVersion);
 
-        const response = await fetch('https://api.github.com/repos/CyberTimon/RapidRAW/releases/latest');
+        const response = await fetch('https://api.github.com/repos/CyberTimon/QRaw/releases/latest');
         if (!response.ok) {
           console.error('Failed to fetch latest release info from GitHub.');
           return;
@@ -1954,7 +1954,7 @@ export default function MainLibrary({
           ) : (
             <>
               <div className="my-auto text-left">
-                <Text variant={TextVariants.displayLarge}>RapidRAW</Text>
+                <Text variant={TextVariants.displayLarge}>QRaw</Text>
                 <Text
                   variant={TextVariants.heading}
                   color={TextColors.secondary}
@@ -2027,7 +2027,7 @@ export default function MainLibrary({
                         }`}
                         onClick={() => {
                           if (isUpdateAvailable) {
-                            open('https://github.com/CyberTimon/RapidRAW/releases/latest');
+                            open('https://github.com/CyberTimon/QRaw/releases/latest');
                           }
                         }}
                         data-tooltip={
@@ -2054,7 +2054,7 @@ export default function MainLibrary({
                       </a>
                       <span className="mx-1">or</span>
                       <a
-                        href="https://github.com/CyberTimon/RapidRAW"
+                        href="https://github.com/CyberTimon/QRaw"
                         className="hover:underline"
                         target="_blank"
                         rel="noopener noreferrer"

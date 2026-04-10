@@ -1028,7 +1028,7 @@ export default function SettingsPanel({
 
                               <SettingItem
                                 label="Custom AI Tag List"
-                                description="If provided, the AI will ONLY use tags from this list, overriding RapidRAW’s built-in list. Tagging works only in English."
+                                description="If provided, the AI will ONLY use tags from this list, overriding QRaw’s built-in list. Tagging works only in English."
                               >
                                 <div>
                                   <div className="flex flex-wrap gap-2 p-2 bg-bg-primary rounded-md min-h-10 border border-border-color mb-2 items-center">
@@ -1208,7 +1208,7 @@ export default function SettingsPanel({
                     Special Thanks
                   </Text>
                   <Text className="mb-4">
-                    A huge thank you to the following projects that were very important in the development of RapidRAW:
+                    A huge thank you to the following projects that were very important in the development of QRaw:
                   </Text>
                   <Text as="ul" className="space-y-3 list-disc ml-5 pl-1">
                     <li>
@@ -1300,7 +1300,7 @@ export default function SettingsPanel({
                       >
                         nind-denoise
                       </a>
-                      : For providing AI models that power the AI noise reduction capabilities in RapidRAW.
+                      : For providing AI models that power the AI noise reduction capabilities in QRaw.
                     </li>
                     <li>
                       <a
@@ -1314,7 +1314,7 @@ export default function SettingsPanel({
                       : For some reference implementations that guided parts of this work.
                     </li>
                     <li>
-                      <span className="font-semibold text-accent">You</span>: For using and supporting RapidRAW. Your
+                      <span className="font-semibold text-accent">You</span>: For using and supporting QRaw. Your
                       interest keeps this project alive and evolving.
                     </li>
                   </Text>
@@ -1574,7 +1574,7 @@ export default function SettingsPanel({
                     Generative AI
                   </Text>
                   <Text className="mb-4">
-                    RapidRAW's AI is built for flexibility. Choose your ideal workflow, from fast local tools to
+                    QRaw's AI is built for flexibility. Choose your ideal workflow, from fast local tools to
                     powerful self-hosting.
                   </Text>
 
@@ -1592,7 +1592,7 @@ export default function SettingsPanel({
                         >
                           <Text variant={TextVariants.heading}>Built-in AI (CPU)</Text>
                           <Text className="mt-1">
-                            Integrated directly into RapidRAW, these features run entirely on your computer. They are
+                            Integrated directly into QRaw, these features run entirely on your computer. They are
                             fast, free, and require no setup, making them ideal for everyday workflow acceleration.
                           </Text>
                           <Text as="ul" className="mt-3 space-y-1 list-disc list-inside">
@@ -1613,9 +1613,9 @@ export default function SettingsPanel({
                         >
                           <div className="space-y-8">
                             <div>
-                              <Text variant={TextVariants.heading}>Self-Hosted (RapidRAW AI Connector)</Text>
+                              <Text variant={TextVariants.heading}>Self-Hosted (QRaw AI Connector)</Text>
                               <Text className="mt-1">
-                                For users with a capable GPU who want maximum control, connect RapidRAW to your own
+                                For users with a capable GPU who want maximum control, connect QRaw to your own
                                 Connector server. This gives you full control for technical workflows.
                               </Text>
                               <Text as="ul" className="mt-3 space-y-1 list-disc list-inside">

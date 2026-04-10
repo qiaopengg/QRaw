@@ -11,7 +11,7 @@ Changes to be committed:
 	modified:   .github/workflows/pr-ci.yml
 	modified:   .github/workflows/release.yml
 	modified:   .gitignore
-	modified:   data/io.github.CyberTimon.RapidRAW.metainfo.xml
+	modified:   data/com.qiaopeng.qraw.metainfo.xml
 	modified:   package.json
 	modified:   public/splash-dark.jpg
 	modified:   src-tauri/Cargo.toml

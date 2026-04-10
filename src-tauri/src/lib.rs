@@ -3427,7 +3427,7 @@ async fn invoke_generative_replace_with_mask_def(
         }
     } else {
         return Err(
-            "No generative backend available. Connect to a RapidRAW AI Connector or upgrade to Pro for Cloud AI."
+            "No generative backend available. Connect to a QRaw AI Connector or upgrade to Pro for Cloud AI."
                 .to_string(),
         );
     };
@@ -3495,11 +3495,11 @@ fn get_supported_file_types() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn fetch_community_presets() -> Result<Vec<CommunityPreset>, String> {
     let client = reqwest::Client::new();
-    let url = "https://raw.githubusercontent.com/CyberTimon/RapidRAW-Presets/main/manifest.json";
+    let url = "https://raw.githubusercontent.com/CyberTimon/QRaw-Presets/main/manifest.json";
 
     let response = client
         .get(url)
-        .header("User-Agent", "RapidRAW-App")
+        .header("User-Agent", "QRaw-App")
         .send()
         .await
         .map_err(|e| format!("Failed to fetch manifest from GitHub: {}", e))?;

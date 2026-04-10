@@ -1676,7 +1676,7 @@ index 3bc79208,7ad19735..00000000
  -        const currentVersion = await getVersion();
  -        setAppVersion(currentVersion);
  -
- -        const response = await fetch('https://api.github.com/repos/CyberTimon/RapidRAW/releases/latest');
+ -        const response = await fetch('https://api.github.com/repos/CyberTimon/QRaw/releases/latest');
  -        if (!response.ok) {
  -          console.error('Failed to fetch latest release info from GitHub.');
  -          return;
@@ -2028,7 +2028,7 @@ index a8582534,2c2487f4..00000000
   
                                 <SettingItem
  -                                label="Custom AI Tag List"
- -                                description="If provided, the AI will ONLY use tags from this list, overriding RapidRAW’s built-in list. Tagging works only in English."
+ -                                description="If provided, the AI will ONLY use tags from this list, overriding QRaw’s built-in list. Tagging works only in English."
  +                                label={t('settings.customAiTagList')}
  +                                description={t('settings.customAiTagListDescription')}
                                 >
