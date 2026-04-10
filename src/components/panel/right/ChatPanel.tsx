@@ -18,7 +18,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { AppSettings, Invokes } from '../../ui/AppProperties';
-import { Adjustments } from '../../../utils/adjustments';
+import { Adjustments, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
 
 const DEFAULT_MODEL = 'auto';
@@ -615,7 +615,8 @@ export default function ChatPanel({
       try {
         // Ollama 在线时用 LLM 增强版（流式），否则用纯算法版
         if (ollamaStatus === 'online') {
-          await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferWithLlm, {
+          // 第一轮：初始分析
+          const result1 = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferWithLlm, {
             referencePath: refPath,
             currentImagePath: currentImagePath,
             currentAdjustments: simpleAdj,
@@ -626,6 +627,49 @@ export default function ChatPanel({
             highlightGuardStrength: tuning.highlightGuardStrength,
             skinProtectStrength: tuning.skinProtectStrength,
           });
+
+          // 如果需要第二轮视觉闭环（这里默认触发一次）
+          try {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === streamMsgId
+                  ? {
+                      ...msg,
+                      thinkingContent: (msg.thinkingContent || '') + '\n正在生成第一轮预览图进行效果校验...\n',
+                    }
+                  : msg,
+              ),
+            );
+
+            // 合并第一轮调整
+            const firstRoundAdj: Record<string, any> = { ...simpleAdj };
+            result1.adjustments.forEach((s) => {
+              firstRoundAdj[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
+            });
+
+            // 调用后端生成预览图 (200x200)
+            const imageData: Uint8Array = await invoke(Invokes.GeneratePresetPreview, {
+              jsAdjustments: { ...INITIAL_ADJUSTMENTS, ...firstRoundAdj },
+            });
+            
+            // 转为 base64
+            const binary = Array.from(imageData).map((b) => String.fromCharCode(b)).join('');
+            const base64 = btoa(binary);
+
+            // 第二轮：Agent 闭环自我修正
+            await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransferAgentRefine, {
+              referencePath: refPath,
+              firstRoundImageB64: base64,
+              previousAdjustments: firstRoundAdj,
+              llmEndpoint: endpoint,
+              llmApiKey: llmApiKey || null,
+              llmModel: activeModel || null,
+            });
+            // 注意：第二轮命令内部也会发 style-transfer-stream done 事件，
+            // 上方的 unlisten 事件回调会自动应用最终的结果。
+          } catch (agentError) {
+            console.warn('Agent 第二轮闭环失败，回退到第一轮结果:', agentError);
+          }
         } else {
           const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
             referencePath: refPath,

@@ -113,6 +113,7 @@ export enum Invokes {
   ChatAdjust = 'chat_adjust',
   AnalyzeStyleTransfer = 'analyze_style_transfer',
   AnalyzeStyleTransferWithLlm = 'analyze_style_transfer_with_llm',
+  AnalyzeStyleTransferAgentRefine = 'analyze_style_transfer_agent_refine',
   UpdateWindowEffect = 'update_window_effect',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',

@@ -4322,6 +4322,216 @@ pub async fn analyze_style_transfer_with_llm(
     }
 }
 
+/// Agent 闭环迭代：第二轮视觉反馈
+#[tauri::command]
+pub async fn analyze_style_transfer_agent_refine(
+    reference_path: String,
+    first_round_image_b64: String,
+    previous_adjustments: Value,
+    llm_endpoint: String,
+    llm_api_key: Option<String>,
+    llm_model: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<StyleTransferResponse, String> {
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        StreamChunkPayload {
+            chunk_type: "thinking".to_string(),
+            text: "\n[Agent] 正在进行第二轮视觉反馈与自我纠错...\n".to_string(),
+            result: None,
+        },
+    );
+
+    // 加载参考图
+    let ref_img = load_style_transfer_images(&reference_path, &reference_path)
+        .await
+        .map(|(img, _)| img)?;
+
+    // 将前端传来的第一轮渲染结果 Base64 解码为图像
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let cur_img_bytes = STANDARD.decode(&first_round_image_b64).map_err(|e| format!("Base64 解码失败: {}", e))?;
+    let cur_img = image::load_from_memory(&cur_img_bytes).map_err(|e| format!("图像解码失败: {}", e))?;
+
+    // 为了使用现有的 prompt，我们需要参考图的 base64
+    let ref_b64 = encode_image_for_vision_model(&ref_img)?;
+    let cur_b64 = encode_image_for_vision_model(&cur_img)?;
+
+    let system_prompt = "你是一个专业的摄影后期修图大师助手。
+现在正在进行第二轮参数自我纠错（Visual Feedback Loop）。
+第一张图是【参考图】（你期望的最终风格）。
+第二张图是【当前效果图】（第一轮调整后的结果）。
+请对比两者的曝光、对比度、色彩偏移，指出当前效果图还有哪些不足，并给出新的调整参数。
+输出格式要求：严格返回一段 JSON。包含 understanding（分析评价）和 adjustments（调整数组，包含需要覆盖的新参数值，如曝光不足，给出稍微增加的曝光值。不要包含曲线(curves)参数，只需调节基础滑块）。";
+
+    let user_message = json!({
+        "role": "user",
+        "content": [
+            { "type": "text", "text": "请观察效果图与参考图在色彩、曝光、对比度上的差异，给出绝对修改参数（覆盖当前的参数）。输出严格 JSON。" },
+            { "type": "image_url", "image_url": { "url": format!("data:image/jpeg;base64,{}", ref_b64) } },
+            { "type": "text", "text": "上图是参考图。" },
+            { "type": "image_url", "image_url": { "url": format!("data:image/jpeg;base64,{}", cur_b64) } },
+            { "type": "text", "text": "上图是当前效果图。请输出严格 JSON。" }
+        ]
+    });
+
+    let messages = vec![
+        json!({ "role": "system", "content": system_prompt }),
+        user_message,
+    ];
+
+    let endpoint = llm_endpoint.trim_end_matches('/');
+    let url = format!("{}/v1/chat/completions", endpoint);
+
+    let request_body = json!({
+        "model": resolve_style_transfer_model(llm_model),
+        "messages": messages,
+        "temperature": 0.2,
+        "stream": true
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut req = client.post(&url).json(&request_body);
+    if let Some(key) = llm_api_key {
+        if !key.is_empty() {
+            req = req.bearer_auth(key);
+        }
+    }
+
+    let response = req
+        .send()
+        .await
+        .map_err(|e| format!("LLM 请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("LLM 返回错误 {}: {}", status, body));
+    }
+
+    let mut full_content = String::new();
+    let mut in_thinking = false;
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut line_buffer = String::new();
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("流读取错误: {}", e))?;
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        line_buffer.push_str(&chunk_str);
+
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line = line_buffer[..newline_pos].trim().to_string();
+            line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+            if line.is_empty() || line == "data: [DONE]" {
+                continue;
+            }
+
+            if let Some(json_str) = line.strip_prefix("data: ") {
+                if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(error) = sse_json.get("error") {
+                        return Err(format!("API 返回错误: {}", error));
+                    }
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
+                    {
+                        if delta_content.is_empty() {
+                            continue;
+                        }
+
+                        full_content.push_str(delta_content);
+
+                        if delta_content.contains("<think>") {
+                            in_thinking = true;
+                        }
+
+                        if in_thinking {
+                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            if !clean.is_empty() {
+                                let _ = app_handle.emit(
+                                    "style-transfer-stream",
+                                    StreamChunkPayload {
+                                        chunk_type: "thinking".to_string(),
+                                        text: clean,
+                                        result: None,
+                                    },
+                                );
+                            }
+                        }
+
+                        if delta_content.contains("</think>") {
+                            in_thinking = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let json_str = extract_json_from_response(&full_content)?;
+    let mut parsed: StyleTransferResponse = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "解析 Agent 风格迁移 JSON 失败: {}，原始: {}",
+            e,
+            &full_content[..full_content.len().min(500)]
+        )
+    })?;
+
+    // 过滤幻觉参数并安全限制（二轮微调不能超过太多）
+    parsed.adjustments.retain(|s| action_meta(&s.key).is_some() && s.key != "curves");
+    
+    // 我们保留 previous_adjustments 中的曲线等复杂参数
+    // 将第二轮修改融合到最终输出中
+    let mut final_adjustments = previous_adjustments.clone();
+    for suggestion in &parsed.adjustments {
+        if let Some(meta) = action_meta(&suggestion.key) {
+            let safe_val = suggestion.value.clamp(meta.1, meta.2);
+            // LLM返回的是覆盖值
+            final_adjustments[&suggestion.key] = json!(safe_val);
+        }
+    }
+
+    // 重新提取最终建议数组
+    let mut updated_suggestions = Vec::new();
+    if let Some(obj) = final_adjustments.as_object() {
+        for (k, v) in obj {
+            if k == "aiPatches" || k == "masks" { continue; }
+            if let Some(meta) = action_meta(k) {
+                if let Some(num) = v.as_f64() {
+                    updated_suggestions.push(StyleTransferSuggestion {
+                        key: k.clone(),
+                        value: num,
+                        complex_value: None,
+                        label: meta.0.to_string(),
+                        min: meta.1,
+                        max: meta.2,
+                        reason: "Agent 第二轮闭环修正".to_string(),
+                    });
+                } else if k == "curves" || k == "hsl" || k == "colorGrading" {
+                    updated_suggestions.push(StyleTransferSuggestion {
+                        key: k.clone(),
+                        value: 0.0,
+                        complex_value: Some(v.clone()),
+                        label: meta.0.to_string(),
+                        min: meta.1,
+                        max: meta.2,
+                        reason: "从第一轮保留的非线性映射参数".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    parsed.adjustments = updated_suggestions;
+    parsed.understanding = format!("【Agent 视觉闭环】\n{}", parsed.understanding);
+    
+    emit_style_transfer_done(&app_handle, &parsed);
+    Ok(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
