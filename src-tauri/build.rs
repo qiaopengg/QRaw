@@ -147,7 +147,7 @@ fn main() {
             target_os, target_arch
         );
         let base_url =
-            "https://huggingface.co/CyberTimon/QRaw-Models/resolve/main/onnxruntimes-v1.22.0/";
+            "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes-v1.22.0/";
         let download_url = format!("{}{}?download=true", base_url, download_filename);
         println!("cargo:warning=URL: {}", download_url);
 

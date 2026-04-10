@@ -3495,7 +3495,7 @@ fn get_supported_file_types() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn fetch_community_presets() -> Result<Vec<CommunityPreset>, String> {
     let client = reqwest::Client::new();
-    let url = "https://raw.githubusercontent.com/CyberTimon/QRaw-Presets/main/manifest.json";
+    let url = "https://raw.githubusercontent.com/CyberTimon/RapidRAW-Presets/main/manifest.json";
 
     let response = client
         .get(url)

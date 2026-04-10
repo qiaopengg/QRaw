@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/CyberTimon/QRaw/assets/.github/assets/editor.png" alt="QRaw Editor">
+  <img src="https://raw.githubusercontent.com/CyberTimon/RapidRAW/assets/.github/assets/editor.png" alt="QRaw Editor">
 </p>
 
 <div align="center">
@@ -17,7 +17,7 @@
 
 > A beautiful, non-destructive, and GPU-accelerated RAW image editor built with performance in mind.
 
-QRaw is a secondary development fork of [QRaw](https://github.com/CyberTimon/QRaw) by [CyberTimon (Timon Käch)](https://github.com/CyberTimon), licensed under AGPL-3.0. It delivers GPU-accelerated, non-destructive RAW editing in a lightweight package for Windows, macOS, and Linux.
+QRaw is a secondary development fork of [RapidRAW](https://github.com/CyberTimon/RapidRAW) by [CyberTimon (Timon Käch)](https://github.com/CyberTimon), licensed under AGPL-3.0. It delivers GPU-accelerated, non-destructive RAW editing in a lightweight package for Windows, macOS, and Linux.
 
 <table width="100%">
   <tr>
@@ -32,7 +32,7 @@ QRaw is a secondary development fork of [QRaw](https://github.com/CyberTimon/QRa
       <br>
       <h3>Upstream Project</h3>
       <p>QRaw is based on QRaw. For upstream docs and tutorials:</p>
-      <strong><a href="https://github.com/CyberTimon/QRaw">QRaw by CyberTimon →</a></strong>
+      <strong><a href="https://github.com/CyberTimon/RapidRAW">QRaw by CyberTimon →</a></strong>
       <br><br>
     </td>
   </tr>
@@ -222,7 +222,7 @@ All core functionality is inherited from the upstream QRaw project.
 
 ## Key Features
 
-Inherited from QRaw — see the [upstream README](https://github.com/CyberTimon/QRaw#key-features) for the full feature list.
+Inherited from QRaw — see the [upstream README](https://github.com/CyberTimon/RapidRAW#key-features) for the full feature list.
 
 - **GPU-Accelerated:** Full 32-bit image processing pipeline written in WGSL.
 - **Masking:** Layer-based masking with AI subject, sky and foreground detection.
@@ -241,7 +241,7 @@ Requires [Rust](https://www.rust-lang.org/tools/install) and [Node.js](https://n
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/CyberTimon/QRaw.git
+git clone https://github.com/CyberTimon/RapidRAW.git
 cd QRaw
 
 # Install frontend dependencies
@@ -265,6 +265,6 @@ npm start
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
-QRaw is a modified version of [QRaw](https://github.com/CyberTimon/QRaw), originally developed by [Timon Käch (CyberTimon)](https://github.com/CyberTimon). The original work is copyright © Timon Käch and contributors. This fork carries prominent notice of modification as required by AGPL-3.0 Section 5.
+QRaw is a modified version of [RapidRAW](https://github.com/CyberTimon/RapidRAW), originally developed by [Timon Käch (CyberTimon)](https://github.com/CyberTimon). The original work is copyright © Timon Käch and contributors. This fork carries prominent notice of modification as required by AGPL-3.0 Section 5.
 
 See the [LICENSE](LICENSE) file for full details.

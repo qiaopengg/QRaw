@@ -8,7 +8,7 @@ import Input from '../ui/Input';
 import { Invokes, SupportedTypes, ImageFile } from '../ui/AppProperties';
 import { INITIAL_ADJUSTMENTS } from '../../utils/adjustments';
 
-const DEFAULT_PREVIEW_IMAGE_URL = 'https://raw.githubusercontent.com/CyberTimon/QRaw-Presets/main/sample-image.jpg';
+const DEFAULT_PREVIEW_IMAGE_URL = 'https://raw.githubusercontent.com/CyberTimon/RapidRAW-Presets/main/sample-image.jpg';
 
 interface CommunityPreset {
   name: string;
@@ -320,7 +320,7 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
           >
             <p>{t('community.wantFeatured')}</p>
             <a
-              href="https://github.com/CyberTimon/QRaw-Presets/issues/new?assignees=&labels=preset-submission&template=preset_submission.md&title=Preset+Submission%3A+%5BYour+Preset+Name%5D"
+              href="https://github.com/CyberTimon/RapidRAW-Presets/issues/new?assignees=&labels=preset-submission&template=preset_submission.md&title=Preset+Submission%3A+%5BYour+Preset+Name%5D"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent hover:underline inline-flex items-center gap-2"

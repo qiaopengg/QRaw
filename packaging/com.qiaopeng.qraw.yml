@@ -30,14 +30,14 @@ modules:
           tag-pattern: ^v([\d.]+)$
 
       - type: file
-        url: https://huggingface.co/CyberTimon/QRaw-Models/resolve/main/onnxruntimes/libonnxruntime-linux-x86_64.so?download=true
+        url: https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes/libonnxruntime-linux-x86_64.so?download=true
         sha256: a6f4b5dc4312d72488d108ad8cbc555c1c52ac58f7f79eb67aa9f73331745192
         dest-filename: libonnxruntime.so
         only-arches:
           - x86_64
 
       - type: file
-        url: https://huggingface.co/CyberTimon/QRaw-Models/resolve/main/onnxruntimes/libonnxruntime-linux-aarch64.so?download=true
+        url: https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes/libonnxruntime-linux-aarch64.so?download=true
         sha256: a423523eb36b843d33c642169f5fd76af586401b440feb199d868d5edfb30b0d
         dest-filename: libonnxruntime.so
         only-arches:
