@@ -4,6 +4,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 mod ai_connector;
 mod ai_processing;
+mod color_matching;
 mod culling;
 mod denoising;
 mod exif_processing;
@@ -4823,8 +4824,6 @@ pub fn run() {
             tagging::remove_tag_for_paths,
             llm_chat::chat_adjust,
             style_transfer::analyze_style_transfer,
-            style_transfer::analyze_style_transfer_with_llm,
-            style_transfer::analyze_style_transfer_agent_refine,
             culling::cull_images,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
