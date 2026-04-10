@@ -2841,6 +2841,7 @@ fn generate_matched_curves(
 
     for (c, ch_name) in channels.iter().enumerate() {
         let mut points = Vec::new();
+        let mut prev_y = 0.0;
         for &x_val in &[0, 64, 128, 192, 255] {
             let target_cdf = cur_cdf[c][x_val];
             let mut best_y = x_val;
@@ -2855,10 +2856,12 @@ fn generate_matched_curves(
 
             let blended_y = (x_val as f64 * (1.0 - strength)) + (best_y as f64 * strength);
             let safe_y = blended_y.clamp((x_val as f64 - 50.0).max(0.0), (x_val as f64 + 50.0).min(255.0));
+            let monotonic_y = safe_y.max(prev_y);
+            prev_y = monotonic_y;
 
             points.push(serde_json::json!({
                 "x": x_val as f64 / 255.0,
-                "y": safe_y / 255.0
+                "y": monotonic_y / 255.0
             }));
         }
         curves.insert(ch_name.to_string(), serde_json::json!(points));
@@ -4486,11 +4489,12 @@ pub async fn analyze_style_transfer_agent_refine(
     // 我们保留 previous_adjustments 中的曲线等复杂参数
     // 将第二轮修改融合到最终输出中
     let mut final_adjustments = previous_adjustments.clone();
-    for suggestion in &parsed.adjustments {
-        if let Some(meta) = action_meta(&suggestion.key) {
-            let safe_val = suggestion.value.clamp(meta.1, meta.2);
-            // LLM返回的是覆盖值
-            final_adjustments[&suggestion.key] = json!(safe_val);
+    if let Some(obj) = final_adjustments.as_object_mut() {
+        for suggestion in &parsed.adjustments {
+            if let Some(meta) = action_meta(&suggestion.key) {
+                let safe_val = suggestion.value.clamp(meta.1, meta.2);
+                obj.insert(suggestion.key.clone(), json!(safe_val));
+            }
         }
     }
 

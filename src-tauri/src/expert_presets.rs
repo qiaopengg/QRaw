@@ -176,7 +176,7 @@ pub fn derive_style_tags(
 
 pub fn select_expert_preset(tags: &[&'static str]) -> Option<&'static ExpertPreset> {
     let mut best: Option<&ExpertPreset> = None;
-    let mut best_score = -1i32;
+    let mut best_score = 0i32;
 
     for preset in EXPERT_PRESETS.iter() {
         let mut score = 0i32;
