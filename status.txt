@@ -1,0 +1,65 @@
+On branch main
+Your branch is up to date with 'origin/main'.
+
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Changes to be committed:
+	modified:   .github/workflows/build.yml
+	modified:   .github/workflows/ci.yml
+	modified:   .github/workflows/pr-ci.yml
+	modified:   .github/workflows/release.yml
+	modified:   .gitignore
+	modified:   data/io.github.CyberTimon.RapidRAW.metainfo.xml
+	modified:   package.json
+	modified:   public/splash-dark.jpg
+	modified:   src-tauri/Cargo.toml
+	modified:   src-tauri/build.rs
+	modified:   src-tauri/src/ai_processing.rs
+	modified:   src-tauri/src/exif_processing.rs
+	modified:   src-tauri/src/file_management.rs
+	modified:   src-tauri/src/image_processing.rs
+	deleted:    src-tauri/src/inpainting.rs
+	new file:   src-tauri/src/lib.rs
+	modified:   src-tauri/src/main.rs
+	modified:   src-tauri/src/mask_generation.rs
+	modified:   src-tauri/src/preset_converter.rs
+	modified:   src-tauri/src/raw_processing.rs
+	modified:   src-tauri/src/shaders/flare.wgsl
+	modified:   src-tauri/src/shaders/shader.wgsl
+	new file:   src-tauri/src/window_customizer.rs
+	modified:   src-tauri/tauri.conf.json
+	modified:   src/components/panel/BottomBar.tsx
+	modified:   src/components/panel/Editor.tsx
+	modified:   src/components/ui/AppProperties.tsx
+	modified:   src/components/ui/ColorWheel.tsx
+	modified:   src/components/ui/ExportImportProperties.tsx
+	modified:   src/hooks/useKeyboardShortcuts.tsx
+	new file:   src/hooks/useOsPlatform.ts
+	modified:   src/styles.css
+	modified:   src/utils/adjustments.tsx
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+	both modified:   src/App.tsx
+	both modified:   src/components/adjustments/Color.tsx
+	both modified:   src/components/modals/DenoiseModal.tsx
+	both modified:   src/components/panel/MainLibrary.tsx
+	both modified:   src/components/panel/SettingsPanel.tsx
+	both modified:   src/components/panel/editor/ImageCanvas.tsx
+	both modified:   src/components/panel/right/AIPanel.tsx
+	both modified:   src/components/panel/right/ExportPanel.tsx
+	both modified:   src/components/panel/right/LibraryExportPanel.tsx
+	both modified:   src/components/panel/right/Masks.tsx
+	both modified:   src/components/panel/right/MasksPanel.tsx
+	both modified:   src/hooks/useThumbnails.tsx
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	conflicts_log.txt
+	diff.txt
+	get_conflicts.py
+	src-tauri/rawler/
+	status.txt
+

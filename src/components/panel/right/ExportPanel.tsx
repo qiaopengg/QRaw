@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { Save, CheckCircle, XCircle, Loader, Ban } from 'lucide-react';
@@ -24,19 +23,20 @@ import {
 import { Invokes, SelectedImage, AppSettings } from '../../ui/AppProperties';
 import ExportPresetsList from '../../ui/ExportPresetsList';
 import { useExportSettings } from '../../../hooks/useExportSettings';
+import { useOsPlatform } from '../../../hooks/useOsPlatform';
 
 interface ExportPanelProps {
   adjustments: Adjustments;
   exportState: ExportState;
   multiSelectedPaths: Array<string>;
   selectedImage: SelectedImage;
-  setExportState(state: ExportState): void;
+  setExportState(state: any): void;
   appSettings: AppSettings | null;
   onSettingsChange: (settings: AppSettings) => void;
 }
 
 interface SectionProps {
-  children: React.ReactNode;
+  children: any;
   title: string;
 }
 
@@ -208,7 +208,6 @@ export default function ExportPanel({
     handleApplyPreset,
     currentSettingsObject,
   } = useExportSettings();
-  const { t } = useTranslation();
 
   const initDone = useRef(false);
   useEffect(() => {
@@ -242,6 +241,8 @@ export default function ExportPanel({
   const [isEstimating, setIsEstimating] = useState<boolean>(false);
   const [watermarkImageAspectRatio, setWatermarkImageAspectRatio] = useState(1);
   const filenameInputRef = useRef<HTMLInputElement>(null);
+  const osPlatform = useOsPlatform();
+  const isAndroid = osPlatform === 'android';
 
   const { status, progress, errorMessage } = exportState;
   const isExporting = status === Status.Exporting;
@@ -422,43 +423,51 @@ export default function ExportPanel({
 
     try {
       if (isBatchMode || !isEditorContext) {
-        const outputFolder = await open({
-          title: `Select Folder to Export ${numImages} Image(s)`,
-          directory: true,
-          defaultPath: lastExportPath ?? undefined,
-        });
+        const outputFolder = isAndroid
+          ? ''
+          : await open({
+              title: `Select Folder to Export ${numImages} Image(s)`,
+              directory: true,
+              defaultPath: lastExportPath ?? undefined,
+            });
+
         if (outputFolder) {
-          saveLastUsedPreset(outputFolder as string);
+          if (!isAndroid) {
+            saveLastUsedPreset(outputFolder as string);
+          }
           setExportState({ status: Status.Exporting, progress: { current: 0, total: numImages }, errorMessage: '' });
           await invoke(Invokes.BatchExportImages, {
             exportSettings,
-            outputFolder,
+            outputFolder: outputFolder as string,
             outputFormat: FILE_FORMATS.find((f: FileFormat) => f.id === fileFormat)?.extensions[0],
             paths: pathsToExport,
           });
         }
       } else {
-        const selectedFormat: FileFormat | undefined = FILE_FORMATS.find((f) => f.id === fileFormat);
+        const selectedFormat: any = FILE_FORMATS.find((f) => f.id === fileFormat);
         const originalFilename = selectedImage.path.split(/[\\/]/).pop() || '';
         const stem = originalFilename.substring(0, originalFilename.lastIndexOf('.')) || originalFilename;
         const suggestedName = finalFilenameTemplate.replace('{original_filename}', stem);
-        const defaultPath = lastExportPath
-          ? `${lastExportPath}/${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`
-          : `${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`;
-        const filePath = await save({
-          title: 'Save Edited Image',
-          defaultPath,
-          filters: [
-            { name: selectedFormat?.name ?? 'Image', extensions: selectedFormat?.extensions ?? ['jpg'] },
-            ...FILE_FORMATS.filter((f: FileFormat) => f.id !== fileFormat).map((f: FileFormat) => ({
-              name: f.name,
-              extensions: f.extensions,
-            })),
-          ],
-        });
+        const outputFileName = `${suggestedName}.${selectedFormat.extensions[0]}`;
+        const filePath = isAndroid
+          ? outputFileName
+          : await save({
+              title: 'Save Edited Image',
+              defaultPath: lastExportPath ? `${lastExportPath}/${outputFileName}` : outputFileName,
+              filters: [
+                { name: selectedFormat.name, extensions: selectedFormat.extensions },
+                ...FILE_FORMATS.filter((f: FileFormat) => f.id !== fileFormat).map((f: FileFormat) => ({
+                  name: f.name,
+                  extensions: f.extensions,
+                })),
+              ],
+            });
+
         if (filePath) {
-          const dir = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')));
-          if (dir) saveLastUsedPreset(dir);
+          if (!isAndroid) {
+            const dir = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')));
+            if (dir) saveLastUsedPreset(dir);
+          }
           setExportState({ status: Status.Exporting, progress: { current: 0, total: numImages }, errorMessage: '' });
           await invoke(Invokes.ExportImage, {
             exportSettings,
@@ -505,7 +514,7 @@ export default function ExportPanel({
               onApplyPreset={handleApplyPreset}
             />
 
-            <Section title={t('export.fileSettings')}>
+            <Section title="File Settings">
               <div className="grid grid-cols-3 gap-2">
                 {FILE_FORMATS.map((format: FileFormat) => (
                   <button
@@ -520,11 +529,11 @@ export default function ExportPanel({
                   </button>
                 ))}
               </div>
-              {fileFormat === FileFormats.Jpeg && (
+              {[FileFormats.Jpeg, FileFormats.Webp, FileFormats.Jxl].includes(fileFormat as FileFormats) && (
                 <div className={isExporting ? 'opacity-50 pointer-events-none' : ''}>
                   <Slider
                     defaultValue={90}
-                    label="Quality"
+                    label={fileFormat === FileFormats.Jxl && jpegQuality === 100 ? 'Quality (Lossless)' : 'Quality'}
                     max={100}
                     min={1}
                     onChange={(e) => setJpegQuality(Number(e.target.value))}
@@ -536,7 +545,7 @@ export default function ExportPanel({
             </Section>
 
             {isBatchMode && (
-              <Section title={t('export.fileNaming')}>
+              <Section title="File Naming">
                 <input
                   className="w-full bg-bg-primary border border-surface rounded-md p-2 text-sm text-text-primary focus:ring-accent focus:border-accent"
                   disabled={isExporting}
@@ -560,153 +569,163 @@ export default function ExportPanel({
               </Section>
             )}
 
-            <Section title={t('export.imageSizing')}>
-              <Switch
-                label={t('export.resizeToFit')}
-                checked={enableResize}
-                onChange={setEnableResize}
-                disabled={isExporting}
-              />
-              {enableResize && (
-                <div className="space-y-4 pl-2 border-l-2 border-surface">
-                  <div className="flex items-center gap-2">
-                    <Dropdown
-                      options={resizeModeOptions}
-                      value={resizeMode}
-                      onChange={setResizeMode}
-                      disabled={isExporting}
-                      className="w-full"
-                    />
-                    <input
-                      className="w-24 bg-bg-primary text-center rounded-md p-2 border border-surface focus:border-accent focus:ring-accent"
-                      disabled={isExporting}
-                      min="1"
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setResizeValue(parseInt(e?.target?.value))}
-                      type="number"
-                      value={resizeValue}
-                    />
-                    <span className="text-sm">pixels</span>
-                  </div>
+            {fileFormat !== FileFormats.Cube && (
+              <>
+                <Section title="Image Sizing">
                   <Switch
-                    checked={dontEnlarge}
-                    disabled={isExporting}
-                    label={t('export.dontEnlarge')}
-                    onChange={setDontEnlarge}
-                  />
-                </div>
-              )}
-            </Section>
-
-            <Section title={t('export.metadata')}>
-              <Switch
-                checked={keepMetadata}
-                disabled={isExporting}
-                label={t('export.keepOriginalMetadata')}
-                onChange={setKeepMetadata}
-              />
-              {keepMetadata && (
-                <div className="pl-2 border-l-2 border-surface">
-                  <Switch
-                    label={t('export.removeGpsData')}
-                    checked={stripGps}
-                    onChange={setStripGps}
+                    label="Resize to Fit"
+                    checked={enableResize}
+                    onChange={setEnableResize}
                     disabled={isExporting}
                   />
-                </div>
-              )}
-            </Section>
-
-            {isEditorContext && (
-              <Section title={t('export.masks')}>
-                <Switch
-                  label={t('export.exportMasksAsSeparate')}
-                  checked={exportMasks}
-                  onChange={setExportMasks}
-                  disabled={isExporting}
-                />
-              </Section>
-            )}
-
-            <Section title={t('export.watermark')}>
-              <Switch
-                label={t('export.addWatermark')}
-                checked={enableWatermark}
-                onChange={setEnableWatermark}
-                disabled={isExporting}
-              />
-              {enableWatermark && (
-                <div className="space-y-4 pl-2 border-l-2 border-surface">
-                  <ImagePicker
-                    label="Watermark Image"
-                    imageName={watermarkPath ? watermarkPath.split(/[\\/]/).pop() || null : null}
-                    onImageSelect={setWatermarkPath}
-                    onClear={() => setWatermarkPath(null)}
-                  />
-                  {watermarkPath && (
-                    <>
-                      <Dropdown
-                        options={anchorOptions}
-                        value={watermarkAnchor}
-                        onChange={(val) => setWatermarkAnchor(val)}
+                  {enableResize && (
+                    <div className="space-y-4 pl-2 border-l-2 border-surface">
+                      <div className="flex items-center gap-2">
+                        <Dropdown
+                          options={resizeModeOptions}
+                          value={resizeMode}
+                          onChange={setResizeMode}
+                          disabled={isExporting}
+                          className="w-full"
+                        />
+                        <input
+                          className="w-24 bg-bg-primary text-center rounded-md p-2 border border-surface focus:border-accent focus:ring-accent"
+                          disabled={isExporting}
+                          min="1"
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setResizeValue(parseInt(e?.target?.value))
+                          }
+                          type="number"
+                          value={resizeValue}
+                        />
+                        <span className="text-sm">pixels</span>
+                      </div>
+                      <Switch
+                        checked={dontEnlarge}
                         disabled={isExporting}
-                        className="w-full"
+                        label="Don't Enlarge"
+                        onChange={setDontEnlarge}
                       />
-                      <Slider
-                        label="Scale"
-                        min={1}
-                        max={50}
-                        step={1}
-                        value={watermarkScale}
-                        onChange={(e) => setWatermarkScale(Number(e.target.value))}
-                        disabled={isExporting}
-                        defaultValue={10}
-                      />
-                      <Slider
-                        label="Spacing"
-                        min={0}
-                        max={25}
-                        step={1}
-                        value={watermarkSpacing}
-                        onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
-                        disabled={isExporting}
-                        defaultValue={5}
-                      />
-                      <Slider
-                        label="Opacity"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={watermarkOpacity}
-                        onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
-                        disabled={isExporting}
-                        defaultValue={75}
-                      />
-                      <WatermarkPreview
-                        imageAspectRatio={imageAspectRatio}
-                        watermarkImageAspectRatio={watermarkImageAspectRatio}
-                        watermarkPath={watermarkPath}
-                        anchor={watermarkAnchor}
-                        scale={watermarkScale}
-                        spacing={watermarkSpacing}
-                        opacity={watermarkOpacity}
-                      />
-                    </>
+                    </div>
                   )}
-                </div>
-              )}
-            </Section>
+                </Section>
+
+                {fileFormat == FileFormats.Jpeg && (
+                  <>
+                    <Section title="Metadata">
+                      <Switch
+                        checked={keepMetadata}
+                        disabled={isExporting}
+                        label="Keep Original Metadata"
+                        onChange={setKeepMetadata}
+                      />
+                      {keepMetadata && (
+                        <div className="pl-2 border-l-2 border-surface">
+                          <Switch
+                            label="Remove GPS Data"
+                            checked={stripGps}
+                            onChange={setStripGps}
+                            disabled={isExporting}
+                          />
+                        </div>
+                      )}
+                    </Section>
+                  </>
+                )}
+
+                {isEditorContext && (
+                  <Section title="Masks">
+                    <Switch
+                      label="Export masks as separate files"
+                      checked={exportMasks}
+                      onChange={setExportMasks}
+                      disabled={isExporting}
+                    />
+                  </Section>
+                )}
+
+                <Section title="Watermark">
+                  <Switch
+                    label="Add Watermark"
+                    checked={enableWatermark}
+                    onChange={setEnableWatermark}
+                    disabled={isExporting}
+                  />
+                  {enableWatermark && (
+                    <div className="space-y-4 pl-2 border-l-2 border-surface">
+                      <ImagePicker
+                        label="Watermark Image"
+                        imageName={watermarkPath ? watermarkPath.split(/[\\/]/).pop() || null : null}
+                        onImageSelect={setWatermarkPath}
+                        onClear={() => setWatermarkPath(null)}
+                      />
+                      {watermarkPath && (
+                        <>
+                          <Dropdown
+                            options={anchorOptions}
+                            value={watermarkAnchor}
+                            onChange={(val) => setWatermarkAnchor(val)}
+                            disabled={isExporting}
+                            className="w-full"
+                          />
+                          <Slider
+                            label="Scale"
+                            min={1}
+                            max={50}
+                            step={1}
+                            value={watermarkScale}
+                            onChange={(e) => setWatermarkScale(Number(e.target.value))}
+                            disabled={isExporting}
+                            defaultValue={10}
+                          />
+                          <Slider
+                            label="Spacing"
+                            min={0}
+                            max={25}
+                            step={1}
+                            value={watermarkSpacing}
+                            onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
+                            disabled={isExporting}
+                            defaultValue={5}
+                          />
+                          <Slider
+                            label="Opacity"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={watermarkOpacity}
+                            onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
+                            disabled={isExporting}
+                            defaultValue={75}
+                          />
+                          <WatermarkPreview
+                            imageAspectRatio={imageAspectRatio}
+                            watermarkImageAspectRatio={watermarkImageAspectRatio}
+                            watermarkPath={watermarkPath}
+                            anchor={watermarkAnchor}
+                            scale={watermarkScale}
+                            spacing={watermarkSpacing}
+                            opacity={watermarkOpacity}
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
+                </Section>
+              </>
+            )}
           </>
         ) : (
-          <p className="text-center text-text-tertiary mt-4">{t('export.noImageSelected')}</p>
+          <p className="text-center text-text-tertiary mt-4">No image selected for export.</p>
         )}
       </div>
 
       <div className="p-4 border-t border-surface shrink-0 space-y-3">
         <div className="text-center text-xs text-text-tertiary h-4">
           {isEstimating ? (
-            <span className="italic">{t('export.estimatingSize')}</span>
+            <span className="italic">Estimating size...</span>
           ) : estimatedSize !== null ? (
-            <span>{t('export.estimatedFileSize', { size: formatBytes(estimatedSize) })}</span>
+            <span>Estimated file size: ~{formatBytes(estimatedSize)}</span>
           ) : null}
         </div>
         <Button
@@ -729,26 +748,24 @@ export default function ExportPanel({
             <>
               <span className="flex items-center group-hover:hidden">
                 <Loader size={18} className="animate-spin mr-2" />
-                {progress.total > 1
-                  ? t('export.exportingProgress', { current: progress.current, total: progress.total })
-                  : t('export.exporting')}
+                Exporting…{progress.total > 1 && ` (${progress.current}/${progress.total})`}
               </span>
               <span className="hidden items-center group-hover:flex">
                 <Ban size={18} className="mr-2" />
-                {t('export.cancelExport')}
+                Cancel Export
               </span>
             </>
           ) : status === Status.Success ? (
             <>
-              <CheckCircle size={18} className="mr-2" /> {t('export.exportSuccessful')}
+              <CheckCircle size={18} className="mr-2" /> Export successful!
             </>
           ) : status === Status.Error ? (
             <>
-              <XCircle size={18} className="mr-2" /> {errorMessage || t('export.exportFailed')}
+              <XCircle size={18} className="mr-2" /> {errorMessage || 'Export failed'}
             </>
           ) : status === Status.Cancelled ? (
             <>
-              <Ban size={18} className="mr-2" /> {t('export.exportCancelled')}
+              <Ban size={18} className="mr-2" /> Export cancelled
             </>
           ) : (
             <>

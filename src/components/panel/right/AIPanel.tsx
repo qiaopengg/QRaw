@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -16,12 +15,15 @@ import {
 } from '@dnd-kit/core';
 import {
   Circle,
+  ClipboardPaste,
+  Copy,
   Eye,
   EyeOff,
   FileEdit,
   Loader2,
   Minus,
   Plus,
+  PlusSquare,
   RotateCcw,
   Trash2,
   Wand2,
@@ -43,11 +45,13 @@ import {
   SubMaskMode,
   ToolType,
   MASK_ICON_MAP,
-  getAiPanelCreationTypes,
-  getAiSubMaskComponentTypes,
+  AI_PANEL_CREATION_TYPES,
+  AI_SUB_MASK_COMPONENT_TYPES,
+  formatMaskTypeName,
+  getSubMaskName,
 } from './Masks';
 import { Adjustments, AiPatch } from '../../../utils/adjustments';
-import { BrushSettings, SelectedImage } from '../../ui/AppProperties';
+import { BrushSettings, OPTION_SEPARATOR, SelectedImage } from '../../ui/AppProperties';
 import { createSubMask } from '../../../utils/maskUtils';
 
 interface AiPanelProps {
@@ -61,14 +65,14 @@ interface AiPanelProps {
   isGeneratingAiMask: boolean;
   onDeletePatch(id: string): void;
   onGenerateAiForegroundMask(id: string): void;
-  onGenerativeReplace(patchId: string, prompt: string, useFastInpaint: boolean): void;
+  onGenerativeReplace(patchId: string, prompt: any, useFastInpaint: boolean): void;
   onSelectPatchContainer(id: string | null): void;
   onSelectSubMask(id: string | null): void;
   onTogglePatchVisibility(id: string): void;
   selectedImage: SelectedImage;
-  setAdjustments(updater: (prev: Adjustments) => Adjustments): void;
+  setAdjustments(updater: any): void;
   setBrushSettings(brushSettings: BrushSettings | null): void;
-  setCustomEscapeHandler(handler: (() => void) | null): void;
+  setCustomEscapeHandler(handler: any): void;
   onDragStateChange?: (isDragging: boolean) => void;
 }
 
@@ -83,13 +87,6 @@ interface DragData {
   parentId?: string;
 }
 
-function formatMaskTypeName(type: string, t: (key: string) => string) {
-  if (type === Mask.AiSubject) return t('masking.aiSubject');
-  if (type === Mask.AiForeground) return t('masking.aiForeground');
-  if (type === Mask.AiSky) return t('masking.aiSky');
-  return type.charAt(0).toUpperCase() + type.slice(1);
-}
-
 const PLACEHOLDER_PATCH: AiPatch = {
   id: 'placeholder',
   invert: false,
@@ -101,122 +98,91 @@ const PLACEHOLDER_PATCH: AiPatch = {
   visible: true,
 };
 
-interface SubMaskParam {
-  key: string;
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  multiplier?: number;
-  defaultValue: number;
-}
-
-interface SubMaskConfigEntry {
-  parameters?: SubMaskParam[];
-  showBrushTools?: boolean;
-}
-
-const getSubMaskConfig = (t: (key: string) => string): Partial<Record<Mask, SubMaskConfigEntry>> => ({
+const SUB_MASK_CONFIG: any = {
   [Mask.Radial]: {
-    parameters: [
-      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 },
-    ],
+    parameters: [{ key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 }],
   },
   [Mask.Brush]: { showBrushTools: true },
   [Mask.Linear]: { parameters: [] },
   [Mask.AiSubject]: {
     parameters: [
-      { key: 'grow', label: t('ai.grow'), min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, defaultValue: 25 },
+      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 50 },
+      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiForeground]: {
     parameters: [
-      { key: 'grow', label: t('ai.grow'), min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, defaultValue: 25 },
+      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 50 },
+      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiSky]: {
     parameters: [
-      { key: 'grow', label: t('ai.grow'), min: -100, max: 100, step: 1, defaultValue: 0 },
-      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, defaultValue: 0 },
+      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 0 },
     ],
   },
   [Mask.QuickEraser]: {
     parameters: [
-      { key: 'grow', label: t('ai.grow'), min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, defaultValue: 50 },
+      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 75 },
+      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 75 },
     ],
   },
-});
-
-const BrushTools = ({
-  settings,
-  onSettingsChange,
-}: {
-  settings: BrushSettings;
-  onSettingsChange: (settings: BrushSettings) => void;
-}) => {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-4 pt-4 border-t border-surface mt-4">
-      <Slider
-        defaultValue={100}
-        label={t('masking.brushSize')}
-        max={200}
-        min={1}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          onSettingsChange({ ...settings, size: Number(e.target.value) })
-        }
-        step={1}
-        value={settings.size}
-      />
-      <Slider
-        defaultValue={50}
-        label={t('masking.brushFeather')}
-        max={100}
-        min={0}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          onSettingsChange({ ...settings, feather: Number(e.target.value) })
-        }
-        step={1}
-        value={settings.feather}
-      />
-      <div className="grid grid-cols-2 gap-2 pt-2">
-        <button
-          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-            settings.tool === ToolType.Brush
-              ? 'text-primary bg-surface'
-              : 'bg-surface text-text-secondary hover:bg-card-active'
-          }`}
-          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Brush })}
-        >
-          {t('common.add')}
-        </button>
-        <button
-          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-            settings.tool === ToolType.Eraser
-              ? 'text-primary bg-surface'
-              : 'bg-surface text-text-secondary hover:bg-card-active'
-          }`}
-          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Eraser })}
-        >
-          {t('common.erase')}
-        </button>
-      </div>
-    </div>
-  );
 };
+
+const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => (
+  <div className="space-y-4 pt-4 border-t border-surface mt-4">
+    <Slider
+      defaultValue={100}
+      label="Brush Size"
+      max={200}
+      min={1}
+      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
+      step={1}
+      value={settings.size}
+    />
+    <Slider
+      defaultValue={50}
+      label="Brush Feather"
+      max={100}
+      min={0}
+      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+      step={1}
+      value={settings.feather}
+    />
+    <div className="grid grid-cols-2 gap-2 pt-2">
+      <button
+        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+          settings.tool === ToolType.Brush
+            ? 'text-primary bg-surface'
+            : 'bg-surface text-text-secondary hover:bg-card-active'
+        }`}
+        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Brush }))}
+      >
+        Add
+      </button>
+      <button
+        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+          settings.tool === ToolType.Eraser
+            ? 'text-primary bg-surface'
+            : 'bg-surface text-text-secondary hover:bg-card-active'
+        }`}
+        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Eraser }))}
+      >
+        Erase
+      </button>
+    </div>
+  </div>
+);
 
 const ConnectionStatus = ({ isConnected }: ConnectionStatusProps) => {
   const [isHovered, setIsHovered] = useState(false);
-  const { t } = useTranslation();
   if (isConnected) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-surface rounded-lg mb-4">
         <div className={'w-2.5 h-2.5 rounded-full bg-green-500'} />
-        <span className="text-sm font-medium text-text-secondary">{t('ai.aiConnectorLabel')}</span>
-        <span className={'text-sm font-bold text-green-400'}>{t('ai.aiConnectorReady')}</span>
+        <span className="text-sm font-medium text-text-secondary">AI Connector:</span>
+        <span className={'text-sm font-bold text-green-400'}>Ready</span>
       </div>
     );
   }
@@ -228,8 +194,8 @@ const ConnectionStatus = ({ isConnected }: ConnectionStatusProps) => {
     >
       <div className="flex items-center gap-2 px-4 pt-2">
         <div className={'w-2.5 h-2.5 rounded-full bg-red-500'} />
-        <span className="text-sm font-medium text-text-secondary">{t('ai.aiConnectorLabel')}</span>
-        <span className={'text-sm font-bold text-red-400'}>{t('ai.aiConnectorNotDetected')}</span>
+        <span className="text-sm font-medium text-text-secondary">AI Connector:</span>
+        <span className={'text-sm font-bold text-red-400'}>Not Detected</span>
       </div>
       <div className="px-4 pb-2">
         <motion.div
@@ -238,7 +204,9 @@ const ConnectionStatus = ({ isConnected }: ConnectionStatusProps) => {
           initial={{ height: 0, opacity: 0, marginTop: 0 }}
           transition={{ duration: 0.2, ease: 'easeInOut' }}
         >
-          <p className="text-xs text-text-secondary">{t('ai.simpleInpaintingOnly')}</p>
+          <p className="text-xs text-text-secondary">
+            Only basic inpainting available. Connect backend for generative features.
+          </p>
         </motion.div>
       </div>
     </div>
@@ -267,21 +235,22 @@ export default function AIPanel({
   onDragStateChange,
 }: AiPanelProps) {
   const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set());
-  const { t } = useTranslation();
   const [activeDragItem, setActiveDragItem] = useState<DragData | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
-  const [isPatchListEmpty, setIsPatchListEmpty] = useState((adjustments.aiPatches || []).length === 0);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [isSettingsPanelEverOpened, setIsSettingsPanelEverOpened] = useState(false);
   const hasPerformedInitialSelection = useRef(false);
   const [analyzingSubMaskId, setAnalyzingSubMaskId] = useState<string | null>(null);
+  const [copiedPatch, setCopiedPatch] = useState<AiPatch | null>(null);
+  const [copiedSubMask, setCopiedSubMask] = useState<SubMask | null>(null);
 
   const [collapsibleState, setCollapsibleState] = useState({
     generative: true,
     properties: true,
   });
 
+  const { showContextMenu } = useContextMenu();
   const { setNodeRef: setRootDroppableRef, isOver: isRootOver } = useDroppable({ id: 'ai-list-root' });
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -319,7 +288,6 @@ export default function AIPanel({
 
     if (hasPatches) {
       setIsSettingsPanelEverOpened(true);
-      setIsPatchListEmpty(false);
     }
 
     if (activePatchContainerId) {
@@ -383,9 +351,9 @@ export default function AIPanel({
     const imgW = isRotated ? selectedImage.height || 1000 : selectedImage.width || 1000;
     const imgH = isRotated ? selectedImage.width || 1000 : selectedImage.height || 1000;
 
-    const config = getSubMaskConfig(t)[type];
+    const config = SUB_MASK_CONFIG[type];
     if (config && config.parameters) {
-      config.parameters.forEach((param: SubMaskParam) => {
+      config.parameters.forEach((param: any) => {
         if (param.defaultValue !== undefined) {
           subMask.parameters[param.key] = param.defaultValue / (param.multiplier || 1);
         }
@@ -407,38 +375,11 @@ export default function AIPanel({
       subMask.parameters.centerY = -10000;
       subMask.parameters.radiusX = 0;
       subMask.parameters.radiusY = 0;
-    } else if (adjustments?.crop && subMask.parameters) {
-      const { x, y, width, height, unit } = adjustments.crop as {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        unit: string;
-      };
-      const isPercent = unit === '%';
-
-      const cW = isPercent ? (width / 100) * imgW : width;
-      const cH = isPercent ? (height / 100) * imgH : height;
-      const cX = isPercent ? (x / 100) * imgW : x;
-      const cY = isPercent ? (y / 100) * imgH : y;
-
-      if (imgW && imgH) {
-        const _ratioX = cW / imgW;
-        const _ratioY = cH / imgH;
-        const _cx = cX + cW / 2;
-        const _cy = cY + cH / 2;
-        const _ox = imgW / 2;
-        const _oy = imgH / 2;
-
-        const p = { ...subMask.parameters };
-        subMask.parameters = p;
-      }
     }
     return subMask;
   };
 
   const handleAddAiPatchContainer = (type: Mask) => {
-    if ((adjustments.aiPatches || []).length === 0) setIsPatchListEmpty(false);
     const subMask = createMaskLogic(type);
 
     let name: string;
@@ -447,9 +388,9 @@ export default function AIPanel({
         (adjustments.aiPatches || []).filter((p: AiPatch) =>
           p.subMasks.some((sm: SubMask) => sm.type === Mask.QuickEraser),
         ).length + 1;
-      name = t('ai.quickEraseCount', { count });
+      name = `Quick Erase ${count}`;
     } else {
-      name = t('ai.aiEditCount', { count: (adjustments.aiPatches || []).length + 1 });
+      name = `AI Edit ${(adjustments.aiPatches || []).length + 1}`;
     }
 
     const newContainer: AiPatch = {
@@ -491,13 +432,37 @@ export default function AIPanel({
     if (type === Mask.AiForeground) onGenerateAiForegroundMask(subMask.id);
   };
 
-  const updatePatch = (id: string, data: Partial<AiPatch>) =>
+  const handleAddAiContextMenu = (event: React.MouseEvent, targetContainerId?: string | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+
+    const types = targetContainerId ? AI_SUB_MASK_COMPONENT_TYPES : AI_PANEL_CREATION_TYPES;
+
+    const options = types
+      .filter((mt) => !mt.disabled)
+      .map((maskType: MaskType) => ({
+        label: maskType.name,
+        icon: maskType.icon,
+        onClick: () => {
+          if (targetContainerId) {
+            handleAddSubMask(targetContainerId, maskType.type);
+          } else {
+            handleAddAiPatchContainer(maskType.type);
+          }
+        },
+      }));
+
+    showContextMenu(rect.left, rect.bottom + 5, options);
+  };
+
+  const updatePatch = (id: string, data: any) =>
     setAdjustments((prev: Adjustments) => ({
       ...prev,
       aiPatches: prev.aiPatches.map((p) => (p.id === id ? { ...p, ...data } : p)),
     }));
 
-  const updateSubMask = (id: string, data: Partial<SubMask>) =>
+  const updateSubMask = (id: string, data: any) =>
     setAdjustments((prev: Adjustments) => ({
       ...prev,
       aiPatches: prev.aiPatches.map((p) => ({
@@ -519,6 +484,139 @@ export default function AIPanel({
         p.id === containerId ? { ...p, subMasks: p.subMasks.filter((sm) => sm.id !== subMaskId) } : p,
       ),
     }));
+  };
+
+  const clonePatchData = (container: AiPatch, options: { invert?: boolean; rename?: boolean } = {}): AiPatch => {
+    const clonedContainer = JSON.parse(JSON.stringify(container));
+
+    clonedContainer.id = uuidv4();
+    clonedContainer.invert = options.invert ? !clonedContainer.invert : clonedContainer.invert;
+    clonedContainer.isLoading = false;
+    clonedContainer.name = options.rename === false ? clonedContainer.name : `${container.name} Copy`;
+    clonedContainer.patchData = null;
+    clonedContainer.subMasks = clonedContainer.subMasks.map((subMask: SubMask) => ({
+      ...subMask,
+      id: uuidv4(),
+    }));
+
+    return clonedContainer;
+  };
+
+  const cloneSubMaskData = (subMask: SubMask, options: { invert?: boolean; rename?: boolean } = {}): SubMask => {
+    const clonedSubMask = JSON.parse(JSON.stringify(subMask));
+
+    clonedSubMask.id = uuidv4();
+    clonedSubMask.invert = options.invert ? !clonedSubMask.invert : clonedSubMask.invert;
+    clonedSubMask.name = options.rename === false ? clonedSubMask.name : `${getSubMaskName(subMask)} Copy`;
+
+    return clonedSubMask;
+  };
+
+  const copyPatchToClipboard = (container: AiPatch) => {
+    setCopiedPatch(JSON.parse(JSON.stringify(container)));
+  };
+
+  const copySubMaskToClipboard = (subMask: SubMask) => {
+    setCopiedSubMask(JSON.parse(JSON.stringify(subMask)));
+  };
+
+  const insertPatchContainer = (container: AiPatch, insertIndex?: number) => {
+    setAdjustments((prev: Adjustments) => {
+      const newPatches = [...(prev.aiPatches || [])];
+      const targetIndex = Math.max(0, Math.min(insertIndex ?? newPatches.length, newPatches.length));
+
+      newPatches.splice(targetIndex, 0, container);
+      return { ...prev, aiPatches: newPatches };
+    });
+
+    onSelectPatchContainer(container.id);
+    onSelectSubMask(null);
+    setExpandedContainers((prev) => new Set(prev).add(container.id));
+  };
+
+  const insertSubMaskIntoContainer = (containerId: string, subMask: SubMask, insertIndex?: number) => {
+    setAdjustments((prev: Adjustments) => ({
+      ...prev,
+      aiPatches: (prev.aiPatches || []).map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+
+        const newSubMasks = [...container.subMasks];
+        const targetIndex = Math.max(0, Math.min(insertIndex ?? newSubMasks.length, newSubMasks.length));
+
+        newSubMasks.splice(targetIndex, 0, subMask);
+        return { ...container, subMasks: newSubMasks };
+      }),
+    }));
+
+    onSelectPatchContainer(containerId);
+    onSelectSubMask(subMask.id);
+    setExpandedContainers((prev) => new Set(prev).add(containerId));
+  };
+
+  const handleDuplicatePatchContainer = (container: AiPatch) => {
+    const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
+    const duplicatedContainer = clonePatchData(container, { rename: true });
+
+    insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
+  };
+
+  const handleDuplicateAndInvertPatchContainer = (container: AiPatch) => {
+    const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
+    const duplicatedContainer = clonePatchData(container, { invert: true, rename: true });
+
+    insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
+  };
+
+  const handlePastePatch = (insertAfterContainerId?: string) => {
+    if (!copiedPatch) {
+      return;
+    }
+
+    const pastedContainer = clonePatchData(copiedPatch, { rename: false });
+    const patchIndex = insertAfterContainerId
+      ? (adjustments.aiPatches || []).findIndex((patch) => patch.id === insertAfterContainerId)
+      : -1;
+
+    insertPatchContainer(pastedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
+  };
+
+  const handleDuplicateSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
+    const duplicatedSubMask = cloneSubMaskData(subMask, { rename: true });
+    insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
+  };
+
+  const handleDuplicateAndInvertSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
+    const duplicatedSubMask = cloneSubMaskData(subMask, { invert: true, rename: true });
+    insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
+  };
+
+  const handlePasteSubMask = (containerId: string, insertIndex?: number) => {
+    if (!copiedSubMask) {
+      return;
+    }
+
+    const pastedSubMask = cloneSubMaskData(copiedSubMask, { rename: false });
+    insertSubMaskIntoContainer(containerId, pastedSubMask, insertIndex);
+  };
+
+  const handlePanelContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!selectedImage) {
+      return;
+    }
+
+    const newEditSubMenu = AI_PANEL_CREATION_TYPES.filter((maskType) => !maskType.disabled).map((maskType) => ({
+      label: maskType.name,
+      icon: maskType.icon,
+      onClick: () => handleAddAiPatchContainer(maskType.type),
+    }));
+
+    showContextMenu(e.clientX, e.clientY, [
+      { label: 'Paste Edit', icon: ClipboardPaste, disabled: !copiedPatch, onClick: () => handlePastePatch() },
+      { label: 'Add New Edit', icon: Plus, submenu: newEditSubMenu },
+    ]);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -549,7 +647,7 @@ export default function AIPanel({
         }
       };
 
-      if (!isPatchListEmpty) setPendingAction(() => creationFn);
+      if ((adjustments.aiPatches || []).length > 0) setPendingAction(() => creationFn);
       else creationFn();
       return;
     }
@@ -590,13 +688,12 @@ export default function AIPanel({
           if (subMaskIndex === -1) return prev;
 
           const [movedSubMask] = sourceContainer.subMasks.splice(subMaskIndex, 1);
-          if ((adjustments.aiPatches || []).length === 0) setIsPatchListEmpty(false);
 
           const newContainer: AiPatch = {
             id: uuidv4(),
             invert: false,
             isLoading: false,
-            name: t('ai.aiEditCount', { count: newPatches.length + 1 }),
+            name: `AI Edit ${newPatches.length + 1}`,
             patchData: null,
             prompt: '',
             subMasks: [movedSubMask],
@@ -660,80 +757,72 @@ export default function AIPanel({
       onDragEnd={handleDragEnd}
       collisionDetection={pointerWithin}
     >
-      <div className="flex flex-col h-full select-none overflow-hidden" onClick={handleDeselect}>
-        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface h-[69px]">
-          <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('ai.title')}</h2>
+      <div
+        className="flex flex-col h-full select-none overflow-hidden"
+        onClick={handleDeselect}
+        onContextMenu={handlePanelContextMenu}
+      >
+        <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+          <h2 className="text-xl font-bold text-primary text-shadow-shiny">Inpainting</h2>
           <button
             className="p-2 rounded-full hover:bg-surface transition-colors"
             onClick={handleResetAllAiEdits}
-            data-tooltip={t('ai.resetInpainting')}
+            data-tooltip="Reset Inpainting"
           >
             <RotateCcw size={18} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
-          <div className="p-4 pb-2 z-10 flex-shrink-0">
-            {!selectedImage && <p className="text-center text-text-tertiary mt-4">No image selected.</p>}
-
-            {selectedImage && (
-              <>
-                <ConnectionStatus isConnected={isAIConnectorConnected} />
-                <p className="text-sm mb-3 font-semibold text-text-primary">
-                  {activePatchContainerId ? t('ai.addToSelection') : t('ai.createNewEdit')}
-                </p>
-                <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
-                  {getAiPanelCreationTypes(t).map((maskType: MaskType) => {
-                    const isComponentMode = !!activePatchContainerId;
-                    const typeToRender = isComponentMode
-                      ? getAiSubMaskComponentTypes(t).find((ct) => ct.type === maskType.type)
-                      : maskType;
-
-                    if (!typeToRender) return null;
-
-                    return (
-                      <DraggableGridItem
-                        key={typeToRender.type}
-                        maskType={typeToRender}
-                        isGenerating={isGeneratingAi}
-                        activePatchContainerId={activePatchContainerId}
-                        onClick={() =>
-                          typeToRender.type &&
-                          (isComponentMode
-                            ? handleAddSubMask(activePatchContainerId, typeToRender.type)
-                            : handleAddAiPatchContainer(typeToRender.type))
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-
-          <AnimatePresence>
-            {isSettingsPanelEverOpened && selectedImage && (
+          <AnimatePresence mode="wait">
+            {(adjustments.aiPatches || []).length === 0 ? (
               <motion.div
+                key="ai-grid"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="p-4 pb-2 z-10 shrink-0"
+              >
+                {!selectedImage ? (
+                  <p className="text-center text-text-tertiary mt-4">No image selected.</p>
+                ) : (
+                  <>
+                    <ConnectionStatus isConnected={isAIConnectorConnected} />
+                    <p className="text-sm mb-3 font-semibold text-text-primary">Create New Generative Edit</p>
+                    <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
+                      {AI_PANEL_CREATION_TYPES.map((maskType: MaskType) => (
+                        <DraggableGridItem
+                          key={maskType.type}
+                          maskType={maskType}
+                          isGenerating={isGeneratingAi}
+                          onClick={() => handleAddAiPatchContainer(maskType.type)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="ai-list"
                 ref={setRootDroppableRef}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
-                className={`flex flex-col px-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
+                className={`flex flex-col px-4 pt-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
               >
-                <p className="text-sm my-3 font-semibold text-text-primary">{t('ai.edits')}</p>
-
-                {isPatchListEmpty && (adjustments.aiPatches || []).length === 0 && (
-                  <div className="text-center text-text-secondary text-sm py-4 opacity-70">
-                    {t('ai.noEditsCreated')}
-                  </div>
-                )}
+                <p className="text-sm my-3 font-semibold text-text-primary">Edits</p>
 
                 <AnimatePresence
                   initial={false}
                   mode="popLayout"
                   onExitComplete={() => {
-                    if ((adjustments.aiPatches || []).length === 0) setIsPatchListEmpty(true);
+                    if (pendingAction) {
+                      pendingAction();
+                      setPendingAction(null);
+                    }
                   }}
                 >
                   {(adjustments.aiPatches || []).map((container) => (
@@ -754,27 +843,46 @@ export default function AIPanel({
                       setTempName={setTempName}
                       updateContainer={updatePatch}
                       handleDelete={handleDeleteContainer}
+                      handleDuplicate={handleDuplicatePatchContainer}
+                      handleDuplicateAndInvert={handleDuplicateAndInvertPatchContainer}
+                      handlePastePatch={handlePastePatch}
+                      copyPatchToClipboard={copyPatchToClipboard}
+                      copiedPatch={copiedPatch}
+                      setAdjustments={setAdjustments}
                       activeDragItem={activeDragItem}
                       activeSubMaskId={activeSubMaskId}
                       onSelectContainer={onSelectPatchContainer}
                       onSelectSubMask={onSelectSubMask}
                       updateSubMask={updateSubMask}
                       handleDeleteSubMask={handleDeleteSubMask}
+                      handleDuplicateSubMask={handleDuplicateSubMask}
+                      handleDuplicateAndInvertSubMask={handleDuplicateAndInvertSubMask}
+                      handlePasteSubMask={handlePasteSubMask}
+                      copySubMaskToClipboard={copySubMaskToClipboard}
+                      copiedSubMask={copiedSubMask}
                       analyzingSubMaskId={analyzingSubMaskId}
+                      onAddComponent={(e: React.MouseEvent) => handleAddAiContextMenu(e, container.id)}
                     />
                   ))}
                 </AnimatePresence>
 
-                <AnimatePresence
-                  onExitComplete={() => {
-                    if (pendingAction) {
-                      pendingAction();
-                      setPendingAction(null);
-                    }
-                  }}
-                >
-                  {activeDragItem?.type === 'Creation' && !isPatchListEmpty && <NewMaskDropZone isOver={isRootOver} />}
+                <AnimatePresence>
+                  {activeDragItem?.type === 'Creation' && (adjustments.aiPatches || []).length > 0 && (
+                    <NewMaskDropZone isOver={isRootOver} />
+                  )}
                 </AnimatePresence>
+
+                <div
+                  className="flex items-center gap-2 p-2 rounded-md transition-colors hover:bg-card-active cursor-pointer mt-1 text-text-secondary hover:text-text-primary group"
+                  onClick={(e) => handleAddAiContextMenu(e, null)}
+                >
+                  <div className="p-0.5 opacity-70 group-hover:opacity-100">
+                    <Plus size={18} />
+                  </div>
+                  <span className="text-sm font-medium opacity-70 group-hover:opacity-100 transition-opacity">
+                    Add New Edit
+                  </span>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -788,7 +896,7 @@ export default function AIPanel({
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="flex-1 min-h-0"
               >
-                <p className="text-sm my-3 font-semibold text-text-primary px-4">{t('ai.editSettings')}</p>
+                <p className="text-sm my-3 font-semibold text-text-primary px-4">Edit Settings</p>
                 <SettingsPanel
                   container={activeContainer || null}
                   activeSubMask={activeSubMaskData || null}
@@ -812,7 +920,7 @@ export default function AIPanel({
 
       <DragOverlay dropAnimation={{ duration: 150, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
         {activeDragItem ? (
-          <div className="w-[var(--sidebar-width,280px)] pointer-events-none">
+          <div className="w-(--sidebar-width,280px) pointer-events-none">
             {activeDragItem.type === 'Container' && activeDragItem.item && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10">
                 <div className="text-text-secondary">
@@ -824,27 +932,27 @@ export default function AIPanel({
               </div>
             )}
             {activeDragItem.type === 'SubMask' && activeDragItem.item && (
-              <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10 ml-[15px]">
+              <div className="flex items-center gap-2 p-2 rounded-md bg-surface shadow-2xl opacity-90 ring-1 ring-black/10 ml-3.75">
                 {(() => {
                   const sm = activeDragItem.item as SubMask;
                   const Icon = MASK_ICON_MAP[sm.type] || Circle;
-                  return <Icon size={16} className="text-text-secondary flex-shrink-0 ml-1" />;
+                  return <Icon size={16} className="text-text-secondary shrink-0 ml-1" />;
                 })()}
                 <span className="text-sm text-text-primary flex-1 truncate">
-                  {formatMaskTypeName((activeDragItem.item as SubMask).type, t)}
+                  {getSubMaskName(activeDragItem.item as SubMask)}
                 </span>
               </div>
             )}
             {activeDragItem.type === 'Creation' && (
               <div className="bg-surface text-text-primary rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 aspect-square w-20 shadow-xl opacity-90">
                 {(() => {
-                  const maskType = getAiPanelCreationTypes(t).find((m) => m.type === activeDragItem.maskType);
+                  const maskType = AI_PANEL_CREATION_TYPES.find((m) => m.type === activeDragItem.maskType);
                   const Icon = maskType?.icon || Circle;
                   return (
                     <>
                       <Icon size={24} />
                       <span className="text-xs text-center">
-                        {activeDragItem.maskType ? formatMaskTypeName(activeDragItem.maskType, t) : t('panels.masks')}
+                        {activeDragItem.maskType ? formatMaskTypeName(activeDragItem.maskType) : 'Mask'}
                       </span>
                     </>
                   );
@@ -873,17 +981,7 @@ function NewMaskDropZone({ isOver }: { isOver: boolean }) {
   );
 }
 
-function DraggableGridItem({
-  maskType,
-  isGenerating,
-  onClick,
-  activePatchContainerId,
-}: {
-  maskType: MaskType;
-  isGenerating: boolean;
-  onClick: (e: React.MouseEvent) => void;
-  activePatchContainerId: string | null;
-}) {
+function DraggableGridItem({ maskType, isGenerating, onClick }: any) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `create-ai-${maskType.type}`,
     data: { type: 'Creation', maskType: maskType.type },
@@ -897,15 +995,13 @@ function DraggableGridItem({
       disabled={maskType.disabled || isGenerating}
       onClick={onClick}
       className={`bg-surface text-text-primary rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 aspect-square transition-colors
-              ${maskType.disabled || isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-card-active active:bg-accent/20'}
+              ${
+                maskType.disabled || isGenerating
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-card-active active:bg-accent/20'
+              }
               ${isDragging ? 'opacity-50' : ''}`}
-      data-tooltip={
-        maskType.disabled
-          ? 'Coming Soon'
-          : activePatchContainerId
-            ? `Add ${maskType.name} to Current Edit`
-            : `Create New ${maskType.name} Edit`
-      }
+      data-tooltip={maskType.disabled ? 'Coming Soon' : `Create New ${maskType.name} Edit`}
     >
       <maskType.icon size={24} /> <span className="text-xs">{maskType.name}</span>
     </button>
@@ -925,34 +1021,25 @@ function ContainerRow({
   setTempName,
   updateContainer,
   handleDelete,
+  handleDuplicate,
+  handleDuplicateAndInvert,
+  handlePastePatch,
+  copyPatchToClipboard,
+  copiedPatch,
   activeDragItem,
   activeSubMaskId,
   onSelectContainer,
   onSelectSubMask,
   updateSubMask,
   handleDeleteSubMask,
+  handleDuplicateSubMask,
+  handleDuplicateAndInvertSubMask,
+  handlePasteSubMask,
+  copySubMaskToClipboard,
+  copiedSubMask,
   analyzingSubMaskId,
-}: {
-  container: AiPatch;
-  isSelected: boolean;
-  hasActiveChild: boolean;
-  isExpanded: boolean;
-  onToggle: () => void;
-  onSelect: () => void;
-  renamingId: string | null;
-  setRenamingId: (id: string | null) => void;
-  tempName: string;
-  setTempName: (name: string) => void;
-  updateContainer: (id: string, data: Partial<AiPatch>) => void;
-  handleDelete: (id: string) => void;
-  activeDragItem: DragData | null;
-  activeSubMaskId: string | null;
-  onSelectContainer: (id: string | null) => void;
-  onSelectSubMask: (id: string | null) => void;
-  updateSubMask: (id: string, data: Partial<SubMask>) => void;
-  handleDeleteSubMask: (containerId: string, subMaskId: string) => void;
-  analyzingSubMaskId: string | null;
-}) {
+  onAddComponent,
+}: any) {
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: container.id,
     data: { type: 'Container', item: container },
@@ -963,13 +1050,7 @@ function ContainerRow({
     setNodeRef: setDraggableRef,
     isDragging,
   } = useDraggable({ id: container.id, data: { type: 'Container', item: container } });
-  const [isSubMaskListEmpty, setIsSubMaskListEmpty] = useState(container.subMasks.length === 0);
   const { showContextMenu } = useContextMenu();
-  const { t } = useTranslation();
-
-  useEffect(() => {
-    if (container.subMasks.length > 0 && isSubMaskListEmpty) setIsSubMaskListEmpty(false);
-  }, [container.subMasks.length, isSubMaskListEmpty]);
 
   const setCombinedRef = (node: HTMLElement | null) => {
     setDroppableRef(node);
@@ -988,19 +1069,29 @@ function ContainerRow({
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
       {
-        label: t('ai.rename'),
+        label: 'Rename',
         icon: FileEdit,
         onClick: () => {
           setRenamingId(container.id);
           setTempName(container.name);
         },
       },
+      { label: 'Duplicate Edit', icon: PlusSquare, onClick: () => handleDuplicate(container) },
+      { label: 'Duplicate and Invert Edit', icon: RotateCcw, onClick: () => handleDuplicateAndInvert(container) },
+      { label: 'Copy Edit', icon: Copy, onClick: () => copyPatchToClipboard(container) },
       {
-        label: t('ai.resetSelection'),
+        label: 'Paste Edit',
+        icon: ClipboardPaste,
+        disabled: !copiedPatch,
+        onClick: () => handlePastePatch(container.id),
+      },
+      { type: OPTION_SEPARATOR },
+      {
+        label: 'Reset Selection',
         icon: RotateCcw,
         onClick: () => updateContainer(container.id, { subMasks: [] }),
       },
-      { label: t('ai.deleteEdit'), icon: Trash2, isDestructive: true, onClick: () => handleDelete(container.id) },
+      { label: 'Delete Edit', icon: Trash2, isDestructive: true, onClick: () => handleDelete(container.id) },
     ]);
   };
 
@@ -1060,7 +1151,7 @@ function ContainerRow({
           {renamingId === container.id ? (
             <input
               autoFocus
-              className="bg-bg-primary text-sm w-full rounded px-1 outline-none border border-accent"
+              className="bg-bg-primary text-sm w-full rounded-sm px-1 outline-hidden border border-accent"
               value={tempName}
               onChange={(e) => setTempName(e.target.value)}
               onBlur={handleRenameSubmit}
@@ -1090,7 +1181,7 @@ function ContainerRow({
           </button>
           <button
             className="p-1 hover:text-red-500 text-text-secondary"
-            data-tooltip={t('ai.deleteEdit')}
+            data-tooltip="Delete Edit"
             onClick={(e) => {
               e.stopPropagation();
               handleDelete(container.id);
@@ -1107,16 +1198,10 @@ function ContainerRow({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden pl-2 border-l border-border-color/20 ml-[15px]"
+            className="overflow-hidden pl-2 border-l border-border-color/20 ml-3.75"
             layout
           >
-            <AnimatePresence
-              mode="popLayout"
-              initial={false}
-              onExitComplete={() => {
-                if (container.subMasks.length === 0) setIsSubMaskListEmpty(true);
-              }}
-            >
+            <AnimatePresence mode="popLayout" initial={false}>
               {container.subMasks.map((subMask: SubMask, index: number) => (
                 <SubMaskRow
                   key={subMask.id}
@@ -1133,21 +1218,48 @@ function ContainerRow({
                   }}
                   updateSubMask={updateSubMask}
                   handleDelete={() => handleDeleteSubMask(container.id, subMask.id)}
+                  handleDuplicate={() => handleDuplicateSubMask(container.id, subMask, index + 1)}
+                  handleDuplicateAndInvert={() => handleDuplicateAndInvertSubMask(container.id, subMask, index + 1)}
+                  handlePaste={() => handlePasteSubMask(container.id, index + 1)}
+                  handleCopy={() => copySubMaskToClipboard(subMask)}
+                  hasCopiedSubMask={!!copiedSubMask}
                   analyzingSubMaskId={analyzingSubMaskId}
+                  renamingId={renamingId}
+                  setRenamingId={setRenamingId}
+                  tempName={tempName}
+                  setTempName={setTempName}
                   isParentLoading={container.isLoading}
                 />
               ))}
             </AnimatePresence>
-            {isSubMaskListEmpty && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="p-3 text-xs text-text-secondary text-center italic"
-              >
-                No selection components.
-              </motion.div>
-            )}
+
+            <AnimatePresence initial={false}>
+              {(isSelected || hasActiveChild || container.subMasks.length === 0) && (
+                <motion.div
+                  key="add-component-btn"
+                  layout="position"
+                  initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                  animate={{ opacity: 1, height: 'auto', overflow: 'hidden' }}
+                  exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <div
+                    className="flex items-center gap-2 p-2 rounded-md transition-colors hover:bg-card-active cursor-pointer mt-0.5 text-text-secondary hover:text-text-primary group"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddComponent(e);
+                    }}
+                  >
+                    <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center opacity-70 group-hover:opacity-100">
+                      <Plus size={16} />
+                    </div>
+                    <span className="text-sm opacity-70 group-hover:opacity-100 transition-opacity select-none">
+                      Add New Component
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1165,23 +1277,19 @@ function SubMaskRow({
   onSelect,
   updateSubMask,
   handleDelete,
+  handleDuplicate,
+  handleDuplicateAndInvert,
+  handlePaste,
+  handleCopy,
+  hasCopiedSubMask,
   activeDragItem,
   analyzingSubMaskId,
+  renamingId,
+  setRenamingId,
+  tempName,
+  setTempName,
   isParentLoading,
-}: {
-  subMask: SubMask;
-  index: number;
-  totalCount: number;
-  containerId: string;
-  isActive: boolean;
-  parentVisible: boolean;
-  onSelect: () => void;
-  updateSubMask: (id: string, data: Partial<SubMask>) => void;
-  handleDelete: () => void;
-  activeDragItem: DragData | null;
-  analyzingSubMaskId: string | null;
-  isParentLoading: boolean;
-}) {
+}: any) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: subMask.id,
     data: { type: 'SubMask', item: subMask, parentId: containerId },
@@ -1196,7 +1304,6 @@ function SubMaskRow({
   };
   const MaskIcon = MASK_ICON_MAP[subMask.type as Mask] || Circle;
   const { showContextMenu } = useContextMenu();
-  const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDraggingContainer = activeDragItem?.type === 'Container';
@@ -1218,11 +1325,32 @@ function SubMaskRow({
     };
   }, []);
 
+  const handleRenameSubmit = () => {
+    if (tempName.trim()) {
+      const newName = tempName.trim();
+      updateSubMask(subMask.id, { name: newName });
+    }
+    setRenamingId(null);
+  };
+
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
-      { label: t('ai.deleteComponent'), icon: Trash2, isDestructive: true, onClick: handleDelete },
+      {
+        label: 'Rename',
+        icon: FileEdit,
+        onClick: () => {
+          setRenamingId(subMask.id);
+          setTempName(getSubMaskName(subMask));
+        },
+      },
+      { label: 'Duplicate Component', icon: PlusSquare, onClick: handleDuplicate },
+      { label: 'Duplicate and Invert Component', icon: RotateCcw, onClick: handleDuplicateAndInvert },
+      { label: 'Copy Component', icon: Copy, onClick: handleCopy },
+      { label: 'Paste Component', icon: ClipboardPaste, disabled: !hasCopiedSubMask, onClick: handlePaste },
+      { type: OPTION_SEPARATOR },
+      { label: 'Delete Component', icon: Trash2, isDestructive: true, onClick: handleDelete },
     ]);
   };
   const showNumber = isHovered && totalCount > 1;
@@ -1251,7 +1379,7 @@ function SubMaskRow({
       }}
       onContextMenu={onContextMenu}
     >
-      <div className="relative w-4 h-4 ml-1 flex-shrink-0 flex items-center justify-center">
+      <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
         <AnimatePresence mode="wait" initial={false}>
           {isAnalyzing ? (
             <motion.div
@@ -1289,12 +1417,22 @@ function SubMaskRow({
           )}
         </AnimatePresence>
       </div>
-      <span className="text-sm text-text-primary flex-1 truncate select-none">
-        {formatMaskTypeName(subMask.type, t)}
-      </span>
+      {renamingId === subMask.id ? (
+        <input
+          autoFocus
+          className="bg-bg-primary text-sm w-full rounded px-1 outline-none border border-accent"
+          value={tempName}
+          onChange={(e) => setTempName(e.target.value)}
+          onBlur={handleRenameSubmit}
+          onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit()}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span className="text-sm text-text-primary flex-1 truncate select-none">{getSubMaskName(subMask)}</span>
+      )}
       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
-          className="p-1 hover:bg-bg-primary rounded text-text-secondary"
+          className="p-1 hover:bg-bg-primary rounded-sm text-text-secondary"
           data-tooltip={subMask.mode === SubMaskMode.Additive ? 'Switch to Subtract' : 'Switch to Add'}
           onClick={(e) => {
             e.stopPropagation();
@@ -1307,7 +1445,7 @@ function SubMaskRow({
         </button>
         <button
           className="p-1 hover:text-red-500 text-text-secondary"
-          data-tooltip={t('ai.deleteComponent')}
+          data-tooltip="Delete Component"
           onClick={(e) => {
             e.stopPropagation();
             handleDelete();
@@ -1334,42 +1472,37 @@ function SettingsPanel({
   onGenerativeReplace,
   collapsibleState,
   setCollapsibleState,
-}: {
-  container: AiPatch | null;
-  activeSubMask: SubMask | null;
-  aiModelDownloadStatus: string | null;
-  brushSettings: BrushSettings | null;
-  setBrushSettings: (brushSettings: BrushSettings | null) => void;
-  updateContainer: (id: string, data: Partial<AiPatch>) => void;
-  updateSubMask: (id: string, data: Partial<SubMask>) => void;
-  isAIConnectorConnected: boolean;
-  isGeneratingAi: boolean;
-  isGeneratingAiMask: boolean;
-  onGenerativeReplace: (patchId: string, prompt: string, useFastInpaint: boolean) => void;
-  collapsibleState: Record<string, boolean>;
-  setCollapsibleState: React.Dispatch<React.SetStateAction<{ generative: boolean; properties: boolean }>>;
-}) {
+}: any) {
   const isActive = !!container;
   const isComponentMode = !!activeSubMask;
-  const { t } = useTranslation();
 
   const displayContainer = container || PLACEHOLDER_PATCH;
 
   const [prompt, setPrompt] = useState(displayContainer.prompt || '');
   const [useFastInpaint, setUseFastInpaint] = useState(!isAIConnectorConnected);
 
+  const prevContainerId = useRef<string | null>(null);
+
   useEffect(() => {
     if (container) setPrompt(container.prompt || '');
   }, [container?.id]);
 
   const isQuickErasePatch = displayContainer.subMasks?.some((sm: SubMask) => sm.type === Mask.QuickEraser);
+
   useEffect(() => {
     if (container) {
-      setUseFastInpaint(isQuickErasePatch || !isAIConnectorConnected);
+      if (!isAIConnectorConnected) {
+        setUseFastInpaint(true);
+      } else if (container.id !== prevContainerId.current) {
+        setUseFastInpaint(isQuickErasePatch);
+        prevContainerId.current = container.id;
+      }
+    } else {
+      prevContainerId.current = null;
     }
   }, [isAIConnectorConnected, container, isQuickErasePatch]);
 
-  const subMaskConfig = activeSubMask ? getSubMaskConfig(t)[activeSubMask.type as Mask] || {} : {};
+  const subMaskConfig = activeSubMask ? SUB_MASK_CONFIG[activeSubMask.type] || {} : {};
   const isAiMask =
     activeSubMask &&
     (activeSubMask.type === Mask.AiSubject ||
@@ -1383,13 +1516,7 @@ function SettingsPanel({
   };
 
   const handleToggleSection = (section: string) =>
-    setCollapsibleState(
-      (prev) =>
-        ({ ...prev, [section]: !(prev as Record<string, boolean>)[section] }) as {
-          generative: boolean;
-          properties: boolean;
-        },
-    );
+    setCollapsibleState((prev: any) => ({ ...prev, [section]: !prev[section] }));
 
   return (
     <div
@@ -1399,32 +1526,39 @@ function SettingsPanel({
       onClick={(e) => e.stopPropagation()}
     >
       <CollapsibleSection
-        title={t('ai.generativeReplace', 'Generative Replace')}
+        title="Generative Replace"
         isOpen={collapsibleState.generative}
         onToggle={() => handleToggleSection('generative')}
         canToggleVisibility={false}
         isContentVisible={true}
       >
         <div className="space-y-3 pt-2">
+          {aiModelDownloadStatus && aiModelDownloadStatus.includes('Inpainting') && (
+            <div className="p-3 mb-2 bg-card-active rounded-md border border-surface flex items-center gap-3">
+              <Loader2 size={16} className="text-accent animate-spin shrink-0" />
+              <div className="text-xs text-text-secondary leading-relaxed">
+                Downloading: <span className="text-accent font-medium">{aiModelDownloadStatus}</span>
+              </div>
+            </div>
+          )}
+
           <p className="text-xs text-text-secondary">
             {isQuickErasePatch
-              ? t('ai.fillSelectionRemove', 'Fill selection to remove the object.')
+              ? 'Fill selection to remove the object.'
               : useFastInpaint
-                ? t('ai.fillSelectionSurrounding', 'Fill selection based on surrounding pixels.')
-                : t('ai.describeGeneration')}
+                ? 'Fill selection based on surrounding pixels.'
+                : 'Describe what you want to generate in the selected area.'}
           </p>
 
           <Switch
             checked={useFastInpaint}
-            disabled={isQuickErasePatch || !isAIConnectorConnected}
-            label={t('ai.useFastInpainting')}
+            disabled={!isAIConnectorConnected}
+            label="Use basic inpainting"
             onChange={setUseFastInpaint}
             tooltip={
-              isQuickErasePatch
-                ? t('ai.quickEraseAlwaysFast')
-                : !isAIConnectorConnected
-                  ? t('ai.aiConnectorNotConnectedFast')
-                  : t('ai.fastInpaintingTooltip')
+              !isAIConnectorConnected
+                ? 'AI Connector not connected, basic inpainting is required.'
+                : 'Basic inpainting is quicker but not generative. Uncheck to use AI Connector with a text prompt.'
             }
           />
 
@@ -1439,13 +1573,13 @@ function SettingsPanel({
               >
                 <div className="flex items-center gap-2">
                   <Input
-                    className="flex-grow"
+                    className="grow"
                     disabled={isGeneratingAi || displayContainer.isLoading}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    onChange={(e: any) => {
                       setPrompt(e.target.value);
                     }}
                     onBlur={() => isActive && updateContainer(container.id, { prompt })}
-                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    onKeyDown={(e: any) => {
                       if (e.key === 'Enter') handleGenerateClick();
                     }}
                     placeholder="e.g., a field of flowers"
@@ -1479,7 +1613,7 @@ function SettingsPanel({
       </CollapsibleSection>
 
       <CollapsibleSection
-        title={isComponentMode ? `${formatMaskTypeName(activeSubMask.type, t)} Properties` : 'Selection Properties'}
+        title={isComponentMode ? `${getSubMaskName(activeSubMask)} Properties` : 'Selection Properties'}
         isOpen={collapsibleState.properties}
         onToggle={() => handleToggleSection('properties')}
         canToggleVisibility={false}
@@ -1492,7 +1626,7 @@ function SettingsPanel({
             onChange={(v) =>
               isComponentMode
                 ? updateSubMask(activeSubMask.id, { invert: v })
-                : updateContainer(container!.id, { invert: v })
+                : updateContainer(container.id, { invert: v })
             }
           />
 
@@ -1500,14 +1634,14 @@ function SettingsPanel({
             <>
               {isAiMask && aiModelDownloadStatus && (
                 <div className="p-3 mb-4 bg-card-active rounded-md border border-surface flex items-center gap-3">
-                  <Loader2 size={16} className="text-accent animate-spin flex-shrink-0" />
+                  <Loader2 size={16} className="text-accent animate-spin shrink-0" />
                   <div className="text-xs text-text-secondary leading-relaxed">
                     AI Model Downloading: <span className="text-accent font-medium">{aiModelDownloadStatus}</span>
                   </div>
                 </div>
               )}
 
-              {subMaskConfig.parameters?.map((param: SubMaskParam) => (
+              {subMaskConfig.parameters?.map((param: any) => (
                 <Slider
                   key={param.key}
                   label={param.label}
@@ -1515,8 +1649,8 @@ function SettingsPanel({
                   max={param.max}
                   step={param.step}
                   defaultValue={param.defaultValue}
-                  value={((activeSubMask.parameters?.[param.key] as number) || 0) * (param.multiplier || 1)}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  value={(activeSubMask.parameters[param.key] || 0) * (param.multiplier || 1)}
+                  onChange={(e: any) =>
                     updateSubMask(activeSubMask.id, {
                       parameters: {
                         ...activeSubMask.parameters,

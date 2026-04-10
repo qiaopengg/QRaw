@@ -13,6 +13,10 @@ interface HdrModalProps {
   onOpenFile(path: string): void;
   onSave(): Promise<string>;
   progressMessage: string | null;
+  imageCount?: number;
+  isProcessing?: boolean;
+  onMerge?: () => void;
+  loadingImageUrl?: string | null;
 }
 
 export default function HdrModal({

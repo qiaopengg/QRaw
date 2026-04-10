@@ -1,0 +1,4154 @@
+diff --cc src/App.tsx
+index 5edec601,0fd3ac62..00000000
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@@ -225,12 -240,42 +234,22 @@@ const getParentDir = (filePath: string)
+    return filePath.substring(0, lastSeparatorIndex);
+  };
+  
+ -const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[]): any => {
+ -  if (!node) return null;
+ -
+ -  if (node.path === targetPath) {
+ -    const mergedChildren = newChildren.map((newChild: any) => {
+ -      const existingChild = node.children?.find((c: any) => c.path === newChild.path);
+ -      if (existingChild && existingChild.children && existingChild.children.length > 0) {
+ -        return { ...newChild, children: existingChild.children };
+ -      }
+ -      return newChild;
+ -    });
+ -
+ -    return { ...node, children: mergedChildren };
+ -  }
+ -
+ -  if (node.children && node.children.length > 0) {
+ -    return {
+ -      ...node,
+ -      children: node.children.map((child: any) => insertChildrenIntoTree(child, targetPath, newChildren)),
+ -    };
+ -  }
+ -
+ -  return node;
+ -};
+ -
+  function App() {
+    const [rootPath, setRootPath] = useState<string | null>(null);
+ +  const { t } = useTranslation();
+    const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+++<<<<<<< HEAD
+++=======
++   const [osPlatform, setOsPlatform] = useState(() => {
++     try {
++       return platform();
++     } catch (_err) {
++       return '';
++     }
++   });
+++>>>>>>> upstream/main
+    const [activeView, setActiveView] = useState('library');
+ +  const [osPlatform, setOsPlatform] = useState('');
+    const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
+    const [isInstantTransition, setIsInstantTransition] = useState(false);
+    const [isLayoutReady, setIsLayoutReady] = useState(false);
+@@@ -252,14 -297,8 +271,15 @@@
+    useEffect(() => {
+      selectedImagePathRef.current = selectedImage?.path ?? null;
+    }, [selectedImage?.path]);
+ +  useEffect(() => {
+ +    try {
+ +      setOsPlatform(platform());
+ +    } catch (e) {
+ +      console.error('Failed to get platform:', e);
+ +    }
+ +  }, []);
+    const [multiSelectedPaths, setMultiSelectedPaths] = useState<Array<string>>([]);
++   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
+    const [libraryActivePath, setLibraryActivePath] = useState<string | null>(null);
+    const [libraryActiveAdjustments, setLibraryActiveAdjustments] = useState<Adjustments>(INITIAL_ADJUSTMENTS);
+    const [finalPreviewUrl, setFinalPreviewUrl] = useState<string | null>(null);
+@@@ -416,10 -457,18 +438,16 @@@
+    const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+    const [isMaskControlHovered, setIsMaskControlHovered] = useState(false);
+    const [libraryScrollTop, setLibraryScrollTop] = useState<number>(0);
+ -  const [listColumnWidths, setListColumnWidths] = useState<ColumnWidths>({
+ -    thumbnail: 4,
+ -    name: 32,
+ -    date: 30,
+ -    rating: 15,
+ -    color: 15,
+ -  });
+    const { showContextMenu } = useContextMenu();
+    const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+++<<<<<<< HEAD
+ +  const { loading: isThumbnailsLoading, requestThumbnails, clearThumbnailQueue } = useThumbnails();
+ +  const transformWrapperRef = useRef<ReactZoomPanPinchRef | null>(null);
+++=======
++   const { requestThumbnails, clearThumbnailQueue } = useThumbnails();
++   const [thumbnailProgress, setThumbnailProgress] = useState<Progress>({ current: 0, total: 0 });
++   const transformWrapperRef = useRef<any>(null);
+++>>>>>>> upstream/main
+    const isProgrammaticZoom = useRef(false);
+    const currentResRef = useRef<number>(1280);
+    const currentOriginalResRef = useRef<number>(0);
+@@@ -1425,9 -1588,16 +1538,16 @@@
+          if (err !== 'Superseded or worker failed') {
+            console.error('Failed to apply adjustments:', err);
+          }
++ 
++         if (!dragging) {
++           setInteractivePatch((prev) => {
++             if (prev && prev.url) URL.revokeObjectURL(prev.url);
++             return null;
++           });
++         }
+        }
+      },
+ -    [selectedImage?.isReady, selectedImage?.path, calculateROI, isWaveformVisible],
+ +    [selectedImage?.isReady, selectedImage?.path, calculateROI],
+    );
+  
+    const generateUncroppedPreview = useCallback(
+@@@ -1622,9 -1801,9 +1742,9 @@@
+            }
+          }
+  
+-         if (settings.lastRootPath) {
++         if (!isAndroid && settings.lastRootPath) {
+            const root = settings.lastRootPath;
+ -          const currentPath = settings.lastFolderState?.currentFolderPath || root;
+ +          const currentPath = (settings.lastFolderState?.currentFolderPath as string | undefined) || root;
+  
+            const command =
+              settings.libraryViewMode === LibraryViewMode.Recursive
+@@@ -1814,10 -2021,10 +1934,10 @@@
+        const currentPins = appSettings.pinnedFolders || [];
+        const isPinned = currentPins.includes(path);
+        const newPins = isPinned
+ -        ? currentPins.filter((p) => p !== path)
+ -        : [...currentPins, path].sort((a, b) => a.localeCompare(b));
+ +        ? currentPins.filter((p: string) => p !== path)
+ +        : [...currentPins, path].sort((a: string, b: string) => a.localeCompare(b));
+  
+-       if (!isPinned && path === currentFolderPath) {
++       if (!isPinned) {
+          handleActiveTreeSectionChange('pinned');
+        }
+  
+@@@ -1827,9 -2034,9 +1947,15 @@@
+          const trees = await invoke(Invokes.GetPinnedFolderTrees, {
+            paths: newPins,
+            expandedFolders: Array.from(expandedFolders),
+++<<<<<<< HEAD
+ +          showImageCounts: appSettings?.enableFolderImageCounts ?? false,
+ +        });
+ +        setPinnedFolderTrees(trees as FolderTreeType[]);
+++=======
++           showImageCounts: appSettings.enableFolderImageCounts ?? false,
++         });
++         setPinnedFolderTrees(trees);
+++>>>>>>> upstream/main
+        } catch (err) {
+          console.error('Failed to refresh pinned folders:', err);
+        }
+@@@ -1858,8 -2065,10 +1984,15 @@@
+          setActiveView('library');
+  
+          if (isNewRoot) {
+++<<<<<<< HEAD
+ +          setExpandedFolders(new Set(path ? [path] : []));
+ +        } else if (path) {
+++=======
++           if (path) {
++             setExpandedFolders(new Set([path]));
++           }
++         } else if (path && expandParents) {
+++>>>>>>> upstream/main
+            setExpandedFolders((prev) => {
+              const newSet = new Set(prev);
+              const allRoots = [rootPath, ...pinnedFolders].filter(Boolean) as string[];
+@@@ -1983,7 -2200,9 +2127,13 @@@
+        sortCriteria.key,
+        pinnedFolders,
+        libraryViewMode,
+++<<<<<<< HEAD
+ +      clearThumbnailQueue,
+++=======
++       debouncedSave,
++       debouncedSetHistory,
++       resetAdjustmentsHistory,
+++>>>>>>> upstream/main
+      ],
+    );
+  
+@@@ -2981,18 -3230,22 +3164,32 @@@
+            setInitialFileToOpen(event.payload as string);
+          }
+        }),
+ -      listen('waveform-update', (event: any) => {
+ -        if (isEffectActive && event.payload.path === selectedImagePathRef.current) {
+ -          setWaveform(event.payload.data);
+ +      listen('waveform-update', (event: { payload: unknown }) => {
+ +        if (!isEffectActive) return;
+ +        const payload = event.payload;
+ +        if (payload && typeof payload === 'object' && 'path' in payload) {
+ +          const wrapped = payload as { path?: string; data?: WaveformData };
+ +          if (wrapped.path && wrapped.path !== selectedImagePathRef.current) return;
+ +          setWaveform(wrapped.data ?? null);
+ +          return;
+          }
+ +        setWaveform((payload as WaveformData) ?? null);
+        }),
+++<<<<<<< HEAD
+ +      listen('thumbnail-generated', (event: { payload: { path: string; data: string; rating?: number } }) => {
+++=======
++       listen('thumbnail-progress', (event: any) => {
++         if (isEffectActive) {
++           setThumbnailProgress({ current: event.payload.current, total: event.payload.total });
++         }
++       }),
++       listen('thumbnail-generation-complete', () => {
++         if (isEffectActive) {
++           setThumbnailProgress({ current: 0, total: 0 });
++         }
++       }),
++       listen('thumbnail-generated', (event: any) => {
+++>>>>>>> upstream/main
+          if (isEffectActive) {
+            const { path, data, rating } = event.payload;
+            if (data) {
+@@@ -3411,19 -3708,21 +3617,35 @@@
+  
+    const handleOpenFolder = async () => {
+      try {
+++<<<<<<< HEAD
+ +      const selected = await open({
+ +        directory: true,
+ +        multiple: false,
+ +        defaultPath: await homeDir(),
+ +        title: t('library.openFolder'),
+ +      });
+++=======
++       if (isAndroid) {
++         const libraryRoot = await invoke<string>(Invokes.GetOrCreateInternalLibraryRoot);
++         setRootPath(libraryRoot);
++         await handleSelectSubfolder(libraryRoot, true);
++         return;
++       }
++ 
++       const selected = await open({ directory: true, multiple: false, defaultPath: await homeDir() });
+++>>>>>>> upstream/main
+        if (typeof selected === 'string') {
+          setRootPath(selected);
+          await handleSelectSubfolder(selected, true);
+        }
+      } catch (err) {
+++<<<<<<< HEAD
+ +      console.error('Failed to open directory dialog:', err);
+ +      setError(t('app.failedToOpenFolderDialog'));
+++=======
++       console.error(isAndroid ? 'Failed to open Android library root:' : 'Failed to open directory dialog:', err);
++       setError(isAndroid ? 'Failed to open library.' : 'Failed to open folder selection dialog.');
+++>>>>>>> upstream/main
+      }
+    };
+  
+@@@ -3453,8 -3752,7 +3675,12 @@@
+        setRootPath(root);
+  
+        if (folderState?.expandedFolders) {
+++<<<<<<< HEAD
+ +        const newExpandedFolders = new Set<string>(folderState.expandedFolders);
+ +        newExpandedFolders.add(root);
+++=======
++         const newExpandedFolders = new Set(folderState.expandedFolders);
+++>>>>>>> upstream/main
+          setExpandedFolders(newExpandedFolders);
+        } else {
+          setExpandedFolders(new Set([root]));
+@@@ -3467,9 -3765,10 +3693,13 @@@
+            treeData = await preloadedDataRef.current.tree;
+            console.log('Preload cache hit for folder tree.');
+          } else {
+++<<<<<<< HEAD
+++=======
++           const expandedArr = folderState?.expandedFolders ? Array.from(new Set(folderState.expandedFolders)) : [root];
+++>>>>>>> upstream/main
+            treeData = await invoke(Invokes.GetFolderTree, {
+              path: root,
+ -            expandedFolders: expandedArr,
+ +            expandedFolders: folderState?.expandedFolders || [root],
+              showImageCounts: appSettings?.enableFolderImageCounts ?? false,
+            });
+          }
+@@@ -3589,23 -3891,27 +3822,27 @@@
+      }
+    };
+  
+ -  const handleLibraryImageSingleClick = (path: string, event: any) => {
+ +  const handleLibraryImageSingleClick = (path: string, event: React.MouseEvent) => {
+      handleMultiSelectClick(path, event, {
+-       shiftAnchor: libraryActivePath,
++       shiftAnchor: selectionAnchorPath ?? libraryActivePath,
+        updateLibraryActivePath: true,
+ -      onSimpleClick: (p: any) => {
+ +      onSimpleClick: (p: string) => {
+          setMultiSelectedPaths([p]);
+          setLibraryActivePath(p);
++         setSelectionAnchorPath(p);
+        },
+      });
+    };
+  
+ -  const handleImageClick = (path: string, event: any) => {
+ +  const handleImageClick = (path: string, event: React.MouseEvent) => {
+      const inEditor = !!selectedImage;
+      handleMultiSelectClick(path, event, {
+-       shiftAnchor: inEditor ? selectedImage.path : libraryActivePath,
++       shiftAnchor: selectionAnchorPath ?? (inEditor ? selectedImage.path : libraryActivePath),
+        updateLibraryActivePath: !inEditor,
+-       onSimpleClick: handleImageSelect,
++       onSimpleClick: (p: string) => {
++         handleImageSelect(p);
++         setSelectionAnchorPath(p);
++       },
+      });
+    };
+  
+@@@ -4643,7 -4904,13 +4880,17 @@@
+  
+      const options = [
+        {
+++<<<<<<< HEAD
+ +        label: t('app.paste'),
+++=======
++         label: 'Refresh Folder',
++         icon: RefreshCw,
++         onClick: handleLibraryRefresh,
++       },
++       { type: OPTION_SEPARATOR },
++       {
++         label: 'Paste',
+++>>>>>>> upstream/main
+          icon: ClipboardPaste,
+          disabled: copiedFilePaths.length === 0,
+          submenu: [
+@@@ -4684,179 -4951,130 +4931,306 @@@
+      showContextMenu(event.clientX, event.clientY, options);
+    };
+  
+++<<<<<<< HEAD
+ +  const memoizedFolderTree = useMemo(
+ +    () =>
+ +      rootPath && (
+ +        <div
+ +          className={clsx(
+ +            'flex h-full overflow-hidden flex-shrink-0',
+ +            !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
+ +          )}
+ +          style={{
+ +            maxWidth: isFullScreen ? '0px' : '1000px',
+ +            opacity: isFullScreen ? 0 : 1,
+ +          }}
+ +        >
+ +          <FolderTree
+ +            expandedFolders={expandedFolders}
+ +            isLoading={isTreeLoading}
+ +            isResizing={isResizing}
+ +            isVisible={uiVisibility.folderTree}
+ +            onContextMenu={handleFolderTreeContextMenu}
+ +            onFolderSelect={(path) => handleSelectSubfolder(path, false)}
+ +            onToggleFolder={handleToggleFolder}
+ +            selectedPath={currentFolderPath}
+ +            setIsVisible={(value: boolean) => setUiVisibility((prev: UiVisibility) => ({ ...prev, folderTree: value }))}
+ +            style={{ width: uiVisibility.folderTree ? `${leftPanelWidth}px` : '32px' }}
+ +            tree={folderTree}
+ +            pinnedFolderTrees={pinnedFolderTrees}
+ +            pinnedFolders={pinnedFolders}
+ +            activeSection={activeTreeSection}
+ +            onActiveSectionChange={handleActiveTreeSectionChange}
+ +            showImageCounts={appSettings?.enableFolderImageCounts ?? false}
+ +            isInstantTransition={isInstantTransition}
+ +          />
+ +          <Resizer
+ +            direction={Orientation.Vertical}
+ +            onMouseDown={createResizeHandler(setLeftPanelWidth, leftPanelWidth)}
+ +          />
+ +        </div>
+ +      ),
+ +    [
+ +      rootPath,
+ +      expandedFolders,
+ +      isTreeLoading,
+ +      isResizing,
+ +      handleSelectSubfolder,
+ +      uiVisibility.folderTree,
+ +      currentFolderPath,
+ +      leftPanelWidth,
+ +      folderTree,
+ +      pinnedFolderTrees,
+ +      pinnedFolders,
+ +      activeTreeSection,
+ +      copiedFilePaths,
+ +      isFullScreen,
+ +      isInstantTransition,
+ +    ],
+ +  );
+ +
+ +  const memoizedLibraryView = useMemo(
+ +    () => (
+ +      <div className="flex flex-row flex-grow h-full min-h-0">
+ +        <div className="flex-1 flex flex-col min-w-0 gap-2">
+ +          {activeView === 'community' ? (
+ +            <CommunityPage
+ +              onBackToLibrary={() => setActiveView('library')}
+ +              supportedTypes={supportedTypes}
+ +              imageList={sortedImageList}
+ +              currentFolderPath={currentFolderPath}
+ +            />
+ +          ) : (
+ +            <MainLibrary
+ +              activePath={libraryActivePath}
+ +              aiModelDownloadStatus={aiModelDownloadStatus}
+ +              appSettings={appSettings}
+ +              currentFolderPath={currentFolderPath}
+ +              filterCriteria={filterCriteria}
+ +              imageList={sortedImageList}
+ +              imageRatings={imageRatings}
+ +              importState={importState}
+ +              indexingProgress={indexingProgress}
+ +              isIndexing={isIndexing}
+ +              isThumbnailsLoading={isThumbnailsLoading}
+ +              isLoading={isViewLoading}
+ +              isTreeLoading={isTreeLoading}
+ +              libraryScrollTop={libraryScrollTop}
+ +              libraryViewMode={libraryViewMode}
+ +              multiSelectedPaths={multiSelectedPaths}
+ +              onClearSelection={handleClearSelection}
+ +              onContextMenu={handleThumbnailContextMenu}
+ +              onContinueSession={handleContinueSession}
+ +              onEmptyAreaContextMenu={handleMainLibraryContextMenu}
+ +              onGoHome={handleGoHome}
+ +              onImageClick={handleLibraryImageSingleClick}
+ +              onImageDoubleClick={handleImageSelect}
+ +              onLibraryRefresh={handleLibraryRefresh}
+ +              onOpenFolder={handleOpenFolder}
+ +              onSettingsChange={handleSettingsChange}
+ +              onThumbnailAspectRatioChange={setThumbnailAspectRatio}
+ +              onThumbnailSizeChange={setThumbnailSize}
+ +              onRequestThumbnails={requestThumbnails}
+ +              rootPath={rootPath}
+ +              searchCriteria={searchCriteria}
+ +              setFilterCriteria={setFilterCriteria}
+ +              setLibraryScrollTop={setLibraryScrollTop}
+ +              setLibraryViewMode={setLibraryViewMode}
+ +              setSearchCriteria={setSearchCriteria}
+ +              setSortCriteria={setSortCriteria}
+ +              sortCriteria={sortCriteria}
+ +              theme={theme}
+ +              thumbnailAspectRatio={thumbnailAspectRatio}
+ +              thumbnails={thumbnails}
+ +              thumbnailSize={thumbnailSize}
+ +              onNavigateToCommunity={() => setActiveView('community')}
+ +            />
+ +          )}
+ +          {rootPath && (
+ +            <BottomBar
+ +              isCopied={isCopied}
+ +              isCopyDisabled={multiSelectedPaths.length !== 1}
+ +              isExportDisabled={multiSelectedPaths.length === 0}
+ +              isLibraryView={true}
+ +              isPasted={isPasted}
+ +              isPasteDisabled={copiedAdjustments === null || multiSelectedPaths.length === 0}
+ +              isRatingDisabled={multiSelectedPaths.length === 0}
+ +              isResetDisabled={multiSelectedPaths.length === 0}
+ +              multiSelectedPaths={multiSelectedPaths}
+ +              onCopy={handleCopyAdjustments}
+ +              onExportClick={() => setIsLibraryExportPanelVisible((prev) => !prev)}
+ +              onOpenCopyPasteSettings={() => setIsCopyPasteSettingsModalOpen(true)}
+ +              onPaste={() => handlePasteAdjustments()}
+ +              onRate={handleRate}
+ +              onReset={() => handleResetAdjustments()}
+ +              onRequestThumbnails={requestThumbnails}
+ +              rating={libraryActiveAdjustments.rating || 0}
+ +              thumbnailAspectRatio={thumbnailAspectRatio}
+ +              totalImages={imageList.length}
+ +            />
+ +          )}
+ +        </div>
+ +      </div>
+ +    ),
+ +    [
+ +      activeView,
+ +      sortedImageList,
+ +      currentFolderPath,
+ +      libraryActivePath,
+ +      aiModelDownloadStatus,
+ +      appSettings,
+ +      filterCriteria,
+ +      imageRatings,
+ +      importState,
+ +      indexingProgress,
+ +      isIndexing,
+ +      isThumbnailsLoading,
+ +      isViewLoading,
+ +      isTreeLoading,
+ +      libraryScrollTop,
+ +      libraryViewMode,
+ +      multiSelectedPaths,
+ +      rootPath,
+ +      searchCriteria,
+ +      sortCriteria,
+ +      theme,
+ +      thumbnailAspectRatio,
+ +      thumbnails,
+ +      thumbnailSize,
+ +      isCopied,
+ +      isPasted,
+ +      copiedAdjustments,
+ +      requestThumbnails,
+ +      libraryActiveAdjustments,
+ +      supportedTypes,
+ +      copiedFilePaths,
+ +    ],
+++=======
++   const renderFolderTree = () => {
++     if (!rootPath) return null;
++ 
++     return (
++       <div
++         className={clsx(
++           'flex h-full overflow-hidden shrink-0',
++           !isResizing && !isInstantTransition && 'transition-all duration-300 ease-in-out',
++         )}
++         style={{
++           maxWidth: isFullScreen ? '0px' : '1000px',
++           opacity: isFullScreen ? 0 : 1,
++         }}
++       >
++         <FolderTree
++           expandedFolders={expandedFolders}
++           isLoading={isTreeLoading}
++           isResizing={isResizing}
++           isVisible={uiVisibility.folderTree}
++           onContextMenu={handleFolderTreeContextMenu}
++           onFolderSelect={(path) => handleSelectSubfolder(path, false)}
++           onToggleFolder={handleToggleFolder}
++           selectedPath={currentFolderPath}
++           setIsVisible={(value: boolean) => setUiVisibility((prev: UiVisibility) => ({ ...prev, folderTree: value }))}
++           style={{ width: uiVisibility.folderTree ? `${leftPanelWidth}px` : '32px' }}
++           tree={folderTree}
++           pinnedFolderTrees={pinnedFolderTrees}
++           pinnedFolders={pinnedFolders}
++           activeSection={activeTreeSection}
++           onActiveSectionChange={handleActiveTreeSectionChange}
++           showImageCounts={appSettings?.enableFolderImageCounts ?? false}
++           isInstantTransition={isInstantTransition}
++         />
++         <Resizer
++           direction={Orientation.Vertical}
++           onMouseDown={createResizeHandler(setLeftPanelWidth, leftPanelWidth)}
++         />
++       </div>
++     );
++   };
++ 
++   const renderLibraryView = () => (
++     <div className="flex flex-row grow h-full min-h-0">
++       <div className="flex-1 flex flex-col min-w-0 gap-2">
++         {activeView === 'community' ? (
++           <CommunityPage
++             onBackToLibrary={() => setActiveView('library')}
++             supportedTypes={supportedTypes}
++             imageList={sortedImageList}
++             currentFolderPath={currentFolderPath}
++           />
++         ) : (
++           <MainLibrary
++             activePath={libraryActivePath}
++             aiModelDownloadStatus={aiModelDownloadStatus}
++             appSettings={appSettings}
++             currentFolderPath={currentFolderPath}
++             filterCriteria={filterCriteria}
++             imageList={sortedImageList}
++             imageRatings={imageRatings}
++             importState={importState}
++             indexingProgress={indexingProgress}
++             isIndexing={isIndexing}
++             isLoading={isViewLoading}
++             isTreeLoading={isTreeLoading}
++             isAndroid={isAndroid}
++             libraryScrollTop={libraryScrollTop}
++             libraryViewMode={libraryViewMode}
++             multiSelectedPaths={multiSelectedPaths}
++             onClearSelection={handleClearSelection}
++             onContextMenu={handleThumbnailContextMenu}
++             onContinueSession={handleContinueSession}
++             onEmptyAreaContextMenu={handleMainLibraryContextMenu}
++             onGoHome={handleGoHome}
++             onImageClick={handleLibraryImageSingleClick}
++             onImageDoubleClick={handleImageSelect}
++             onLibraryRefresh={handleLibraryRefresh}
++             onOpenFolder={handleOpenFolder}
++             onSettingsChange={handleSettingsChange}
++             onThumbnailAspectRatioChange={setThumbnailAspectRatio}
++             onThumbnailSizeChange={setThumbnailSize}
++             onRequestThumbnails={requestThumbnails}
++             rootPath={rootPath}
++             searchCriteria={searchCriteria}
++             setFilterCriteria={setFilterCriteria}
++             setLibraryScrollTop={setLibraryScrollTop}
++             setLibraryViewMode={setLibraryViewMode}
++             setSearchCriteria={setSearchCriteria}
++             setSortCriteria={setSortCriteria}
++             sortCriteria={sortCriteria}
++             theme={theme}
++             thumbnailAspectRatio={thumbnailAspectRatio}
++             thumbnails={thumbnails}
++             thumbnailProgress={thumbnailProgress}
++             thumbnailSize={thumbnailSize}
++             onNavigateToCommunity={() => setActiveView('community')}
++             listColumnWidths={listColumnWidths}
++             setListColumnWidths={setListColumnWidths}
++           />
++         )}
++         {rootPath && (
++           <BottomBar
++             isCopied={isCopied}
++             isCopyDisabled={multiSelectedPaths.length !== 1}
++             isExportDisabled={multiSelectedPaths.length === 0}
++             isLibraryView={true}
++             isPasted={isPasted}
++             isPasteDisabled={copiedAdjustments === null || multiSelectedPaths.length === 0}
++             isRatingDisabled={multiSelectedPaths.length === 0}
++             isResetDisabled={multiSelectedPaths.length === 0}
++             multiSelectedPaths={multiSelectedPaths}
++             onCopy={handleCopyAdjustments}
++             onExportClick={() => setIsLibraryExportPanelVisible((prev) => !prev)}
++             onOpenCopyPasteSettings={() => setIsCopyPasteSettingsModalOpen(true)}
++             onPaste={() => handlePasteAdjustments()}
++             onRate={handleRate}
++             onReset={() => handleResetAdjustments()}
++             rating={libraryActiveAdjustments.rating || 0}
++             thumbnailAspectRatio={thumbnailAspectRatio}
++             totalImages={imageList.length}
++           />
++         )}
++       </div>
++     </div>
+++>>>>>>> upstream/main
+    );
+  
+    const renderMainView = () => {
+@@@ -5208,8 -5421,8 +5584,13 @@@
+            ],
+          )}
+        >
+++<<<<<<< HEAD
+ +        <div className="flex flex-row flex-grow h-full min-h-0">
+ +          {memoizedFolderTree}
+++=======
++         <div className="flex flex-row grow h-full min-h-0">
++           {renderFolderTree()}
+++>>>>>>> upstream/main
+            <div className="flex-1 flex flex-col min-w-0">{renderContent()}</div>
+            {!selectedImage && isLibraryExportPanelVisible && (
+              <Resizer
+@@@ -5306,6 -5539,14 +5687,17 @@@
+          isProcessing={denoiseModalState.isProcessing}
+          error={denoiseModalState.error}
+          progressMessage={denoiseModalState.progressMessage}
+++<<<<<<< HEAD
+++=======
++         aiModelDownloadStatus={aiModelDownloadStatus}
++         isRaw={denoiseModalState.isRaw}
++         loadingImageUrl={
++           denoiseModalState.targetPath
++             ? thumbnails[denoiseModalState.targetPath] ||
++               (selectedImage?.path === denoiseModalState.targetPath ? finalPreviewUrl : null)
++             : null
++         }
+++>>>>>>> upstream/main
+        />
+        <CreateFolderModal
+          isOpen={isCreateFolderModalOpen}
+diff --cc src/components/adjustments/Color.tsx
+index c86af24a,ae8733fa..00000000
+--- a/src/components/adjustments/Color.tsx
++++ b/src/components/adjustments/Color.tsx
+@@@ -115,7 -115,8 +116,12 @@@ const ColorSwatch = ({ color, name, isA
+  };
+  
+  const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: ColorPanelProps) => {
+++<<<<<<< HEAD
+ +  const { t } = useTranslation();
+++=======
++   const [activeTab, setActiveTab] = useState<'3way' | 'global'>('3way');
++   const [isExpanded, setIsExpanded] = useState(false);
+++>>>>>>> upstream/main
+    const colorGrading = adjustments.colorGrading || INITIAL_ADJUSTMENTS.colorGrading;
+  
+    const handleChange = (grading: ColorGrading, newValue: HueSatLum) => {
+@@@ -138,39 -139,130 +144,163 @@@
+      }));
+    };
+  
++   const tabs = [
++     {
++       id: '3way',
++       icon: (
++         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
++           <circle cx="12" cy="6" r="4.5" />
++           <circle cx="5" cy="18" r="4.5" />
++           <circle cx="19" cy="18" r="4.5" />
++         </svg>
++       ),
++     },
++     {
++       id: 'global',
++       icon: <div className="w-3.5 h-3.5 rounded-full" style={{ background: 'linear-gradient(to top, #666, #fff)' }} />,
++     },
++   ];
++ 
+    return (
+      <div>
+++<<<<<<< HEAD
+ +      <div className="flex justify-center mb-4">
+ +        <div className="w-[calc(50%-0.5rem)]">
+ +          <ColorWheel
+ +            defaultValue={INITIAL_ADJUSTMENTS.colorGrading.midtones}
+ +            label={t('adjustments.midtones')}
+ +            onChange={(val: HueSatLum) => handleChange(ColorGrading.Midtones, val)}
+ +            value={colorGrading.midtones}
+ +            onDragStateChange={onDragStateChange}
+ +          />
+ +        </div>
+ +      </div>
+ +      <div className="flex justify-between mb-2 gap-4">
+ +        <div className="w-full">
+ +          <ColorWheel
+ +            defaultValue={INITIAL_ADJUSTMENTS.colorGrading.shadows}
+ +            label={t('adjustments.shadows')}
+ +            onChange={(val: HueSatLum) => handleChange(ColorGrading.Shadows, val)}
+ +            value={colorGrading.shadows}
+ +            onDragStateChange={onDragStateChange}
+ +          />
+ +        </div>
+ +        <div className="w-full">
+ +          <ColorWheel
+ +            defaultValue={INITIAL_ADJUSTMENTS.colorGrading.highlights}
+ +            label={t('adjustments.highlights')}
+ +            onChange={(val: HueSatLum) => handleChange(ColorGrading.Highlights, val)}
+ +            value={colorGrading.highlights}
+ +            onDragStateChange={onDragStateChange}
+ +          />
+ +        </div>
+++=======
++       <div className="flex items-center justify-start gap-2 mb-4 mt-2">
++         {tabs.map((tab) => {
++           const isActive = activeTab === tab.id;
++           return (
++             <button
++               key={tab.id}
++               onClick={() => setActiveTab(tab.id as '3way' | 'global')}
++               className={`w-7 h-7 rounded-full flex items-center justify-center transition-all focus:outline-none
++                 ${
++                   isActive
++                     ? 'ring-2 ring-offset-2 ring-offset-surface ring-accent text-text-primary'
++                     : 'bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-secondary/80'
++                 }`}
++             >
++               {tab.icon}
++             </button>
++           );
++         })}
++ 
++         <div className="w-px h-5 bg-text-secondary/20 mx-1" />
++ 
++         <button
++           onClick={() => setIsExpanded(!isExpanded)}
++           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all focus:outline-none
++             ${
++               isExpanded
++                 ? 'bg-accent text-button-text'
++                 : 'bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-secondary/80'
++             }`}
++           data-tooltip="Toggle Sliders"
++         >
++           <Sliders size={14} />
++         </button>
++       </div>
++ 
++       <div className="relative w-full mb-4">
++         <AnimatePresence mode="wait">
++           {activeTab === '3way' ? (
++             <motion.div
++               key="3way"
++               initial={{ opacity: 0, x: -15 }}
++               animate={{ opacity: 1, x: 0 }}
++               exit={{ opacity: 0, x: -15 }}
++               transition={{ duration: 0.2 }}
++               className="w-full"
++             >
++               <div className="flex justify-center mb-4">
++                 <div className="w-[calc(50%-0.5rem)]">
++                   <ColorWheel
++                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.midtones}
++                     label="Midtones"
++                     onChange={(val: HueSatLum) => handleChange(ColorGrading.Midtones, val)}
++                     value={colorGrading.midtones}
++                     onDragStateChange={onDragStateChange}
++                     isExpanded={isExpanded}
++                   />
++                 </div>
++               </div>
++               <div className="flex justify-between mb-2 gap-4">
++                 <div className="w-full flex-1 min-w-0">
++                   <ColorWheel
++                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.shadows}
++                     label="Shadows"
++                     onChange={(val: HueSatLum) => handleChange(ColorGrading.Shadows, val)}
++                     value={colorGrading.shadows}
++                     onDragStateChange={onDragStateChange}
++                     isExpanded={isExpanded}
++                   />
++                 </div>
++                 <div className="w-full flex-1 min-w-0">
++                   <ColorWheel
++                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.highlights}
++                     label="Highlights"
++                     onChange={(val: HueSatLum) => handleChange(ColorGrading.Highlights, val)}
++                     value={colorGrading.highlights}
++                     onDragStateChange={onDragStateChange}
++                     isExpanded={isExpanded}
++                   />
++                 </div>
++               </div>
++             </motion.div>
++           ) : (
++             <motion.div
++               key="global"
++               initial={{ opacity: 0, x: 15 }}
++               animate={{ opacity: 1, x: 0 }}
++               exit={{ opacity: 0, x: 15 }}
++               transition={{ duration: 0.2 }}
++               className="w-full flex justify-center pb-2"
++             >
++               <div className="w-full max-w-70">
++                 <ColorWheel
++                   defaultValue={INITIAL_ADJUSTMENTS.colorGrading.global}
++                   label="Global"
++                   onChange={(val: HueSatLum) => handleChange(ColorGrading.Global, val)}
++                   value={colorGrading.global || INITIAL_ADJUSTMENTS.colorGrading.global}
++                   onDragStateChange={onDragStateChange}
++                   isExpanded={isExpanded}
++                 />
++               </div>
++             </motion.div>
++           )}
++         </AnimatePresence>
+++>>>>>>> upstream/main
+        </div>
++ 
+        <div>
+          <Slider
+            defaultValue={50}
+@@@ -353,27 -438,23 +487,27 @@@ export default function ColorPanel(
+            )}
+          </div>
+          <Slider
+ -          label="Temperature"
+ +          label={t('adjustments.temperature')}
+            max={100}
+            min={-100}
+ -          onChange={(e: any) => handleGlobalChange(ColorAdjustment.Temperature, e.target.value)}
+ +          onChange={(e: { target: { value: number | string } }) =>
+ +            handleGlobalChange(ColorAdjustment.Temperature, String(e.target.value))
+ +          }
+            step={1}
+            value={adjustments.temperature || 0}
+-           trackClassName='temperature-gradient-track'
++           trackClassName="temperature-gradient-track"
+            onDragStateChange={onDragStateChange}
+          />
+          <Slider
+ -          label="Tint"
+ +          label={t('adjustments.tint')}
+            max={100}
+            min={-100}
+ -          onChange={(e: any) => handleGlobalChange(ColorAdjustment.Tint, e.target.value)}
+ +          onChange={(e: { target: { value: number | string } }) =>
+ +            handleGlobalChange(ColorAdjustment.Tint, String(e.target.value))
+ +          }
+            step={1}
+            value={adjustments.tint || 0}
+-           trackClassName='tint-gradient-track'
++           trackClassName="tint-gradient-track"
+            onDragStateChange={onDragStateChange}
+          />
+        </div>
+@@@ -434,36 -511,33 +568,39 @@@
+            ))}
+          </div>
+          <Slider
+ -          label="Hue"
+ +          label={t('adjustments.hue')}
+            max={100}
+            min={-100}
+ -          onChange={(e: any) => handleHslChange(ColorAdjustment.Hue, e.target.value)}
+ +          onChange={(e: { target: { value: number | string } }) =>
+ +            handleHslChange(ColorAdjustment.Hue, String(e.target.value))
+ +          }
+            step={1}
+            value={currentHsl.hue}
++           trackClassName={hue_slider}
+            onDragStateChange={onDragStateChange}
+          />
+          <Slider
+ -          label="Saturation"
+ +          label={t('adjustments.saturation')}
+            max={100}
+            min={-100}
+ -          onChange={(e: any) => handleHslChange(ColorAdjustment.Saturation, e.target.value)}
+ +          onChange={(e: { target: { value: number | string } }) =>
+ +            handleHslChange(ColorAdjustment.Saturation, String(e.target.value))
+ +          }
+            step={1}
+            value={currentHsl.saturation}
++           trackClassName={saturation_slider}
+            onDragStateChange={onDragStateChange}
+          />
+          <Slider
+ -          label="Luminance"
+ +          label={t('adjustments.luminance')}
+            max={100}
+            min={-100}
+ -          onChange={(e: any) => handleHslChange(ColorAdjustment.Luminance, e.target.value)}
+ +          onChange={(e: { target: { value: number | string } }) =>
+ +            handleHslChange(ColorAdjustment.Luminance, String(e.target.value))
+ +          }
+            step={1}
+            value={currentHsl.luminance}
++           trackClassName={luminance_slider}
+            onDragStateChange={onDragStateChange}
+          />
+        </div>
+diff --cc src/components/modals/DenoiseModal.tsx
+index f2d72d4f,c5a22b44..00000000
+--- a/src/components/modals/DenoiseModal.tsx
++++ b/src/components/modals/DenoiseModal.tsx
+@@@ -17,10 -18,17 +17,16 @@@ interface DenoiseModalProps 
+    originalBase64: string | null;
+    isProcessing: boolean;
+    progressMessage: string | null;
+++<<<<<<< HEAD
+++=======
++   aiModelDownloadStatus: string | null;
++   isRaw: boolean;
++   loadingImageUrl?: string | null;
+++>>>>>>> upstream/main
+  }
+  
+ -const methodOptions: Array<{ label: string; value: 'ai' | 'bm3d' }> = [
+ -  { label: 'NIND (AI - Best for RAW)', value: 'ai' },
+ -  { label: 'BM3D (Traditional - All formats)', value: 'bm3d' },
+ -];
+ -
+  const ImageCompare = ({ original, denoised }: { original: string; denoised: string }) => {
+ +  const { t } = useTranslation();
+    const [sliderPosition, setSliderPosition] = useState(50);
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+@@@ -211,6 -218,9 +217,12 @@@ export default function DenoiseModal(
+    originalBase64,
+    isProcessing,
+    progressMessage,
+++<<<<<<< HEAD
+++=======
++   aiModelDownloadStatus,
++   isRaw,
++   loadingImageUrl,
+++>>>>>>> upstream/main
+  }: DenoiseModalProps) {
+    const [isMounted, setIsMounted] = useState(false);
+    const [show, setShow] = useState(false);
+@@@ -221,8 -231,14 +233,12 @@@
+  
+    const mouseDownTarget = useRef<EventTarget | null>(null);
+  
++   const currentStatusText = aiModelDownloadStatus?.includes('NIND')
++     ? `Downloading ${aiModelDownloadStatus}...`
++     : progressMessage || 'Initializing...';
++ 
+    useEffect(() => {
+      if (isOpen) {
+ -      setMethod(isRaw ? 'ai' : 'bm3d');
+ -      setIntensity(isRaw ? 50 : 15);
+        setIsMounted(true);
+        const timer = setTimeout(() => setShow(true), 10);
+        return () => clearTimeout(timer);
+@@@ -312,14 -333,52 +328,63 @@@
+  
+      if (isProcessing) {
+        return (
+++<<<<<<< HEAD
+ +        <div className="flex flex-col items-center justify-center py-12 h-[400px]">
+ +          <Loader2 className="w-16 h-16 text-accent animate-spin mb-4" />
+ +          <Text variant={TextVariants.title} className="mb-2 text-center">
+ +            {t('denoise.denoising')}
+ +          </Text>
+ +          <Text className="text-center h-6 font-mono w-64 flex justify-center items-center">
+ +            {progressMessage || t('denoise.initializing')}
+ +          </Text>
+++=======
++         <div className="flex h-[460px] overflow-hidden rounded-lg border border-surface">
++           <div className="w-2/5 relative overflow-hidden shrink-0 bg-[#0a0a0a] flex items-center justify-center">
++             {loadingImageUrl ? (
++               <img src={loadingImageUrl} alt="Selected preview" className="w-full h-full object-cover" />
++             ) : (
++               <div className="w-full h-full bg-surface/50" />
++             )}
++           </div>
++           <div className="flex-1 flex flex-col items-center justify-center px-12 bg-bg-primary">
++             <motion.div
++               initial={{ opacity: 0, y: 20 }}
++               animate={{ opacity: 1, y: 0 }}
++               transition={{ delay: 0.1, duration: 0.4 }}
++               className="flex flex-col items-center w-full"
++             >
++               <Text variant={TextVariants.title} className="mb-2 text-center">
++                 Denoising in Progress
++               </Text>
++               <Text className="text-center font-mono h-6 flex justify-center items-center">{currentStatusText}</Text>
++ 
++               <div className="mt-8 w-64 relative">
++                 <div className="h-1 bg-surface rounded-full overflow-hidden relative w-full shadow-xs">
++                   <motion.div
++                     className="absolute inset-y-0 w-[80%] bg-linear-to-r from-transparent via-accent to-transparent mix-blend-screen"
++                     style={{ filter: 'blur(3px)' }}
++                     animate={{ x: ['-150%', '150%'] }}
++                     transition={{ repeat: Infinity, duration: 1.5, ease: [0.4, 0, 0.2, 1] }}
++                   />
++                   <motion.div
++                     className="absolute inset-y-0 w-[40%] bg-linear-to-r from-transparent via-white/90 to-transparent"
++                     style={{ filter: 'blur(1px)' }}
++                     animate={{ x: ['-250%', '250%'] }}
++                     transition={{ repeat: Infinity, duration: 1.5, ease: [0.4, 0, 0.2, 1] }}
++                   />
++                 </div>
++               </div>
++ 
++               <Text
++                 variant={TextVariants.small}
++                 data-tooltip="NIND Denoise does not yet support GPU acceleration due to dependency limitations."
++                 className="mt-6 text-center max-w-xs opacity-60"
++               >
++                 This may take a few minutes depending on image size and selected method.
++               </Text>
++             </motion.div>
++           </div>
+++>>>>>>> upstream/main
+          </div>
+        );
+      }
+diff --cc src/components/panel/MainLibrary.tsx
+index 3bc79208,7ad19735..00000000
+--- a/src/components/panel/MainLibrary.tsx
++++ b/src/components/panel/MainLibrary.tsx
+@@@ -133,8 -118,11 +133,9 @@@ interface MainLibraryProps 
+    theme: string;
+    thumbnailAspectRatio: ThumbnailAspectRatio;
+    thumbnails: Record<string, string>;
++   thumbnailProgress: Progress;
+    thumbnailSize: ThumbnailSize;
+    onNavigateToCommunity(): void;
+ -  listColumnWidths: ColumnWidths;
+ -  setListColumnWidths: React.Dispatch<React.SetStateAction<ColumnWidths>>;
+  }
+  
+  interface SearchInputProps {
+@@@ -267,8 -253,119 +268,123 @@@ const groupImagesByFolder = (images: Im
+    }));
+  };
+  
+++<<<<<<< HEAD
+++=======
++ function ListHeader({
++   widths,
++   setWidths,
++   containerRef,
++   sortCriteria,
++   onSortChange,
++ }: {
++   widths: ColumnWidths;
++   setWidths: React.Dispatch<React.SetStateAction<ColumnWidths>>;
++   containerRef: React.RefObject<HTMLDivElement>;
++   sortCriteria: SortCriteria;
++   onSortChange: (key: string) => void;
++ }) {
++   const handleResize = (e: React.MouseEvent, leftCol: keyof ColumnWidths, rightCol: keyof ColumnWidths) => {
++     e.preventDefault();
++     e.stopPropagation();
++     const startX = e.clientX;
++     const startLeftWidth = widths[leftCol];
++     const startRightWidth = widths[rightCol];
++     const containerWidth = containerRef.current?.clientWidth || 1000;
++ 
++     const onMouseMove = (moveEvent: MouseEvent) => {
++       const deltaX = moveEvent.clientX - startX;
++       const deltaPercent = (deltaX / containerWidth) * 100;
++ 
++       let newLeft = startLeftWidth + deltaPercent;
++       let newRight = startRightWidth - deltaPercent;
++ 
++       if (newLeft < 1) {
++         newRight -= 1 - newLeft;
++         newLeft = 1;
++       }
++       if (newRight < 1) {
++         newLeft -= 1 - newRight;
++         newRight = 1;
++       }
++ 
++       setWidths((prev) => ({
++         ...prev,
++         [leftCol]: newLeft,
++         [rightCol]: newRight,
++       }));
++     };
++ 
++     const onMouseUp = () => {
++       document.removeEventListener('mousemove', onMouseMove);
++       document.removeEventListener('mouseup', onMouseUp);
++     };
++ 
++     document.addEventListener('mousemove', onMouseMove);
++     document.addEventListener('mouseup', onMouseUp);
++   };
++ 
++   const Column = ({
++     title,
++     widthKey,
++     nextKey,
++     sortKey,
++   }: {
++     title: string;
++     widthKey: keyof ColumnWidths;
++     nextKey?: keyof ColumnWidths;
++     sortKey?: string;
++   }) => {
++     const isSorted = sortCriteria.key === sortKey;
++     const isAsc = sortCriteria.order === SortDirection.Ascending;
++ 
++     return (
++       <div
++         style={{ width: `${widths[widthKey]}%` }}
++         className={`relative flex items-center px-3 h-full select-none ${
++           sortKey ? 'cursor-pointer hover:bg-bg-primary/50 transition-colors' : ''
++         }`}
++         onClick={() => sortKey && onSortChange(sortKey)}
++       >
++         <Text
++           variant={TextVariants.small}
++           weight={TextWeights.semibold}
++           color={isSorted ? TextColors.primary : TextColors.secondary}
++           className="uppercase tracking-wider text-[11px]"
++         >
++           {title}
++         </Text>
++         {isSorted && (
++           <span className="ml-1 flex items-center text-accent">
++             {isAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
++           </span>
++         )}
++         {nextKey && (
++           <div
++             className="absolute right-[-3px] top-1.5 bottom-1.5 w-[6px] cursor-col-resize z-10 group flex items-center justify-center"
++             onClick={(e) => e.stopPropagation()}
++             onMouseDown={(e) => handleResize(e, widthKey, nextKey)}
++           >
++             <div className="w-px h-full bg-border-color/40 group-hover:bg-accent transition-colors" />
++           </div>
++         )}
++       </div>
++     );
++   };
++ 
++   return (
++     <div className="flex items-center w-full h-9 bg-bg-secondary/80 backdrop-blur-sm border-b border-border-color/50 shrink-0">
++       <Column title="" widthKey="thumbnail" nextKey="name" />
++       <Column title="Name" widthKey="name" nextKey="date" sortKey="name" />
++       <Column title="Modified" widthKey="date" nextKey="rating" sortKey="date" />
++       <Column title="Rating" widthKey="rating" nextKey="color" sortKey="rating" />
++       <Column title="Label" widthKey="color" />
++     </div>
++   );
++ }
++ 
+++>>>>>>> upstream/main
+  function SearchInput({ indexingProgress, isIndexing, searchCriteria, setSearchCriteria }: SearchInputProps) {
+ +  const { t } = useTranslation();
+    const [isSearchActive, setIsSearchActive] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+@@@ -929,6 -1012,209 +1045,212 @@@ function ViewOptionsDropdown(
+    );
+  }
+  
+++<<<<<<< HEAD
+++=======
++ function ListItem({
++   data,
++   isActive,
++   isSelected,
++   onContextMenu,
++   onImageClick,
++   onImageDoubleClick,
++   onLoad,
++   path,
++   rating,
++   tags,
++   modified,
++   aspectRatio: thumbnailAspectRatio,
++   columnWidths,
++ }: ListItemProps) {
++   const [showPlaceholder, setShowPlaceholder] = useState(false);
++   const [layers, setLayers] = useState<ImageLayer[]>([]);
++   const latestThumbDataRef = useRef<string | undefined>(undefined);
++ 
++   const { baseName, isVirtualCopy } = useMemo(() => {
++     const fullFileName = path.split(/[\\/]/).pop() || '';
++     const parts = fullFileName.split('?vc=');
++     return {
++       baseName: parts[0],
++       isVirtualCopy: parts.length > 1,
++     };
++   }, [path]);
++ 
++   useEffect(() => {
++     if (data) {
++       setShowPlaceholder(false);
++       return;
++     }
++     const timer = setTimeout(() => {
++       setShowPlaceholder(true);
++     }, 500);
++     return () => clearTimeout(timer);
++   }, [data]);
++ 
++   useEffect(() => {
++     if (!data) {
++       setLayers([]);
++       latestThumbDataRef.current = undefined;
++       return;
++     }
++ 
++     if (data !== latestThumbDataRef.current) {
++       latestThumbDataRef.current = data;
++       setLayers((prev) => {
++         if (prev.some((l) => l.id === data)) return prev;
++         return [...prev, { id: data, url: data, opacity: 0 }];
++       });
++     }
++   }, [data]);
++ 
++   useEffect(() => {
++     const layerToFadeIn = layers.find((l) => l.opacity === 0);
++     if (layerToFadeIn) {
++       const timer = setTimeout(() => {
++         setLayers((prev) => prev.map((l) => (l.id === layerToFadeIn.id ? { ...l, opacity: 1 } : l)));
++         onLoad();
++       }, 10);
++       return () => clearTimeout(timer);
++     }
++   }, [layers, onLoad]);
++ 
++   const handleTransitionEnd = useCallback((finishedId: string) => {
++     setLayers((prev) => {
++       const finishedIndex = prev.findIndex((l) => l.id === finishedId);
++       if (finishedIndex < 0 || prev.length <= 1) return prev;
++       return prev.slice(finishedIndex);
++     });
++   }, []);
++ 
++   const colorTag = tags?.find((t: string) => t.startsWith('color:'))?.substring(6);
++   const colorLabel = COLOR_LABELS.find((c: Color) => c.name === colorTag);
++ 
++   const dateObj = new Date(modified > 1e11 ? modified : modified * 1000);
++   const dateStr =
++     dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
++     ' ' +
++     dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
++ 
++   const stateClass = isActive
++     ? 'ring-1 ring-inset ring-accent bg-accent/10'
++     : isSelected
++       ? 'ring-1 ring-inset ring-accent/50 bg-accent/5'
++       : 'hover:bg-surface/80';
++ 
++   return (
++     <div
++       className={`flex items-center w-full h-full border-b border-border-color/30 cursor-pointer transition-colors duration-150 ${stateClass}`}
++       onClick={(e: any) => {
++         e.stopPropagation();
++         onImageClick(path, e);
++       }}
++       onContextMenu={onContextMenu}
++       onDoubleClick={() => onImageDoubleClick(path)}
++     >
++       <div
++         style={{ width: `${columnWidths.thumbnail}%` }}
++         className="flex items-center justify-center p-1.5 h-full overflow-hidden"
++       >
++         <div className="w-full h-full relative overflow-hidden rounded-sm bg-surface flex items-center justify-center">
++           {layers.length > 0 && (
++             <div className="absolute inset-0 w-full h-full flex items-center justify-center">
++               {layers.map((layer) => (
++                 <div
++                   key={layer.id}
++                   className="absolute inset-0 w-full h-full"
++                   style={{ opacity: layer.opacity, transition: 'opacity 300ms ease-in-out' }}
++                   onTransitionEnd={() => handleTransitionEnd(layer.id)}
++                 >
++                   {thumbnailAspectRatio === ThumbnailAspectRatio.Contain && (
++                     <img
++                       alt=""
++                       className="absolute inset-0 w-full h-full object-cover blur-md scale-110 brightness-[0.4]"
++                       src={layer.url}
++                     />
++                   )}
++                   <img
++                     alt={baseName}
++                     className={`w-full h-full relative ${
++                       thumbnailAspectRatio === ThumbnailAspectRatio.Contain ? 'object-contain' : 'object-cover'
++                     }`}
++                     decoding="async"
++                     loading="lazy"
++                     src={layer.url}
++                   />
++                 </div>
++               ))}
++             </div>
++           )}
++ 
++           <AnimatePresence>
++             {layers.length === 0 && showPlaceholder && (
++               <motion.div
++                 className="absolute inset-0 w-full h-full flex items-center justify-center"
++                 initial={{ opacity: 0 }}
++                 animate={{ opacity: 1 }}
++                 exit={{ opacity: 0 }}
++                 transition={{ duration: 0.3, ease: 'easeInOut' }}
++               >
++                 <ImageIcon size={14} className="text-text-secondary animate-pulse" />
++               </motion.div>
++             )}
++           </AnimatePresence>
++         </div>
++       </div>
++ 
++       {/* Name */}
++       <div style={{ width: `${columnWidths.name}%` }} className="flex items-center gap-2 px-3 h-full overflow-hidden">
++         <Text variant={TextVariants.small} className="truncate" weight={TextWeights.medium} color={TextColors.primary}>
++           {baseName}
++         </Text>
++         {isVirtualCopy && (
++           <Text
++             as="div"
++             variant={TextVariants.small}
++             color={TextColors.secondary}
++             weight={TextWeights.bold}
++             className="shrink-0 bg-bg-primary px-1.5 py-0.5 rounded-full leading-none border border-border-color"
++             data-tooltip="Virtual Copy"
++           >
++             VC
++           </Text>
++         )}
++       </div>
++ 
++       <div style={{ width: `${columnWidths.date}%` }} className="flex items-center px-3 h-full overflow-hidden">
++         <Text variant={TextVariants.small} color={TextColors.secondary} className="truncate">
++           {dateStr}
++         </Text>
++       </div>
++ 
++       <div style={{ width: `${columnWidths.rating}%` }} className="flex items-center px-3 h-full overflow-hidden">
++         {rating > 0 && (
++           <div className="flex items-center gap-1">
++             <StarIcon size={12} className="text-accent fill-accent" />
++             <Text variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
++               {rating}
++             </Text>
++           </div>
++         )}
++       </div>
++ 
++       <div style={{ width: `${columnWidths.color}%` }} className="flex items-center px-3 h-full overflow-hidden">
++         {colorLabel && (
++           <div className="flex items-center gap-1.5">
++             <div
++               className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-black/20"
++               style={{ backgroundColor: colorLabel.color }}
++             />
++             <Text variant={TextVariants.small} color={TextColors.secondary} className="capitalize truncate">
++               {colorLabel.name}
++             </Text>
++           </div>
++         )}
++       </div>
++     </div>
++   );
++ }
++ 
+++>>>>>>> upstream/main
+  function Thumbnail({
+    data,
+    isActive,
+@@@ -1182,19 -1445,19 +1504,24 @@@ const Row = (
+            ...shiftedStyle,
+            left: 0,
+            width: '100%',
+ -          paddingLeft: outerPadding === 0 ? 12 : outerPadding,
+ -          paddingRight: outerPadding === 0 ? 12 : outerPadding,
+ +          paddingLeft: outerPadding,
+ +          paddingRight: outerPadding,
+            boxSizing: 'border-box',
+          }}
+ -        className="flex items-end pb-2 pt-2"
+ +        className="flex items-end pb-2"
+        >
+-         <div className="flex items-center gap-2 w-full border-b border-border-color pb-1">
++         <div className="flex items-center gap-2 w-full border-b border-border-color/50 pb-1">
+            <FolderOpen size={16} className="text-text-secondary" />
+            <Text variant={TextVariants.label} weight={TextWeights.semibold} className="truncate" data-tooltip={row.path}>
+              {displayPath}
+            </Text>
+++<<<<<<< HEAD
+ +          <Text variant={TextVariants.small} className="opacity-60 ml-auto">
+ +            {t('library.imagesCount', { count: row.count })}
+++=======
++           <Text variant={TextVariants.small} color={TextColors.secondary} className="ml-auto">
++             {row.count} images
+++>>>>>>> upstream/main
+            </Text>
+          </div>
+        </div>
+@@@ -1280,20 -1561,58 +1607,28 @@@ export default function MainLibrary(
+    theme,
+    thumbnailAspectRatio,
+    thumbnails,
++   thumbnailProgress,
+    thumbnailSize,
+    onNavigateToCommunity,
+ -  listColumnWidths,
+ -  setListColumnWidths,
+  }: MainLibraryProps) {
+ +  const { t } = useTranslation();
+    const [showSettings, setShowSettings] = useState(false);
+ -  const [appVersion, setAppVersion] = useState('');
+    const [, setSupportedTypes] = useState<SupportedTypes | null>(null);
+    const libraryContainerRef = useRef<HTMLDivElement>(null);
+ -  const [gridSize, setGridSize] = useState({ height: 0, width: 0 });
+ -  const gridObserverRef = useRef<ResizeObserver | null>(null);
+ -  const gridContainerRef = useCallback((el: HTMLDivElement | null) => {
+ -    if (gridObserverRef.current) {
+ -      gridObserverRef.current.disconnect();
+ -      gridObserverRef.current = null;
+ -    }
+ -    if (el) {
+ -      const ro = new ResizeObserver((entries) => {
+ -        const entry = entries[0];
+ -        if (entry) {
+ -          const { height, width } = entry.contentRect;
+ -          setGridSize((prev) => (prev.height === height && prev.width === width ? prev : { height, width }));
+ -        }
+ -      });
+ -      ro.observe(el);
+ -      gridObserverRef.current = ro;
+ -    }
+ -  }, []);
+    const [listHandle, setListHandle] = useListCallbackRef();
+++<<<<<<< HEAD
+ +  const [isLoaderVisible, setIsLoaderVisible] = useState(false);
+++=======
++   const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
++   const [latestVersion, setLatestVersion] = useState('');
++   const [isBusyDelayed, setIsBusyDelayed] = useState(false);
++   const [isProgressHovered, setIsProgressHovered] = useState(false);
+++>>>>>>> upstream/main
+    const loadedThumbnailsRef = useRef(new Set<string>());
+  
+ -  const handleHeaderSort = useCallback(
+ -    (key: string) => {
+ -      onClearSelection();
+ -      setSortCriteria((prev) => {
+ -        if (prev.key === key) {
+ -          if (prev.order === SortDirection.Ascending) {
+ -            return { ...prev, order: SortDirection.Descening };
+ -          } else {
+ -            return { key: 'name', order: SortDirection.Ascending };
+ -          }
+ -        }
+ -        return { key, order: SortDirection.Ascending };
+ -      });
+ -    },
+ -    [onClearSelection, setSortCriteria],
+ -  );
+ +  useEffect(() => {
+ +    loadedThumbnailsRef.current.clear();
+ +  }, [currentFolderPath]);
+  
+    const prevScrollState = useRef({
+      path: null as string | null,
+@@@ -1317,17 -1636,89 +1652,89 @@@
+    const sortOptions = useMemo(() => {
+      const exifEnabled = appSettings?.enableExifReading ?? false;
+      return [
+ -      { key: 'name', label: 'File Name' },
+ -      { key: 'date', label: 'Date Modified' },
+ -      { key: 'rating', label: 'Rating' },
+ -      { key: 'date_taken', label: 'Date Taken', disabled: !exifEnabled },
+ -      { key: 'focal_length', label: 'Focal Length', disabled: !exifEnabled },
+ -      { key: 'iso', label: 'ISO', disabled: !exifEnabled },
+ -      { key: 'shutter_speed', label: 'Shutter Speed', disabled: !exifEnabled },
+ -      { key: 'aperture', label: 'Aperture', disabled: !exifEnabled },
+ +      { key: 'name', label: t('library.fileName') },
+ +      { key: 'date', label: t('library.dateModified') },
+ +      { key: 'rating', label: t('library.rating') },
+ +      { key: 'date_taken', label: t('library.dateTaken'), disabled: !exifEnabled },
+ +      { key: 'focal_length', label: t('library.focalLength'), disabled: !exifEnabled },
+ +      { key: 'iso', label: t('library.iso'), disabled: !exifEnabled },
+ +      { key: 'shutter_speed', label: t('library.shutterSpeed'), disabled: !exifEnabled },
+ +      { key: 'aperture', label: t('library.aperture'), disabled: !exifEnabled },
+      ];
+ -  }, [appSettings?.enableExifReading]);
+ +  }, [appSettings?.enableExifReading, t]);
+  
++   useEffect(() => {
++     if (!listHandle?.element) return;
++ 
++     const element = listHandle.element;
++     const clientHeight = element.clientHeight;
++ 
++     if (activePath && libraryContainerRef.current) {
++       const width = libraryContainerRef.current.clientWidth;
++       if (width > 0 && clientHeight > 0) {
++         const isListView = thumbnailSize === ThumbnailSize.List;
++         const OUTER_PADDING = isListView ? 0 : 12;
++         const ITEM_GAP = isListView ? 0 : 12;
++         const minThumbWidth = thumbnailSizeOptions.find((o) => o.id === thumbnailSize)?.size || 240;
++         const availableWidth = width - OUTER_PADDING * 2;
++         const columnCount = isListView
++           ? 1
++           : Math.max(1, Math.floor((availableWidth + ITEM_GAP) / (minThumbWidth + ITEM_GAP)));
++         const itemWidth = isListView ? availableWidth : (availableWidth - ITEM_GAP * (columnCount - 1)) / columnCount;
++         const listRowHeight = Math.max(36, Math.min(300, (availableWidth * listColumnWidths.thumbnail) / 100));
++         const rowHeight = isListView ? listRowHeight : itemWidth + ITEM_GAP;
++         const headerHeight = 40;
++ 
++         let targetTop = 0;
++         let found = false;
++ 
++         if (libraryViewMode === LibraryViewMode.Recursive) {
++           const grps = groupImagesByFolder(imageList, currentFolderPath);
++           for (const group of grps) {
++             if (group.images.length === 0) continue;
++             targetTop += headerHeight;
++             const idx = group.images.findIndex((img) => img.path === activePath);
++             if (idx !== -1) {
++               targetTop += Math.floor(idx / columnCount) * rowHeight;
++               found = true;
++               break;
++             }
++             targetTop += Math.ceil(group.images.length / columnCount) * rowHeight;
++           }
++         } else {
++           const idx = imageList.findIndex((img) => img.path === activePath);
++           if (idx !== -1) {
++             targetTop = Math.floor(idx / columnCount) * rowHeight;
++             found = true;
++           }
++         }
++ 
++         if (found) {
++           const itemBottom = targetTop + rowHeight;
++           const savedTop = Math.max(0, libraryScrollTop);
++           const isVisibleAtSaved = targetTop < savedTop + clientHeight && itemBottom > savedTop;
++ 
++           if (isVisibleAtSaved && libraryScrollTop > 0) {
++             element.scrollTop = libraryScrollTop;
++           } else {
++             element.scrollTop = Math.max(0, targetTop - clientHeight / 2 + rowHeight / 2);
++           }
++ 
++           prevScrollState.current = {
++             path: activePath,
++             top: targetTop,
++             folder: currentFolderPath,
++           };
++           return;
++         }
++       }
++     }
++ 
++     if (libraryScrollTop > 0) {
++       element.scrollTop = libraryScrollTop;
++     }
++   }, [listHandle]);
++ 
+    useEffect(() => {
+      if (!activePath || !libraryContainerRef.current || multiSelectedPaths.length > 1) return;
+  
+@@@ -1404,14 -1801,17 +1811,8 @@@
+          };
+        }
+      }
+ -  }, [
+ -    activePath,
+ -    imageList,
+ -    libraryViewMode,
+ -    thumbnailSize,
+ -    currentFolderPath,
+ -    multiSelectedPaths.length,
+ -    listHandle,
+ -    listColumnWidths.thumbnail,
+ -  ]);
+ +  }, [activePath, imageList, libraryViewMode, thumbnailSize, currentFolderPath, multiSelectedPaths.length, listHandle]);
+  
+-   useEffect(() => {
+-     if (listHandle?.element && libraryScrollTop > 0) {
+-       listHandle.element.scrollTop = libraryScrollTop;
+-     }
+-   }, [listHandle]);
+- 
+    useEffect(() => {
+      const exifEnabled = appSettings?.enableExifReading ?? true;
+      const exifSortKeys = ['date_taken', 'iso', 'shutter_speed', 'aperture', 'focal_length'];
+@@@ -1422,28 -1822,67 +1823,25 @@@
+      }
+    }, [appSettings?.enableExifReading, sortCriteria.key, setSortCriteria]);
+  
++   const isBusy =
++     isLoading ||
++     ((thumbnailProgress?.total ?? 0) > 0 && (thumbnailProgress?.current ?? 0) < (thumbnailProgress?.total ?? 0));
++ 
+    useEffect(() => {
+-     let showTimer: number | undefined;
+-     let hideTimer: number | undefined;
++     let timer: number | undefined;
+  
+-     if (isThumbnailsLoading || isLoading) {
+-       showTimer = window.setTimeout(() => {
+-         setIsLoaderVisible(true);
+-       }, 1000);
++     if (isBusy) {
++       timer = window.setTimeout(() => setIsBusyDelayed(true), 1000);
+      } else {
+-       hideTimer = window.setTimeout(() => {
+-         setIsLoaderVisible(false);
+-       }, 500);
++       timer = window.setTimeout(() => setIsBusyDelayed(false), 500);
+      }
+-     return () => {
+-       clearTimeout(showTimer);
+-       clearTimeout(hideTimer);
+-     };
+-   }, [isThumbnailsLoading, isLoading]);
++ 
++     return () => clearTimeout(timer);
++   }, [isBusy]);
+  
+ -  useEffect(() => {
+ -    const compareVersions = (v1: string, v2: string) => {
+ -      const parts1 = v1.split('.').map(Number);
+ -      const parts2 = v2.split('.').map(Number);
+ -      const len = Math.max(parts1.length, parts2.length);
+ -      for (let i = 0; i < len; i++) {
+ -        const p1 = parts1[i] || 0;
+ -        const p2 = parts2[i] || 0;
+ -        if (p1 < p2) return -1;
+ -        if (p1 > p2) return 1;
+ -      }
+ -      return 0;
+ -    };
+ -
+ -    const checkVersion = async () => {
+ -      try {
+ -        const currentVersion = await getVersion();
+ -        setAppVersion(currentVersion);
+ -
+ -        const response = await fetch('https://api.github.com/repos/CyberTimon/RapidRAW/releases/latest');
+ -        if (!response.ok) {
+ -          console.error('Failed to fetch latest release info from GitHub.');
+ -          return;
+ -        }
+ -        const data = await response.json();
+ -        const latestTag = data.tag_name;
+ -        if (!latestTag) return;
+ -
+ -        const latestVersionStr = latestTag.startsWith('v') ? latestTag.substring(1) : latestTag;
+ -        setLatestVersion(latestVersionStr);
+ -
+ -        if (compareVersions(currentVersion, latestVersionStr) < 0) {
+ -          setIsUpdateAvailable(true);
+ -        }
+ -      } catch (error) {
+ -        console.error('Error checking for updates:', error);
+ -      }
+ -    };
+ -
+ -    checkVersion();
+ -  }, []);
+ -
+    useEffect(() => {
+      invoke(Invokes.GetSupportedFileTypes)
+ -      .then((types: any) => setSupportedTypes(types))
+ +      .then((types) => setSupportedTypes(types as SupportedTypes))
+        .catch((err) => console.error('Failed to load supported file types:', err));
+    }, []);
+  
+@@@ -1539,18 -1963,20 +1937,24 @@@
+                  >
+                    {hasLastPath ? (
+                      <>
+ -                      Welcome back!
+ +                      {t('library.welcomeBack')}
+                        <br />
+ -                      Continue where you left off or start a new session.
+ +                      {t('library.continueOrNew')}
+                      </>
+                    ) : (
+++<<<<<<< HEAD
+ +                    t('library.welcomeDescription')
+++=======
++                     `A blazingly fast, GPU-accelerated RAW image editor. ${
++                       isAndroid ? 'Open the library to begin.' : 'Open a folder to begin.'
++                     }`
+++>>>>>>> upstream/main
+                    )}
+                  </Text>
+ -                <div className="flex flex-col w-full max-w-xs gap-4">
+ +                <div className="flex flex-col w-full max-w-xs gap-3">
+                    {hasLastPath && (
+                      <Button
+ -                      className="rounded-md h-11 w-full flex justify-center items-center"
+ +                      className="rounded-lg h-11 w-full flex justify-center items-center gap-2 font-medium"
+                        onClick={onContinueSession}
+                        size="lg"
+                      >
+@@@ -1565,17 -1991,17 +1969,22 @@@
+                        onClick={onOpenFolder}
+                        size="lg"
+                      >
+++<<<<<<< HEAD
+ +                      <Folder size={18} />
+ +                      {hasLastPath ? t('library.changeFolder') : t('library.openFolder')}
+++=======
++                       <Folder size={20} className="mr-2" />
++                       {isAndroid ? 'Open Library' : hasLastPath ? 'Change Folder' : 'Open Folder'}
+++>>>>>>> upstream/main
+                      </Button>
+                      <Button
+ -                      className="px-3 bg-surface text-text-primary shadow-none h-11"
+ +                      className="w-11 h-11 flex items-center justify-center bg-surface text-text-primary shadow-none rounded-lg hover:bg-card-active transition-colors"
+                        onClick={() => setShowSettings(true)}
+ -                      size="lg"
+ -                      data-tooltip="Go to Settings"
+ +                      size="icon"
+ +                      data-tooltip={t('settings.title')}
+                        variant="ghost"
+                      >
+ -                      <Settings size={20} />
+ +                      <Settings size={18} />
+                      </Button>
+                    </div>
+                  </div>
+@@@ -1611,9 -2077,13 +2020,17 @@@
+        className="flex-1 flex flex-col h-full min-w-0 bg-bg-secondary rounded-lg overflow-hidden"
+        ref={libraryContainerRef}
+      >
+++<<<<<<< HEAD
+ +      <header className="p-4 flex-shrink-0 flex justify-between items-center border-b border-border-color gap-4">
+++=======
++       <header
++         className="p-4 shrink-0 flex justify-between items-center border-b border-border-color gap-4"
++         onMouseEnter={() => setIsProgressHovered(true)}
++         onMouseLeave={() => setIsProgressHovered(false)}
++       >
+++>>>>>>> upstream/main
+          <div className="min-w-0">
+ -          <Text variant={TextVariants.headline}>Library</Text>
+ +          <Text variant={TextVariants.headline}>{t('library.title')}</Text>
+            <div className="flex items-center gap-2">
+              {currentFolderPath ? (
+                <Text className="truncate">{currentFolderPath}</Text>
+@@@ -1621,11 -2091,22 +2038,27 @@@
+                <p className="text-sm invisible select-none pointer-events-none h-5 overflow-hidden"></p>
+              )}
+              <div
+++<<<<<<< HEAD
+ +              className={`overflow-hidden transition-all duration-300 ${
+ +                isLoaderVisible ? 'max-w-[1rem] opacity-100' : 'max-w-0 opacity-0'
+++=======
++               className={`flex items-center gap-2 overflow-hidden transition-all duration-300 whitespace-nowrap ${
++                 isBusyDelayed ? 'max-w-xs opacity-100' : 'max-w-0 opacity-0'
+++>>>>>>> upstream/main
+                }`}
+              >
+-               <Loader2 size={14} className="animate-spin text-text-secondary" />
++               <Loader2 size={14} className="animate-spin text-text-secondary shrink-0" />
++               <div
++                 className={`flex items-center transition-all duration-300 ease-out overflow-hidden ${
++                   isProgressHovered && isBusyDelayed && (thumbnailProgress?.total ?? 0) > 0
++                     ? 'max-w-xs opacity-100'
++                     : 'max-w-0 opacity-0'
++                 }`}
++               >
++                 <Text variant={TextVariants.small} color={TextColors.secondary} className="whitespace-nowrap">
++                   ({thumbnailProgress?.current ?? 0}/{thumbnailProgress?.total ?? 0})
++                 </Text>
++               </div>
+              </div>
+            </div>
+          </div>
+@@@ -1735,40 -2229,78 +2168,62 @@@
+                rows.push({ type: 'footer' });
+  
+                const getItemSize = (index: number) => {
+++<<<<<<< HEAD
+ +                if (rows[index].type === 'footer') return OUTER_PADDING;
+++=======
++                 if (rows[index].type === 'footer') return isListView ? 24 : OUTER_PADDING;
+++>>>>>>> upstream/main
+                  return rows[index].type === 'header' ? headerHeight : rowHeight;
+                };
+  
+                return (
+++<<<<<<< HEAD
+ +                <div key={`${width}-${thumbnailSize}-${libraryViewMode}`} style={{ height, width }}>
+ +                  <List
+ +                    listRef={setListHandle}
+ +                    rowCount={rows.length}
+ +                    rowHeight={getItemSize}
+ +                    onScroll={(e: React.UIEvent<HTMLElement>) => setLibraryScrollTop(e.currentTarget.scrollTop)}
+ +                    className="custom-scrollbar"
+ +                    rowComponent={Row}
+ +                    rowProps={{
+ +                      rows,
+ +                      activePath,
+ +                      multiSelectedPaths,
+ +                      onContextMenu,
+ +                      onImageClick,
+ +                      onImageDoubleClick,
+ +                      thumbnails,
+ +                      thumbnailAspectRatio,
+ +                      loadedThumbnails: loadedThumbnailsRef.current,
+ +                      imageRatings,
+ +                      rootPath: currentFolderPath,
+ +                      itemWidth,
+ +                      outerPadding: OUTER_PADDING,
+ +                      gap: ITEM_GAP,
+++=======
++                 <div className="flex flex-col w-full h-full">
++                   {isListView && (
++                     <ListHeader
++                       widths={listColumnWidths}
++                       setWidths={setListColumnWidths}
++                       containerRef={libraryContainerRef}
++                       sortCriteria={sortCriteria}
++                       onSortChange={handleHeaderSort}
++                     />
++                   )}
++                   <div
++                     key={`${gridSize.width}-${thumbnailSize}-${libraryViewMode}`}
++                     style={{
++                       height: isListView ? gridSize.height - 36 : gridSize.height,
++                       width: gridSize.width,
+++>>>>>>> upstream/main
+                      }}
+ -                  >
+ -                    <List
+ -                      listRef={setListHandle}
+ -                      rowCount={rows.length}
+ -                      rowHeight={getItemSize}
+ -                      onScroll={(e: React.UIEvent<HTMLElement>) => setLibraryScrollTop(e.currentTarget.scrollTop)}
+ -                      onRowsRendered={({ startIndex, stopIndex }) => {
+ -                        if (!onRequestThumbnails) return;
+ -                        const pathsToRequest: string[] = [];
+ -
+ -                        for (let i = startIndex; i <= stopIndex; i++) {
+ -                          const row = rows[i];
+ -                          if (row && row.type === 'images') {
+ -                            row.images.forEach((img: ImageFile) => {
+ -                              if (!thumbnails[img.path]) {
+ -                                pathsToRequest.push(img.path);
+ -                              }
+ -                            });
+ -                          }
+ -                        }
+ -
+ -                        if (pathsToRequest.length > 0) {
+ -                          onRequestThumbnails(pathsToRequest);
+ -                        }
+ -                      }}
+ -                      className="custom-scrollbar"
+ -                      rowComponent={Row}
+ -                      rowProps={{
+ -                        rows,
+ -                        activePath,
+ -                        multiSelectedPaths,
+ -                        onContextMenu,
+ -                        onImageClick,
+ -                        onImageDoubleClick,
+ -                        thumbnails,
+ -                        thumbnailAspectRatio,
+ -                        loadedThumbnails: loadedThumbnailsRef.current,
+ -                        imageRatings,
+ -                        rootPath: currentFolderPath,
+ -                        itemWidth,
+ -                        itemHeight: isListView ? listRowHeight : itemWidth,
+ -                        outerPadding: OUTER_PADDING,
+ -                        gap: ITEM_GAP,
+ -                        isListView,
+ -                        columnWidths: listColumnWidths,
+ -                      }}
+ -                    />
+ -                  </div>
+ +                  />
+                  </div>
+                );
+ -            })()}
+ +            }}
+ +          </AutoSizer>
+          </div>
+        ) : isIndexing || aiModelDownloadStatus || importState.status === Status.Importing ? (
+          <div className="flex-1 flex flex-col items-center justify-center" onContextMenu={onEmptyAreaContextMenu}>
+diff --cc src/components/panel/SettingsPanel.tsx
+index a8582534,2c2487f4..00000000
+--- a/src/components/panel/SettingsPanel.tsx
++++ b/src/components/panel/SettingsPanel.tsx
+@@@ -31,10 -29,10 +31,10 @@@ import Switch from '../ui/Switch'
+  import Input from '../ui/Input';
+  import Slider from '../ui/Slider';
+  import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
+ -import { Invokes } from '../ui/AppProperties';
+ +import { Invokes, AppSettings } from '../ui/AppProperties';
+  import Text from '../ui/Text';
+  import { TextColors, TextVariants, TextWeights } from '../../types/typography';
+- import { platform } from '@tauri-apps/plugin-os';
++ import { useOsPlatform } from '../../hooks/useOsPlatform';
+  
+  interface ConfirmModalState {
+    confirmText: string;
+@@@ -113,25 -118,31 +120,40 @@@ const zoomMultiplierOptions: OptionItem
+    { value: 0.25, label: '0.25x' },
+  ];
+  
+++<<<<<<< HEAD
+ +const backendOptions = (t: (key: string) => string): OptionItem<string>[] => [
+ +  { value: 'auto', label: t('settings.backend_auto') },
+ +  { value: 'vulkan', label: t('settings.backend_vulkan') },
+ +  { value: 'dx12', label: t('settings.backend_dx12') },
+ +  { value: 'metal', label: t('settings.backend_metal') },
+ +  { value: 'gl', label: t('settings.backend_gl') },
+++=======
++ const livePreviewQualityOptions: OptionItem<string>[] = [
++   { value: 'full', label: 'Full Resolution' },
++   { value: 'high', label: 'High Quality' },
++   { value: 'performance', label: 'Performance' },
++ ];
++ 
++ const backendOptions: OptionItem<string>[] = [
++   { value: 'auto', label: 'Auto' },
++   { value: 'vulkan', label: 'Vulkan' },
++   { value: 'dx12', label: 'DirectX 12' },
++   { value: 'metal', label: 'Metal' },
++   { value: 'gl', label: 'OpenGL' },
+++>>>>>>> upstream/main
+  ];
+  
+ -const linearRawOptions: OptionItem<string>[] = [
+ -  { value: 'auto', label: 'Auto' },
+ -  { value: 'gamma', label: 'Apply Gamma' },
+ -  { value: 'skip_calib', label: 'Skip Calibrate' },
+ -  { value: 'gamma_skip_calib', label: 'Apply Gamma & Skip Calibrate' },
+ +const linearRawOptions = (t: (key: string) => string): OptionItem<string>[] => [
+ +  { value: 'auto', label: t('settings.linearRaw_auto') },
+ +  { value: 'gamma', label: t('settings.linearRaw_gamma') },
+ +  { value: 'skip_calib', label: t('settings.linearRaw_skip_calib') },
+ +  { value: 'gamma_skip_calib', label: t('settings.linearRaw_gamma_skip_calib') },
+  ];
+  
+ -const settingCategories = [
+ -  { id: 'general', label: 'General', icon: SlidersHorizontal },
+ -  { id: 'processing', label: 'Processing', icon: Cpu },
+ -  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+ +const settingCategories = (t: (key: string) => string) => [
+ +  { id: 'general', label: t('settings.general'), icon: SlidersHorizontal },
+ +  { id: 'processing', label: t('settings.processing'), icon: Cpu },
+ +  { id: 'shortcuts', label: t('settings.shortcuts'), icon: Keyboard },
+  ];
+  
+  const KeybindItem = ({ keys, description }: KeybindItemProps) => (
+@@@ -342,17 -347,9 +365,9 @@@ export default function SettingsPanel(
+    const [activeCategory, setActiveCategory] = useState('general');
+    const [logPath, setLogPath] = useState('');
+    const [dpr, setDpr] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio : 1));
+-   const [osPlatform, setOsPlatform] = useState('');
+- 
+-   useEffect(() => {
+-     try {
+-       setOsPlatform(platform());
+-     } catch (e) {
+-       console.error('Failed to get platform:', e);
+-     }
+-   }, []);
++   const osPlatform = useOsPlatform();
+  
+ -  const filteredBackendOptions = backendOptions.filter((opt) => {
+ +  const filteredBackendOptions = backendOptions(t).filter((opt) => {
+      if (opt.value === 'metal' && osPlatform !== 'macos') return false;
+      if (opt.value === 'dx12' && osPlatform === 'macos') return false;
+      return true;
+@@@ -712,8 -713,8 +728,13 @@@
+              </Text>
+            </div>
+  
+++<<<<<<< HEAD
+ +          <div className="relative flex w-full min-[1200px]:w-[450px] p-2 bg-surface rounded-md">
+ +            {settingCategories(t).map((category) => (
+++=======
++           <div className="relative flex w-full min-[1200px]:w-112.5 p-2 bg-surface rounded-md">
++             {settingCategories.map((category) => (
+++>>>>>>> upstream/main
+                <button
+                  key={category.id}
+                  onClick={() => setActiveCategory(category.id)}
+@@@ -1031,11 -1029,11 +1052,11 @@@
+                                </SettingItem>
+  
+                                <SettingItem
+ -                                label="Custom AI Tag List"
+ -                                description="If provided, the AI will ONLY use tags from this list, overriding RapidRAW’s built-in list. Tagging works only in English."
+ +                                label={t('settings.customAiTagList')}
+ +                                description={t('settings.customAiTagListDescription')}
+                                >
+                                  <div>
+-                                   <div className="flex flex-wrap gap-2 p-2 bg-bg-primary rounded-md min-h-[40px] border border-border-color mb-2 items-center">
++                                   <div className="flex flex-wrap gap-2 p-2 bg-bg-primary rounded-md min-h-10 border border-border-color mb-2 items-center">
+                                      <AnimatePresence>
+                                        {customAiTags.length > 0 ? (
+                                          customAiTags.map((tag: string) => (
+@@@ -1109,11 -1107,11 +1130,11 @@@
+                      </div>
+  
+                      <SettingItem
+ -                      label="Tagging Shortcuts"
+ -                      description="A list of tags that will appear as shortcuts in the tagging context menu."
+ +                      label={t('settings.taggingShortcuts')}
+ +                      description={t('settings.taggingShortcutsDescription')}
+                      >
+                        <div>
+-                         <div className="flex flex-wrap gap-2 p-2 bg-bg-primary rounded-md min-h-[40px] border border-border-color mb-2 items-center">
++                         <div className="flex flex-wrap gap-2 p-2 bg-bg-primary rounded-md min-h-10 border border-border-color mb-2 items-center">
+                            <AnimatePresence>
+                              {taggingShortcuts.length > 0 ? (
+                                taggingShortcuts.map((shortcut: string) => (
+@@@ -1440,17 -1468,15 +1485,27 @@@
+                            >
+                              <div className="pl-4 border-l-2 border-border-color ml-1">
+                                <SettingItem
+++<<<<<<< HEAD
+ +                                label={t('settings.highQualityLivePreview')}
+ +                                description={t('settings.highQualityLivePreviewDescription')}
+ +                              >
+ +                                <Switch
+ +                                  checked={appSettings?.enableHighQualityLivePreviews ?? false}
+ +                                  id="hq-live-previews-toggle"
+ +                                  label={t('settings.enableHighQuality')}
+ +                                  onChange={(checked) =>
+ +                                    onSettingsChange({ ...appSettings, enableHighQualityLivePreviews: checked })
+++=======
++                                 label="Live Preview Quality"
++                                 description="Controls the resolution and compression of the image while dragging sliders. Lower quality significantly improves responsiveness."
++                               >
++                                 <Dropdown
++                                   onChange={(value: any) =>
++                                     onSettingsChange({ ...appSettings, livePreviewQuality: value })
+++>>>>>>> upstream/main
+                                    }
++                                   options={livePreviewQualityOptions}
++                                   value={appSettings?.livePreviewQuality || 'high'}
+                                  />
+                                </SettingItem>
+                              </div>
+@@@ -1460,11 -1486,22 +1515,27 @@@
+                      </div>
+  
+                      <SettingItem
+++<<<<<<< HEAD
+ +                      label={t('settings.rawHighlightRecovery')}
+ +                      description={t('settings.rawHighlightRecoveryDescription')}
+++=======
++                       description="Determines the resolution of generated library thumbnails. Higher values produce sharper images during loading."
++                       label="Thumbnail Resolution"
++                     >
++                       <Dropdown
++                         onChange={(value: any) => handleProcessingSettingChange('thumbnailResolution', value)}
++                         options={thumbnailResolutions}
++                         value={processingSettings.thumbnailResolution}
++                       />
++                     </SettingItem>
++ 
++                     <SettingItem
++                       label="RAW Highlight Recovery"
++                       description="Controls how much detail is recovered from clipped highlights in RAW files. Higher values recover more detail but can introduce purple artefacts."
+++>>>>>>> upstream/main
+                      >
+                        <Slider
+ -                        label="Amount"
+ +                        label={t('adjustments.amount')}
+                          min={1}
+                          max={10}
+                          step={0.1}
+diff --cc src/components/panel/editor/ImageCanvas.tsx
+index 889d227b,c281bf97..00000000
+--- a/src/components/panel/editor/ImageCanvas.tsx
++++ b/src/components/panel/editor/ImageCanvas.tsx
+@@@ -1077,15 -1190,11 +1129,15 @@@ const ImageCanvas = memo
+            drawingStageRef.current = stage;
+  
+            const newLine: DrawnLine = {
+-             brushSize: isBrushActive && brushSettings?.size ? brushSettings.size : 2,
++             brushSize: isBrushActive && brushSettings?.size ? brushStageSize : 2,
+              points: [pos],
+-             tool: toolType,
++             tool: effectiveTool,
+            };
+            currentLine.current = newLine;
+ +
+ +          if (isAiSubjectActive) {
+ +            setPreviewLine(newLine);
+ +          }
+          } else {
+            if (e.target === e.target.getStage()) {
+              if (isMasking) {
+@@@ -1244,10 -1366,10 +1309,10 @@@
+                  x: p.x / scale + cropX,
+                  y: p.y / scale + cropY,
+                })),
+-               tool: brushSettings?.tool ?? ToolType.Brush,
++               tool: effectiveToolForPreview,
+              };
+  
+ -            const existingLines = activeSubMask.parameters?.lines || [];
+ +            const existingLines = (activeSubMask.parameters?.lines as DrawnLine[] | undefined) ?? [];
+              const previewSubMask = {
+                ...activeSubMask,
+                parameters: {
+@@@ -1347,37 -1515,21 +1414,44 @@@
+  
+        const activeId = isMasking ? activeMaskId : activeAiSubMaskId;
+  
+++<<<<<<< HEAD
+ +      if (activeSubMask?.type === Mask.AiSubject || activeSubMask?.type === Mask.QuickEraser) {
+ +        const points = line.points;
+ +        if (points.length > 1) {
+ +          const xs = points.map((p: Coord) => p.x);
+ +          const ys = points.map((p: Coord) => p.y);
+ +          const minX = Math.min(...xs);
+ +          const minY = Math.min(...ys);
+ +          const maxX = Math.max(...xs);
+ +          const maxY = Math.max(...ys);
+ +
+ +          const startPoint = { x: minX / scale + cropX, y: minY / scale + cropY };
+ +          const endPoint = { x: maxX / scale + cropX, y: maxY / scale + cropY };
+ +
+ +          if (activeSubMask.type === Mask.QuickEraser && onQuickErase) {
+ +            onQuickErase(activeId, startPoint, endPoint);
+ +          } else if (activeSubMask.type === Mask.AiSubject && onGenerateAiMask) {
+ +            onGenerateAiMask(activeId, startPoint, endPoint);
+ +          }
+ +        }
+ +      } else if (isBrushActive) {
+++=======
++       if (isBrushActive) {
++         const wasAltPressed = (window as any).altKeyDown || false;
++         const effectiveToolForFinal = wasAltPressed ? (baseTool === ToolType.Brush ? ToolType.Eraser : ToolType.Brush) : baseTool;
++ 
+++>>>>>>> upstream/main
+          const imageSpaceLine: DrawnLine = {
+-           brushSize: (brushSettings?.size ?? 0) / scale,
++           brushSize: brushImageSpaceSize,
+            feather: brushSettings?.feather ? brushSettings?.feather / 100 : 0,
+            points: line.points.map((p: Coord) => ({
+              x: p.x / scale + cropX,
+              y: p.y / scale + cropY,
+            })),
+-           tool: brushSettings?.tool ?? ToolType.Brush,
++           tool: effectiveToolForFinal,
+          };
+  
+ -        const existingLines = activeSubMask?.parameters.lines || [];
+ +        const existingLines = (activeSubMask?.parameters?.lines as DrawnLine[] | undefined) ?? [];
+  
+          updateSubMask(activeId, {
+            parameters: {
+@@@ -1810,17 -1984,17 +1907,27 @@@
+                        />
+                      );
+                    })}
+++<<<<<<< HEAD
+ +                {previewLine && previewLine.tool === ToolType.AiSeletor && (
+ +                  <Line
+ +                    dash={[4, 4]}
+ +                    lineCap="round"
+ +                    lineJoin="round"
+ +                    listening={false}
+ +                    opacity={0.8}
+ +                    points={previewLine.points.flatMap((p: Coord) => [p.x, p.y])}
+++=======
++ 
++                 {previewBox && (
++                   <Rect
++                     x={Math.min(previewBox.start.x, previewBox.end.x)}
++                     y={Math.min(previewBox.start.y, previewBox.end.y)}
++                     width={Math.abs(previewBox.end.x - previewBox.start.x)}
++                     height={Math.abs(previewBox.end.y - previewBox.start.y)}
+++>>>>>>> upstream/main
+                      stroke="#0ea5e9"
+                      strokeWidth={2}
+ -                    dash={[4, 4]}
+ -                    listening={false}
+ +                    tension={0.5}
+                    />
+                  )}
+                  {isBrushActive && cursorPreview.visible && (
+diff --cc src/components/panel/right/AIPanel.tsx
+index c2b9bc5a,bde1e0b9..00000000
+--- a/src/components/panel/right/AIPanel.tsx
++++ b/src/components/panel/right/AIPanel.tsx
+@@@ -144,69 -124,56 +144,74 @@@ const getSubMaskConfig = (t: (key: stri
+    },
+    [Mask.QuickEraser]: {
+      parameters: [
+++<<<<<<< HEAD
+ +      { key: 'grow', label: t('ai.grow'), min: -100, max: 100, step: 1, defaultValue: 50 },
+ +      { key: 'feather', label: t('ai.feather'), min: 0, max: 100, step: 1, defaultValue: 50 },
+++=======
++       { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 75 },
++       { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 75 },
+++>>>>>>> upstream/main
+      ],
+    },
+ -};
+ -
+ -const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => (
+ -  <div className="space-y-4 pt-4 border-t border-surface mt-4">
+ -    <Slider
+ -      defaultValue={100}
+ -      label="Brush Size"
+ -      max={200}
+ -      min={1}
+ -      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
+ -      step={1}
+ -      value={settings.size}
+ -    />
+ -    <Slider
+ -      defaultValue={50}
+ -      label="Brush Feather"
+ -      max={100}
+ -      min={0}
+ -      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+ -      step={1}
+ -      value={settings.feather}
+ -    />
+ -    <div className="grid grid-cols-2 gap-2 pt-2">
+ -      <button
+ -        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+ -          settings.tool === ToolType.Brush
+ -            ? 'text-primary bg-surface'
+ -            : 'bg-surface text-text-secondary hover:bg-card-active'
+ -        }`}
+ -        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Brush }))}
+ -      >
+ -        Add
+ -      </button>
+ -      <button
+ -        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+ -          settings.tool === ToolType.Eraser
+ -            ? 'text-primary bg-surface'
+ -            : 'bg-surface text-text-secondary hover:bg-card-active'
+ -        }`}
+ -        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Eraser }))}
+ -      >
+ -        Erase
+ -      </button>
+ +});
+ +
+ +const BrushTools = ({
+ +  settings,
+ +  onSettingsChange,
+ +}: {
+ +  settings: BrushSettings;
+ +  onSettingsChange: (settings: BrushSettings) => void;
+ +}) => {
+ +  const { t } = useTranslation();
+ +  return (
+ +    <div className="space-y-4 pt-4 border-t border-surface mt-4">
+ +      <Slider
+ +        defaultValue={100}
+ +        label={t('masking.brushSize')}
+ +        max={200}
+ +        min={1}
+ +        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+ +          onSettingsChange({ ...settings, size: Number(e.target.value) })
+ +        }
+ +        step={1}
+ +        value={settings.size}
+ +      />
+ +      <Slider
+ +        defaultValue={50}
+ +        label={t('masking.brushFeather')}
+ +        max={100}
+ +        min={0}
+ +        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+ +          onSettingsChange({ ...settings, feather: Number(e.target.value) })
+ +        }
+ +        step={1}
+ +        value={settings.feather}
+ +      />
+ +      <div className="grid grid-cols-2 gap-2 pt-2">
+ +        <button
+ +          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+ +            settings.tool === ToolType.Brush
+ +              ? 'text-primary bg-surface'
+ +              : 'bg-surface text-text-secondary hover:bg-card-active'
+ +          }`}
+ +          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Brush })}
+ +        >
+ +          {t('common.add')}
+ +        </button>
+ +        <button
+ +          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+ +            settings.tool === ToolType.Eraser
+ +              ? 'text-primary bg-surface'
+ +              : 'bg-surface text-text-secondary hover:bg-card-active'
+ +          }`}
+ +          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Eraser })}
+ +        >
+ +          {t('common.erase')}
+ +        </button>
+ +      </div>
+      </div>
+ -  </div>
+ -);
+ +  );
+ +};
+  
+  const ConnectionStatus = ({ isConnected }: ConnectionStatusProps) => {
+    const [isHovered, setIsHovered] = useState(false);
+@@@ -238,7 -204,9 +243,13 @@@
+            initial={{ height: 0, opacity: 0, marginTop: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+          >
+++<<<<<<< HEAD
+ +          <p className="text-xs text-text-secondary">{t('ai.simpleInpaintingOnly')}</p>
+++=======
++           <p className="text-xs text-text-secondary">
++             Only basic inpainting available. Connect backend for generative features.
++           </p>
+++>>>>>>> upstream/main
+          </motion.div>
+        </div>
+      </div>
+@@@ -407,32 -375,6 +416,35 @@@ export default function AIPanel(
+        subMask.parameters.centerY = -10000;
+        subMask.parameters.radiusX = 0;
+        subMask.parameters.radiusY = 0;
+++<<<<<<< HEAD
+ +    } else if (adjustments?.crop && subMask.parameters) {
+ +      const { x, y, width, height, unit } = adjustments.crop as {
+ +        x: number;
+ +        y: number;
+ +        width: number;
+ +        height: number;
+ +        unit: string;
+ +      };
+ +      const isPercent = unit === '%';
+ +
+ +      const cW = isPercent ? (width / 100) * imgW : width;
+ +      const cH = isPercent ? (height / 100) * imgH : height;
+ +      const cX = isPercent ? (x / 100) * imgW : x;
+ +      const cY = isPercent ? (y / 100) * imgH : y;
+ +
+ +      if (imgW && imgH) {
+ +        const _ratioX = cW / imgW;
+ +        const _ratioY = cH / imgH;
+ +        const _cx = cX + cW / 2;
+ +        const _cy = cY + cH / 2;
+ +        const _ox = imgW / 2;
+ +        const _oy = imgH / 2;
+ +
+ +        const p = { ...subMask.parameters };
+ +        subMask.parameters = p;
+ +      }
+++=======
+++>>>>>>> upstream/main
+      }
+      return subMask;
+    };
+@@@ -491,7 -432,31 +502,35 @@@
+      if (type === Mask.AiForeground) onGenerateAiForegroundMask(subMask.id);
+    };
+  
+++<<<<<<< HEAD
+ +  const updatePatch = (id: string, data: Partial<AiPatch>) =>
+++=======
++   const handleAddAiContextMenu = (event: React.MouseEvent, targetContainerId?: string | null) => {
++     event.preventDefault();
++     event.stopPropagation();
++     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
++ 
++     const types = targetContainerId ? AI_SUB_MASK_COMPONENT_TYPES : AI_PANEL_CREATION_TYPES;
++ 
++     const options = types
++       .filter((mt) => !mt.disabled)
++       .map((maskType: MaskType) => ({
++         label: maskType.name,
++         icon: maskType.icon,
++         onClick: () => {
++           if (targetContainerId) {
++             handleAddSubMask(targetContainerId, maskType.type);
++           } else {
++             handleAddAiPatchContainer(maskType.type);
++           }
++         },
++       }));
++ 
++     showContextMenu(rect.left, rect.bottom + 5, options);
++   };
++ 
++   const updatePatch = (id: string, data: any) =>
+++>>>>>>> upstream/main
+      setAdjustments((prev: Adjustments) => ({
+        ...prev,
+        aiPatches: prev.aiPatches.map((p) => (p.id === id ? { ...p, ...data } : p)),
+@@@ -521,6 -486,139 +560,142 @@@
+      }));
+    };
+  
+++<<<<<<< HEAD
+++=======
++   const clonePatchData = (container: AiPatch, options: { invert?: boolean; rename?: boolean } = {}): AiPatch => {
++     const clonedContainer = JSON.parse(JSON.stringify(container));
++ 
++     clonedContainer.id = uuidv4();
++     clonedContainer.invert = options.invert ? !clonedContainer.invert : clonedContainer.invert;
++     clonedContainer.isLoading = false;
++     clonedContainer.name = options.rename === false ? clonedContainer.name : `${container.name} Copy`;
++     clonedContainer.patchData = null;
++     clonedContainer.subMasks = clonedContainer.subMasks.map((subMask: SubMask) => ({
++       ...subMask,
++       id: uuidv4(),
++     }));
++ 
++     return clonedContainer;
++   };
++ 
++   const cloneSubMaskData = (subMask: SubMask, options: { invert?: boolean; rename?: boolean } = {}): SubMask => {
++     const clonedSubMask = JSON.parse(JSON.stringify(subMask));
++ 
++     clonedSubMask.id = uuidv4();
++     clonedSubMask.invert = options.invert ? !clonedSubMask.invert : clonedSubMask.invert;
++     clonedSubMask.name = options.rename === false ? clonedSubMask.name : `${getSubMaskName(subMask)} Copy`;
++ 
++     return clonedSubMask;
++   };
++ 
++   const copyPatchToClipboard = (container: AiPatch) => {
++     setCopiedPatch(JSON.parse(JSON.stringify(container)));
++   };
++ 
++   const copySubMaskToClipboard = (subMask: SubMask) => {
++     setCopiedSubMask(JSON.parse(JSON.stringify(subMask)));
++   };
++ 
++   const insertPatchContainer = (container: AiPatch, insertIndex?: number) => {
++     setAdjustments((prev: Adjustments) => {
++       const newPatches = [...(prev.aiPatches || [])];
++       const targetIndex = Math.max(0, Math.min(insertIndex ?? newPatches.length, newPatches.length));
++ 
++       newPatches.splice(targetIndex, 0, container);
++       return { ...prev, aiPatches: newPatches };
++     });
++ 
++     onSelectPatchContainer(container.id);
++     onSelectSubMask(null);
++     setExpandedContainers((prev) => new Set(prev).add(container.id));
++   };
++ 
++   const insertSubMaskIntoContainer = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     setAdjustments((prev: Adjustments) => ({
++       ...prev,
++       aiPatches: (prev.aiPatches || []).map((container) => {
++         if (container.id !== containerId) {
++           return container;
++         }
++ 
++         const newSubMasks = [...container.subMasks];
++         const targetIndex = Math.max(0, Math.min(insertIndex ?? newSubMasks.length, newSubMasks.length));
++ 
++         newSubMasks.splice(targetIndex, 0, subMask);
++         return { ...container, subMasks: newSubMasks };
++       }),
++     }));
++ 
++     onSelectPatchContainer(containerId);
++     onSelectSubMask(subMask.id);
++     setExpandedContainers((prev) => new Set(prev).add(containerId));
++   };
++ 
++   const handleDuplicatePatchContainer = (container: AiPatch) => {
++     const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
++     const duplicatedContainer = clonePatchData(container, { rename: true });
++ 
++     insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
++   };
++ 
++   const handleDuplicateAndInvertPatchContainer = (container: AiPatch) => {
++     const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
++     const duplicatedContainer = clonePatchData(container, { invert: true, rename: true });
++ 
++     insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
++   };
++ 
++   const handlePastePatch = (insertAfterContainerId?: string) => {
++     if (!copiedPatch) {
++       return;
++     }
++ 
++     const pastedContainer = clonePatchData(copiedPatch, { rename: false });
++     const patchIndex = insertAfterContainerId
++       ? (adjustments.aiPatches || []).findIndex((patch) => patch.id === insertAfterContainerId)
++       : -1;
++ 
++     insertPatchContainer(pastedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
++   };
++ 
++   const handleDuplicateSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     const duplicatedSubMask = cloneSubMaskData(subMask, { rename: true });
++     insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
++   };
++ 
++   const handleDuplicateAndInvertSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     const duplicatedSubMask = cloneSubMaskData(subMask, { invert: true, rename: true });
++     insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
++   };
++ 
++   const handlePasteSubMask = (containerId: string, insertIndex?: number) => {
++     if (!copiedSubMask) {
++       return;
++     }
++ 
++     const pastedSubMask = cloneSubMaskData(copiedSubMask, { rename: false });
++     insertSubMaskIntoContainer(containerId, pastedSubMask, insertIndex);
++   };
++ 
++   const handlePanelContextMenu = (e: React.MouseEvent) => {
++     e.preventDefault();
++     if (!selectedImage) {
++       return;
++     }
++ 
++     const newEditSubMenu = AI_PANEL_CREATION_TYPES.filter((maskType) => !maskType.disabled).map((maskType) => ({
++       label: maskType.name,
++       icon: maskType.icon,
++       onClick: () => handleAddAiPatchContainer(maskType.type),
++     }));
++ 
++     showContextMenu(e.clientX, e.clientY, [
++       { label: 'Paste Edit', icon: ClipboardPaste, disabled: !copiedPatch, onClick: () => handlePastePatch() },
++       { label: 'Add New Edit', icon: Plus, submenu: newEditSubMenu },
++     ]);
++   };
++ 
+++>>>>>>> upstream/main
+    const handleDragStart = (event: DragStartEvent) => {
+      setActiveDragItem(event.active.data.current as DragData);
+      if (onDragStateChange) onDragStateChange(true);
+@@@ -660,9 -757,13 +834,19 @@@
+        onDragEnd={handleDragEnd}
+        collisionDetection={pointerWithin}
+      >
+++<<<<<<< HEAD
+ +      <div className="flex flex-col h-full select-none overflow-hidden" onClick={handleDeselect}>
+ +        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface h-[69px]">
+ +          <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('ai.title')}</h2>
+++=======
++       <div
++         className="flex flex-col h-full select-none overflow-hidden"
++         onClick={handleDeselect}
++         onContextMenu={handlePanelContextMenu}
++       >
++         <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
++           <h2 className="text-xl font-bold text-primary text-shadow-shiny">Inpainting</h2>
+++>>>>>>> upstream/main
+            <button
+              className="p-2 rounded-full hover:bg-surface transition-colors"
+              onClick={handleResetAllAiEdits}
+@@@ -673,62 -774,47 +857,99 @@@
+          </div>
+  
+          <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
+++<<<<<<< HEAD
+ +          <div className="p-4 pb-2 z-10 flex-shrink-0">
+ +            {!selectedImage && <p className="text-center text-text-tertiary mt-4">No image selected.</p>}
+ +
+ +            {selectedImage && (
+ +              <>
+ +                <ConnectionStatus isConnected={isAIConnectorConnected} />
+ +                <p className="text-sm mb-3 font-semibold text-text-primary">
+ +                  {activePatchContainerId ? t('ai.addToSelection') : t('ai.createNewEdit')}
+ +                </p>
+ +                <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
+ +                  {getAiPanelCreationTypes(t).map((maskType: MaskType) => {
+ +                    const isComponentMode = !!activePatchContainerId;
+ +                    const typeToRender = isComponentMode
+ +                      ? getAiSubMaskComponentTypes(t).find((ct) => ct.type === maskType.type)
+ +                      : maskType;
+ +
+ +                    if (!typeToRender) return null;
+ +
+ +                    return (
+ +                      <DraggableGridItem
+ +                        key={typeToRender.type}
+ +                        maskType={typeToRender}
+ +                        isGenerating={isGeneratingAi}
+ +                        activePatchContainerId={activePatchContainerId}
+ +                        onClick={() =>
+ +                          typeToRender.type &&
+ +                          (isComponentMode
+ +                            ? handleAddSubMask(activePatchContainerId, typeToRender.type)
+ +                            : handleAddAiPatchContainer(typeToRender.type))
+ +                        }
+ +                      />
+ +                    );
+ +                  })}
+ +                </div>
+ +              </>
+ +            )}
+ +          </div>
+ +
+ +          <AnimatePresence>
+ +            {isSettingsPanelEverOpened && selectedImage && (
+++=======
++           <AnimatePresence mode="wait">
++             {(adjustments.aiPatches || []).length === 0 ? (
+++>>>>>>> upstream/main
++               <motion.div
++                 key="ai-grid"
++                 initial={{ opacity: 0 }}
++                 animate={{ opacity: 1 }}
++                 exit={{ opacity: 0 }}
++                 transition={{ duration: 0.2 }}
++                 className="p-4 pb-2 z-10 shrink-0"
++               >
++                 {!selectedImage ? (
++                   <p className="text-center text-text-tertiary mt-4">No image selected.</p>
++                 ) : (
++                   <>
++                     <ConnectionStatus isConnected={isAIConnectorConnected} />
++                     <p className="text-sm mb-3 font-semibold text-text-primary">Create New Generative Edit</p>
++                     <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
++                       {AI_PANEL_CREATION_TYPES.map((maskType: MaskType) => (
++                         <DraggableGridItem
++                           key={maskType.type}
++                           maskType={maskType}
++                           isGenerating={isGeneratingAi}
++                           onClick={() => handleAddAiPatchContainer(maskType.type)}
++                         />
++                       ))}
++                     </div>
++                   </>
++                 )}
++               </motion.div>
++             ) : (
+                <motion.div
++                 key="ai-list"
+                  ref={setRootDroppableRef}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+-                 className={`flex flex-col px-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
++                 className={`flex flex-col px-4 pt-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
+                >
+ -                <p className="text-sm my-3 font-semibold text-text-primary">Edits</p>
+ +                <p className="text-sm my-3 font-semibold text-text-primary">{t('ai.edits')}</p>
+  
+++<<<<<<< HEAD
+ +                {isPatchListEmpty && (adjustments.aiPatches || []).length === 0 && (
+ +                  <div className="text-center text-text-secondary text-sm py-4 opacity-70">
+ +                    {t('ai.noEditsCreated')}
+ +                  </div>
+ +                )}
+ +
+++=======
+++>>>>>>> upstream/main
+                  <AnimatePresence
+                    initial={false}
+                    mode="popLayout"
+@@@ -760,7 -855,13 +984,8 @@@
+                        onSelectSubMask={onSelectSubMask}
+                        updateSubMask={updateSubMask}
+                        handleDeleteSubMask={handleDeleteSubMask}
+ -                      handleDuplicateSubMask={handleDuplicateSubMask}
+ -                      handleDuplicateAndInvertSubMask={handleDuplicateAndInvertSubMask}
+ -                      handlePasteSubMask={handlePasteSubMask}
+ -                      copySubMaskToClipboard={copySubMaskToClipboard}
+ -                      copiedSubMask={copiedSubMask}
+                        analyzingSubMaskId={analyzingSubMaskId}
++                       onAddComponent={(e: React.MouseEvent) => handleAddAiContextMenu(e, container.id)}
+                      />
+                    ))}
+                  </AnimatePresence>
+@@@ -873,17 -981,7 +1105,21 @@@ function NewMaskDropZone({ isOver }: { 
+    );
+  }
+  
+++<<<<<<< HEAD
+ +function DraggableGridItem({
+ +  maskType,
+ +  isGenerating,
+ +  onClick,
+ +  activePatchContainerId,
+ +}: {
+ +  maskType: MaskType;
+ +  isGenerating: boolean;
+ +  onClick: (e: React.MouseEvent) => void;
+ +  activePatchContainerId: string | null;
+ +}) {
+++=======
++ function DraggableGridItem({ maskType, isGenerating, onClick }: any) {
+++>>>>>>> upstream/main
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+      id: `create-ai-${maskType.type}`,
+      data: { type: 'Creation', maskType: maskType.type },
+@@@ -897,15 -995,13 +1133,23 @@@
+        disabled={maskType.disabled || isGenerating}
+        onClick={onClick}
+        className={`bg-surface text-text-primary rounded-lg p-2 flex flex-col items-center justify-center gap-1.5 aspect-square transition-colors
+-               ${maskType.disabled || isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-card-active active:bg-accent/20'}
++               ${
++                 maskType.disabled || isGenerating
++                   ? 'opacity-50 cursor-not-allowed'
++                   : 'hover:bg-card-active active:bg-accent/20'
++               }
+                ${isDragging ? 'opacity-50' : ''}`}
+++<<<<<<< HEAD
+ +      data-tooltip={
+ +        maskType.disabled
+ +          ? 'Coming Soon'
+ +          : activePatchContainerId
+ +            ? `Add ${maskType.name} to Current Edit`
+ +            : `Create New ${maskType.name} Edit`
+ +      }
+++=======
++       data-tooltip={maskType.disabled ? 'Coming Soon' : `Create New ${maskType.name} Edit`}
+++>>>>>>> upstream/main
+      >
+        <maskType.icon size={24} /> <span className="text-xs">{maskType.name}</span>
+      </button>
+@@@ -931,28 -1032,14 +1175,33 @@@ function ContainerRow(
+    onSelectSubMask,
+    updateSubMask,
+    handleDeleteSubMask,
+ -  handleDuplicateSubMask,
+ -  handleDuplicateAndInvertSubMask,
+ -  handlePasteSubMask,
+ -  copySubMaskToClipboard,
+ -  copiedSubMask,
+    analyzingSubMaskId,
+++<<<<<<< HEAD
+ +}: {
+ +  container: AiPatch;
+ +  isSelected: boolean;
+ +  hasActiveChild: boolean;
+ +  isExpanded: boolean;
+ +  onToggle: () => void;
+ +  onSelect: () => void;
+ +  renamingId: string | null;
+ +  setRenamingId: (id: string | null) => void;
+ +  tempName: string;
+ +  setTempName: (name: string) => void;
+ +  updateContainer: (id: string, data: Partial<AiPatch>) => void;
+ +  handleDelete: (id: string) => void;
+ +  activeDragItem: DragData | null;
+ +  activeSubMaskId: string | null;
+ +  onSelectContainer: (id: string | null) => void;
+ +  onSelectSubMask: (id: string | null) => void;
+ +  updateSubMask: (id: string, data: Partial<SubMask>) => void;
+ +  handleDeleteSubMask: (containerId: string, subMaskId: string) => void;
+ +  analyzingSubMaskId: string | null;
+ +}) {
+++=======
++   onAddComponent,
++ }: any) {
+++>>>>>>> upstream/main
+    const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+      id: container.id,
+      data: { type: 'Container', item: container },
+@@@ -963,14 -1050,8 +1212,9 @@@
+      setNodeRef: setDraggableRef,
+      isDragging,
+    } = useDraggable({ id: container.id, data: { type: 'Container', item: container } });
+-   const [isSubMaskListEmpty, setIsSubMaskListEmpty] = useState(container.subMasks.length === 0);
+    const { showContextMenu } = useContextMenu();
+ +  const { t } = useTranslation();
+  
+-   useEffect(() => {
+-     if (container.subMasks.length > 0 && isSubMaskListEmpty) setIsSubMaskListEmpty(false);
+-   }, [container.subMasks.length, isSubMaskListEmpty]);
+- 
+    const setCombinedRef = (node: HTMLElement | null) => {
+      setDroppableRef(node);
+      setDraggableRef(node);
+@@@ -1406,25 -1533,32 +1672,44 @@@ function SettingsPanel(
+          isContentVisible={true}
+        >
+          <div className="space-y-3 pt-2">
++           {aiModelDownloadStatus && aiModelDownloadStatus.includes('Inpainting') && (
++             <div className="p-3 mb-2 bg-card-active rounded-md border border-surface flex items-center gap-3">
++               <Loader2 size={16} className="text-accent animate-spin shrink-0" />
++               <div className="text-xs text-text-secondary leading-relaxed">
++                 Downloading: <span className="text-accent font-medium">{aiModelDownloadStatus}</span>
++               </div>
++             </div>
++           )}
++ 
+            <p className="text-xs text-text-secondary">
+              {isQuickErasePatch
+ -              ? 'Fill selection to remove the object.'
+ +              ? t('ai.fillSelectionRemove', 'Fill selection to remove the object.')
+                : useFastInpaint
+ -                ? 'Fill selection based on surrounding pixels.'
+ -                : 'Describe what you want to generate in the selected area.'}
+ +                ? t('ai.fillSelectionSurrounding', 'Fill selection based on surrounding pixels.')
+ +                : t('ai.describeGeneration')}
+            </p>
+  
+            <Switch
+              checked={useFastInpaint}
+++<<<<<<< HEAD
+ +            disabled={isQuickErasePatch || !isAIConnectorConnected}
+ +            label={t('ai.useFastInpainting')}
+ +            onChange={setUseFastInpaint}
+ +            tooltip={
+ +              isQuickErasePatch
+ +                ? t('ai.quickEraseAlwaysFast')
+ +                : !isAIConnectorConnected
+ +                  ? t('ai.aiConnectorNotConnectedFast')
+ +                  : t('ai.fastInpaintingTooltip')
+++=======
++             disabled={!isAIConnectorConnected}
++             label="Use basic inpainting"
++             onChange={setUseFastInpaint}
++             tooltip={
++               !isAIConnectorConnected
++                 ? 'AI Connector not connected, basic inpainting is required.'
++                 : 'Basic inpainting is quicker but not generative. Uncheck to use AI Connector with a text prompt.'
+++>>>>>>> upstream/main
+              }
+            />
+  
+diff --cc src/components/panel/right/ExportPanel.tsx
+index f675aaa1,9784e964..00000000
+--- a/src/components/panel/right/ExportPanel.tsx
++++ b/src/components/panel/right/ExportPanel.tsx
+@@@ -442,23 -448,26 +450,43 @@@ export default function ExportPanel(
+          const originalFilename = selectedImage.path.split(/[\\/]/).pop() || '';
+          const stem = originalFilename.substring(0, originalFilename.lastIndexOf('.')) || originalFilename;
+          const suggestedName = finalFilenameTemplate.replace('{original_filename}', stem);
+++<<<<<<< HEAD
+ +        const defaultPath = lastExportPath
+ +          ? `${lastExportPath}/${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`
+ +          : `${suggestedName}.${selectedFormat?.extensions?.[0] ?? 'jpg'}`;
+ +        const filePath = await save({
+ +          title: 'Save Edited Image',
+ +          defaultPath,
+ +          filters: [
+ +            { name: selectedFormat?.name ?? 'Image', extensions: selectedFormat?.extensions ?? ['jpg'] },
+ +            ...FILE_FORMATS.filter((f: FileFormat) => f.id !== fileFormat).map((f: FileFormat) => ({
+ +              name: f.name,
+ +              extensions: f.extensions,
+ +            })),
+ +          ],
+ +        });
+++=======
++         const outputFileName = `${suggestedName}.${selectedFormat.extensions[0]}`;
++         const filePath = isAndroid
++           ? outputFileName
++           : await save({
++               title: 'Save Edited Image',
++               defaultPath: lastExportPath ? `${lastExportPath}/${outputFileName}` : outputFileName,
++               filters: [
++                 { name: selectedFormat.name, extensions: selectedFormat.extensions },
++                 ...FILE_FORMATS.filter((f: FileFormat) => f.id !== fileFormat).map((f: FileFormat) => ({
++                   name: f.name,
++                   extensions: f.extensions,
++                 })),
++               ],
++             });
++ 
+++>>>>>>> upstream/main
+          if (filePath) {
+-           const dir = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')));
+-           if (dir) saveLastUsedPreset(dir);
++           if (!isAndroid) {
++             const dir = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')));
++             if (dir) saveLastUsedPreset(dir);
++           }
+            setExportState({ status: Status.Exporting, progress: { current: 0, total: numImages }, errorMessage: '' });
+            await invoke(Invokes.ExportImage, {
+              exportSettings,
+diff --cc src/components/panel/right/LibraryExportPanel.tsx
+index b7bbeffd,c68b9f5a..00000000
+--- a/src/components/panel/right/LibraryExportPanel.tsx
++++ b/src/components/panel/right/LibraryExportPanel.tsx
+@@@ -449,14 -449,18 +452,26 @@@ export default function LibraryExportPa
+      const lastExportPath = appSettings?.exportPresets?.find((p) => p.id === '__last_used__')?.lastExportPath;
+  
+      try {
+++<<<<<<< HEAD
+ +      const outputFolder = await open({
+ +        directory: true,
+ +        title: t('export.selectFolderToExport', { count: numImages }),
+ +        defaultPath: lastExportPath ?? undefined,
+ +      });
+++=======
++       const outputFolder = isAndroid
++         ? ''
++         : await open({
++             directory: true,
++             title: `Select Folder to Export ${numImages} Image(s)`,
++             defaultPath: lastExportPath ?? undefined,
++           });
+++>>>>>>> upstream/main
+  
+        if (outputFolder) {
+-         saveLastUsedPreset(outputFolder as string);
++         if (!isAndroid) {
++           saveLastUsedPreset(outputFolder as string);
++         }
+          setExportState({ status: Status.Exporting, progress: { current: 0, total: numImages }, errorMessage: '' });
+          await invoke(Invokes.BatchExportImages, {
+            exportSettings,
+diff --cc src/components/panel/right/Masks.tsx
+index 3a528327,0968658f..00000000
+--- a/src/components/panel/right/Masks.tsx
++++ b/src/components/panel/right/Masks.tsx
+@@@ -1,6 -1,6 +1,7 @@@
+ +import React from 'react';
+  import {
+    Brush,
++   BringToFront,
+    Circle,
+    Cloud,
+    Droplet,
+@@@ -69,7 -73,8 +73,12 @@@ export function getSubMaskName(subMask
+    return subMask.name?.trim() || formatMaskTypeName(subMask.type);
+  }
+  
+++<<<<<<< HEAD
+ +export const MASK_ICON_MAP: Record<Mask, React.ComponentType<{ size?: number; className?: string }>> = {
+++=======
++ export const MASK_ICON_MAP: Record<Mask, any> = {
++   [Mask.AiDepth]: BringToFront,
+++>>>>>>> upstream/main
+    [Mask.AiForeground]: User,
+    [Mask.AiSky]: Cloud,
+    [Mask.AiSubject]: Sparkles,
+@@@ -201,7 -206,25 +210,29 @@@ export const getSubMaskComponentTypes 
+    },
+  ];
+  
+++<<<<<<< HEAD
+ +export const getOthersMaskTypes = (t: (key: string) => string): Array<MaskType> => [
+++=======
++ export const OTHERS_MASK_TYPES: Array<MaskType> = [
++   {
++     disabled: false,
++     icon: BringToFront,
++     name: 'Depth',
++     type: Mask.AiDepth,
++   },
++   {
++     disabled: false,
++     icon: Droplet,
++     name: 'Color',
++     type: Mask.Color,
++   },
++   {
++     disabled: false,
++     icon: Sun,
++     name: 'Luminance',
++     type: Mask.Luminance,
++   },
+++>>>>>>> upstream/main
+    {
+      disabled: false,
+      icon: Brush,
+diff --cc src/components/panel/right/MasksPanel.tsx
+index 5f42c8e2,db08c02b..00000000
+--- a/src/components/panel/right/MasksPanel.tsx
++++ b/src/components/panel/right/MasksPanel.tsx
+@@@ -1,6 -1,7 +1,11 @@@
+++<<<<<<< HEAD
+ +import { useState, useEffect, useRef } from 'react';
+ +import { useTranslation } from 'react-i18next';
+++=======
++ import { useState, useEffect, useRef, useMemo } from 'react';
++ import debounce from 'lodash.debounce';
+++>>>>>>> upstream/main
+  import { v4 as uuidv4 } from 'uuid';
+ -import clsx from 'clsx';
+  import { motion, AnimatePresence } from 'framer-motion';
+  import {
+    DndContext,
+@@@ -73,8 -84,9 +78,9 @@@ interface MasksPanelProps 
+    appSettings: AppSettings | null;
+    brushSettings: BrushSettings | null;
+    copiedMask: MaskContainer | null;
+ -  histogram: any;
+ +  histogram: unknown;
+    isGeneratingAiMask: boolean;
++   onGenerateAiDepthMask(id: string, parameters: any): void;
+    onGenerateAiForegroundMask(id: string): void;
+    onGenerateAiSkyMask(id: string): void;
+    onSelectContainer(id: string | null): void;
+@@@ -95,44 -114,34 +101,47 @@@ interface DragData 
+    parentId?: string;
+  }
+  
+ -const SUB_MASK_CONFIG: Record<Mask, any> = {
+ +function formatMaskTypeName(type: string, t: (key: string) => string) {
+ +  if (type === Mask.AiSubject) return t('masking.aiSubject');
+ +  if (type === Mask.AiForeground) return t('masking.aiForeground');
+ +  if (type === Mask.AiSky) return t('masking.aiSky');
+ +  if (type === Mask.All) return t('masking.wholeImage');
+ +  return type.charAt(0).toUpperCase() + type.slice(1);
+ +}
+ +
+ +interface SubMaskParameter {
+ +  key: string;
+ +  label: string;
+ +  min: number;
+ +  max: number;
+ +  step: number;
+ +  multiplier?: number;
+ +  defaultValue: number;
+ +}
+ +
+ +interface SubMaskConfigEntry {
+ +  parameters?: SubMaskParameter[];
+ +  showBrushTools?: boolean;
+ +}
+ +
+ +const getSubMaskConfig = (t: (key: string) => string): Record<Mask, SubMaskConfigEntry> => ({
+    [Mask.Radial]: {
+ -    parameters: [{ key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 }],
+ -  },
+ -  [Mask.Brush]: { showBrushTools: true },
+ -  [Mask.Linear]: { parameters: [] },
+ -  [Mask.Color]: {
+      parameters: [
+ -      { key: 'tolerance', label: 'Tolerance', min: 1, max: 100, step: 1, defaultValue: 20 },
+ -      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+ -      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 35 },
+ -    ],
+ -  },
+ -  [Mask.Luminance]: {
+ -    parameters: [
+ -      { key: 'tolerance', label: 'Tolerance', min: 1, max: 100, step: 1, defaultValue: 20 },
+ -      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+ -      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 35 },
+ +      { key: 'feather', label: t('masking.feather'), min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 },
+      ],
+    },
+ +  [Mask.Brush]: { showBrushTools: true },
+ +  [Mask.Linear]: { parameters: [] },
+ +  [Mask.Color]: { parameters: [] },
+ +  [Mask.Luminance]: { parameters: [] },
+    [Mask.All]: { parameters: [] },
++   [Mask.AiDepth]: {
++     parameters: [{ key: 'feather', label: 'Global Feather', min: 0, max: 100, step: 1, defaultValue: 15 }],
++   },
+    [Mask.AiSubject]: {
+      parameters: [
+ -      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+ -      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 0 },
+ +      { key: 'grow', label: t('masking.grow'), min: -100, max: 100, step: 1, defaultValue: 0 },
+ +      { key: 'feather', label: t('masking.feather'), min: 0, max: 100, step: 1, defaultValue: 0 },
+      ],
+    },
+    [Mask.AiForeground]: {
+@@@ -148,54 -157,353 +157,362 @@@
+      ],
+    },
+    [Mask.QuickEraser]: { parameters: [] },
+ -};
+ +});
+  
+ -const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => (
+ -  <div className="space-y-4 border-t border-surface">
+ -    <Slider
+ -      defaultValue={100}
+ -      label="Brush Size"
+ -      max={200}
+ -      min={1}
+ -      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
+ -      step={1}
+ -      value={settings.size}
+ -    />
+ -    <Slider
+ -      defaultValue={50}
+ -      label="Brush Feather"
+ -      max={100}
+ -      min={0}
+ -      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+ -      step={1}
+ -      value={settings.feather}
+ -    />
+ -    <div className="grid grid-cols-2 gap-2 pt-2">
+ -      <button
+ -        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${settings.tool === ToolType.Brush ? 'text-primary bg-surface' : 'bg-surface text-text-secondary hover:bg-card-active'}`}
+ -        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Brush }))}
+ -      >
+ -        Brush
+ -      </button>
+ -      <button
+ -        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${settings.tool === ToolType.Eraser ? 'text-primary bg-surface' : 'bg-surface text-text-secondary hover:bg-card-active'}`}
+ -        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Eraser }))}
+ -      >
+ -        Eraser
+ -      </button>
+ +const BrushTools = ({
+ +  settings,
+ +  onSettingsChange,
+ +}: {
+ +  settings: BrushSettings;
+ +  onSettingsChange: (brushSettings: BrushSettings) => void;
+ +}) => {
+ +  const { t } = useTranslation();
+ +  return (
+ +    <div className="space-y-4 border-t border-surface">
+ +      <Slider
+ +        defaultValue={100}
+ +        label={t('masking.brushSize')}
+ +        max={200}
+ +        min={1}
+ +        onChange={(e) => onSettingsChange({ ...settings, size: Number(e.target.value) })}
+ +        step={1}
+ +        value={settings.size}
+ +      />
+ +      <Slider
+ +        defaultValue={50}
+ +        label={t('masking.brushFeather')}
+ +        max={100}
+ +        min={0}
+ +        onChange={(e) => onSettingsChange({ ...settings, feather: Number(e.target.value) })}
+ +        step={1}
+ +        value={settings.feather}
+ +      />
+ +      <div className="grid grid-cols-2 gap-2 pt-2">
+ +        <button
+ +          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${settings.tool === ToolType.Brush ? 'text-primary bg-surface' : 'bg-surface text-text-secondary hover:bg-card-active'}`}
+ +          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Brush })}
+ +        >
+ +          {t('common.brush')}
+ +        </button>
+ +        <button
+ +          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${settings.tool === ToolType.Eraser ? 'text-primary bg-surface' : 'bg-surface text-text-secondary hover:bg-card-active'}`}
+ +          onClick={() => onSettingsChange({ ...settings, tool: ToolType.Eraser })}
+ +        >
+ +          {t('common.eraser')}
+ +        </button>
+ +      </div>
+      </div>
+ -  </div>
+ -);
+ +  );
+ +};
+  
++ function DepthRangePicker({
++   minDepth,
++   maxDepth,
++   minFade,
++   maxFade,
++   onChange,
++ }: {
++   minDepth: number;
++   maxDepth: number;
++   minFade: number;
++   maxFade: number;
++   onChange: (values: { minDepth: number; maxDepth: number; minFade: number; maxFade: number }) => void;
++ }) {
++   const trackRef = useRef<HTMLDivElement>(null);
++   const [activeHandle, setActiveHandle] = useState<string | null>(null);
++   const [dragValues, setDragValues] = useState<{
++     minDepth: number;
++     maxDepth: number;
++     minFade: number;
++     maxFade: number;
++   } | null>(null);
++   const rafRef = useRef<number>(0);
++   const [isLabelHovered, setIsLabelHovered] = useState(false);
++ 
++   const vals = dragValues ?? { minDepth, maxDepth, minFade, maxFade };
++   const fadeLeftEdge = Math.max(0, vals.minDepth - vals.minFade);
++   const fadeRightEdge = Math.min(100, vals.maxDepth + vals.maxFade);
++ 
++   useEffect(() => {
++     return () => {
++       if (rafRef.current) cancelAnimationFrame(rafRef.current);
++     };
++   }, []);
++ 
++   const getVal = (e: MouseEvent | React.MouseEvent): number => {
++     if (!trackRef.current) return 0;
++     const rect = trackRef.current.getBoundingClientRect();
++     return Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / rect.width) * 100)));
++   };
++ 
++   const compute = (
++     handle: string,
++     val: number,
++     init: { minDepth: number; maxDepth: number; minFade: number; maxFade: number; startVal: number },
++   ): { minDepth: number; maxDepth: number; minFade: number; maxFade: number } => {
++     switch (handle) {
++       case 'minDepth': {
++         const v = Math.max(0, Math.min(val, init.maxDepth));
++         return { minDepth: v, maxDepth: init.maxDepth, minFade: Math.min(init.minFade, v), maxFade: init.maxFade };
++       }
++       case 'maxDepth': {
++         const v = Math.max(init.minDepth, Math.min(100, val));
++         return {
++           minDepth: init.minDepth,
++           maxDepth: v,
++           minFade: init.minFade,
++           maxFade: Math.min(init.maxFade, 100 - v),
++         };
++       }
++       case 'fadeLeft': {
++         const edge = Math.max(0, Math.min(val, init.minDepth));
++         return {
++           minDepth: init.minDepth,
++           maxDepth: init.maxDepth,
++           minFade: init.minDepth - edge,
++           maxFade: init.maxFade,
++         };
++       }
++       case 'fadeRight': {
++         const edge = Math.max(init.maxDepth, Math.min(100, val));
++         return {
++           minDepth: init.minDepth,
++           maxDepth: init.maxDepth,
++           minFade: init.minFade,
++           maxFade: edge - init.maxDepth,
++         };
++       }
++       case 'range': {
++         const delta = val - init.startVal;
++         const width = init.maxDepth - init.minDepth;
++         let nMin = Math.round(init.minDepth + delta);
++         let nMax = Math.round(init.maxDepth + delta);
++         if (nMin < 0) {
++           nMin = 0;
++           nMax = width;
++         }
++         if (nMax > 100) {
++           nMax = 100;
++           nMin = 100 - width;
++         }
++         return {
++           minDepth: nMin,
++           maxDepth: nMax,
++           minFade: Math.min(init.minFade, nMin),
++           maxFade: Math.min(init.maxFade, 100 - nMax),
++         };
++       }
++       default:
++         return { minDepth: init.minDepth, maxDepth: init.maxDepth, minFade: init.minFade, maxFade: init.maxFade };
++     }
++   };
++ 
++   const beginDrag = (handle: string) => (e: React.MouseEvent) => {
++     e.preventDefault();
++     e.stopPropagation();
++     setActiveHandle(handle);
++ 
++     const init = { ...vals, startVal: getVal(e) };
++     let latest = { ...vals };
++     let pending = false;
++ 
++     const onMove = (me: MouseEvent) => {
++       latest = compute(handle, getVal(me), init);
++       setDragValues(latest);
++ 
++       if (!pending) {
++         pending = true;
++         rafRef.current = requestAnimationFrame(() => {
++           onChange(latest);
++           pending = false;
++         });
++       }
++     };
++ 
++     const onUp = () => {
++       setActiveHandle(null);
++       if (rafRef.current) cancelAnimationFrame(rafRef.current);
++       onChange(latest);
++ 
++       requestAnimationFrame(() => setDragValues(null));
++ 
++       document.removeEventListener('mousemove', onMove);
++       document.removeEventListener('mouseup', onUp);
++     };
++ 
++     document.addEventListener('mousemove', onMove);
++     document.addEventListener('mouseup', onUp);
++   };
++ 
++   const handleColor = (handle: string, isMain: boolean) =>
++     activeHandle === handle
++       ? 'var(--color-accent, #818cf8)'
++       : isMain
++         ? 'rgba(255,255,255,0.85)'
++         : 'rgba(255,255,255,0.45)';
++ 
++   const handleReset = () => {
++     onChange({ minDepth: 20, maxDepth: 100, minFade: 15, maxFade: 15 });
++   };
++ 
++   const isDragging = activeHandle !== null;
++ 
++   return (
++     <div className="space-y-1">
++       <div
++         className="grid w-fit cursor-pointer"
++         onClick={handleReset}
++         onMouseEnter={() => setIsLabelHovered(true)}
++         onMouseLeave={() => setIsLabelHovered(false)}
++       >
++         <span
++           aria-hidden={isLabelHovered}
++           className={`col-start-1 row-start-1 text-sm font-medium text-text-secondary select-none transition-opacity duration-200 ease-in-out ${
++             isLabelHovered ? 'opacity-0' : 'opacity-100'
++           }`}
++         >
++           Depth Range
++         </span>
++         <span
++           aria-hidden={!isLabelHovered}
++           className={`col-start-1 row-start-1 text-sm font-medium text-text-primary select-none transition-opacity duration-200 ease-in-out pointer-events-none ${
++             isLabelHovered ? 'opacity-100' : 'opacity-0'
++           }`}
++         >
++           Reset
++         </span>
++       </div>
++       <div
++         ref={trackRef}
++         className="relative rounded-md overflow-hidden mt-2 select-none border border-white/10"
++         style={{ height: 44 }}
++       >
++         {isDragging && (
++           <div
++             className="fixed inset-0 z-[9999]"
++             style={{ cursor: activeHandle === 'range' ? 'grabbing' : 'ew-resize' }}
++           />
++         )}
++ 
++         <div
++           className="absolute inset-0"
++           style={{
++             background: 'linear-gradient(to right, #ddd 0%, #bbb 20%, #999 35%, #666 55%, #333 80%, #111 100%)',
++           }}
++         />
++         <div
++           className="absolute inset-y-0 left-0 bg-black/60 pointer-events-none"
++           style={{ width: `${fadeLeftEdge}%` }}
++         />
++         <div
++           className="absolute inset-y-0 right-0 bg-black/60 pointer-events-none"
++           style={{ width: `${100 - fadeRightEdge}%` }}
++         />
++ 
++         {vals.minFade > 0.5 && (
++           <div
++             className="absolute inset-y-0 pointer-events-none"
++             style={{
++               left: `${fadeLeftEdge}%`,
++               width: `${vals.minFade}%`,
++               background: 'linear-gradient(to right, rgba(0,0,0,0.6), transparent)',
++             }}
++           />
++         )}
++         {vals.maxFade > 0.5 && (
++           <div
++             className="absolute inset-y-0 pointer-events-none"
++             style={{
++               left: `${vals.maxDepth}%`,
++               width: `${vals.maxFade}%`,
++               background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.6))',
++             }}
++           />
++         )}
++ 
++         {[0, 1].map((i) => (
++           <div
++             key={i}
++             className="absolute h-px pointer-events-none"
++             style={{
++               left: `${vals.minDepth}%`,
++               width: `${Math.max(0, vals.maxDepth - vals.minDepth)}%`,
++               background: 'rgba(255,255,255,0.3)',
++               ...(i === 0 ? { top: 0 } : { bottom: 0 }),
++             }}
++           />
++         ))}
++ 
++         {[
++           { pos: fadeLeftEdge, key: 'fadeLeft', main: false },
++           { pos: vals.minDepth, key: 'minDepth', main: true },
++           { pos: vals.maxDepth, key: 'maxDepth', main: true },
++           { pos: fadeRightEdge, key: 'fadeRight', main: false },
++         ].map(({ pos, key, main }) => (
++           <div
++             key={`line-${key}`}
++             className="absolute inset-y-0 pointer-events-none"
++             style={{
++               left: `${pos}%`,
++               transform: 'translateX(-50%)',
++               width: main ? 2 : 1,
++               background: handleColor(key, main),
++               transition: activeHandle ? 'none' : 'background 0.15s',
++             }}
++           />
++         ))}
++ 
++         <div
++           className="absolute inset-y-0"
++           style={{
++             left: `${vals.minDepth}%`,
++             width: `${Math.max(0, vals.maxDepth - vals.minDepth)}%`,
++             cursor: activeHandle === 'range' ? 'grabbing' : 'grab',
++             zIndex: 5,
++           }}
++           onMouseDown={beginDrag('range')}
++         />
++ 
++         {[
++           { pos: fadeLeftEdge, key: 'fadeLeft' },
++           { pos: fadeRightEdge, key: 'fadeRight' },
++         ].map(({ pos, key }) => (
++           <div
++             key={key}
++             className="absolute flex items-start justify-center cursor-ew-resize"
++             style={{ left: `${pos}%`, transform: 'translateX(-50%)', top: 0, height: '50%', width: 28, zIndex: 15 }}
++             onMouseDown={beginDrag(key)}
++           >
++             <svg width="8" height="5" viewBox="0 0 8 5" style={{ marginTop: 3 }}>
++               <polygon points="4,5 8,0 0,0" fill={handleColor(key, false)} />
++             </svg>
++           </div>
++         ))}
++ 
++         {[
++           { pos: vals.minDepth, key: 'minDepth' },
++           { pos: vals.maxDepth, key: 'maxDepth' },
++         ].map(({ pos, key }) => (
++           <div
++             key={key}
++             className="absolute flex items-end justify-center cursor-ew-resize"
++             style={{ left: `${pos}%`, transform: 'translateX(-50%)', bottom: 0, height: '50%', width: 28, zIndex: 20 }}
++             onMouseDown={beginDrag(key)}
++           >
++             <svg width="10" height="6" viewBox="0 0 10 6" style={{ marginBottom: 3 }}>
++               <polygon points="5,0 10,6 0,6" fill={handleColor(key, true)} />
++             </svg>
++           </div>
++         ))}
++       </div>
++       <div className="flex justify-between text-xs text-text-secondary select-none px-0.5">
++         <span>Near</span>
++         <span>Far</span>
++       </div>
++     </div>
++   );
++ }
++ 
+  export default function MasksPanel({
+    activeMaskContainerId,
+    activeMaskId,
+@@@ -236,9 -550,9 +554,8 @@@
+    const [isSettingsSectionOpen, setSettingsSectionOpen] = useState(true);
+    const [isSettingsPanelEverOpened, setIsSettingsPanelEverOpened] = useState(false);
+    const hasPerformedInitialSelection = useRef(false);
+-   const [isMaskListEmpty, setIsMaskListEmpty] = useState(adjustments.masks.length === 0);
+    const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+    const [analyzingSubMaskId, setAnalyzingSubMaskId] = useState<string | null>(null);
+ -  const [isResizingWaveform, setIsResizingWaveform] = useState<boolean>(false);
+  
+    const { showContextMenu } = useContextMenu();
+    const { presets } = usePresets(adjustments);
+@@@ -352,18 -682,34 +665,27 @@@
+        subMask.parameters.range = Math.min(imgW, imgH) * 0.1;
+      }
+  
+ -    if (type === Mask.Linear || type === Mask.Radial || type === Mask.Color || type === Mask.Luminance) {
+ +    if (type === Mask.Linear || type === Mask.Radial) {
+        if (!subMask.parameters) subMask.parameters = {};
+        subMask.parameters.isInitialDraw = true;
+ -      if (type === Mask.Linear || type === Mask.Radial) {
+ -        subMask.parameters.startX = -10000;
+ -        subMask.parameters.startY = -10000;
+ -        subMask.parameters.endX = -10000;
+ -        subMask.parameters.endY = -10000;
+ -        subMask.parameters.centerX = -10000;
+ -        subMask.parameters.centerY = -10000;
+ -        subMask.parameters.radiusX = 0;
+ -        subMask.parameters.radiusY = 0;
+ -      } else {
+ -        subMask.parameters.targetX = -10000;
+ -        subMask.parameters.targetY = -10000;
+ -        subMask.parameters.tolerance = 20;
+ -        subMask.parameters.feather = 35;
+ -      }
+ +      subMask.parameters.startX = -10000;
+ +      subMask.parameters.startY = -10000;
+ +      subMask.parameters.endX = -10000;
+ +      subMask.parameters.endY = -10000;
+ +      subMask.parameters.centerX = -10000;
+ +      subMask.parameters.centerY = -10000;
+ +      subMask.parameters.radiusX = 0;
+ +      subMask.parameters.radiusY = 0;
+      }
++ 
++     if (type === Mask.AiDepth) {
++       if (!subMask.parameters) subMask.parameters = {};
++       subMask.parameters.minDepth = 20;
++       subMask.parameters.maxDepth = 100;
++       subMask.parameters.minFade = 15;
++       subMask.parameters.maxFade = 15;
++       subMask.parameters.feather = 10;
++     }
+      return subMask;
+    };
+  
+@@@ -408,10 -752,11 +728,11 @@@
+      setExpandedContainers((prev) => new Set(prev).add(containerId));
+      if (type === Mask.AiForeground) onGenerateAiForegroundMask(subMask.id);
+      else if (type === Mask.AiSky) onGenerateAiSkyMask(subMask.id);
++     else if (type === Mask.AiDepth) onGenerateAiDepthMask(subMask.id, subMask.parameters);
+    };
+  
+ -  const handleGridClick = (type: Mask, forceNewMaskContainer: boolean = false) => {
+ -    if (!forceNewMaskContainer && activeMaskContainerId) handleAddSubMask(activeMaskContainerId, type);
+ +  const handleGridClick = (type: Mask) => {
+ +    if (activeMaskContainerId) handleAddSubMask(activeMaskContainerId, type);
+      else handleAddMaskContainer(type);
+    };
+  
+@@@ -426,7 -780,51 +747,55 @@@
+      showContextMenu(rect.left, rect.bottom + 5, options);
+    };
+  
+++<<<<<<< HEAD
+ +  const updateContainer = (id: string, data: Partial<MaskContainer>) =>
+++=======
++   const handleAddMaskContextMenu = (event: React.MouseEvent, targetContainerId?: string | null) => {
++     event.preventDefault();
++     event.stopPropagation();
++     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
++ 
++     const buildMenu = (types: MaskType[]) =>
++       types.map((maskType: MaskType) => ({
++         label: maskType.name,
++         icon: maskType.icon,
++         disabled: maskType.disabled,
++         onClick: () => {
++           if (targetContainerId) {
++             handleAddSubMask(targetContainerId, maskType.type);
++           } else {
++             handleAddMaskContainer(maskType.type);
++           }
++         },
++       }));
++ 
++     const options = MASK_PANEL_CREATION_TYPES.map((maskType: MaskType) => {
++       if (maskType.id === 'others') {
++         return {
++           label: maskType.name,
++           icon: maskType.icon,
++           submenu: buildMenu(OTHERS_MASK_TYPES),
++         };
++       }
++       return {
++         label: maskType.name,
++         icon: maskType.icon,
++         disabled: maskType.disabled,
++         onClick: () => {
++           if (targetContainerId) {
++             handleAddSubMask(targetContainerId, maskType.type);
++           } else {
++             handleAddMaskContainer(maskType.type);
++           }
++         },
++       };
++     });
++ 
++     showContextMenu(rect.left, rect.bottom + 5, options);
++   };
++ 
++   const updateContainer = (id: string, data: any) =>
+++>>>>>>> upstream/main
+      setAdjustments((prev: Adjustments) => ({
+        ...prev,
+        masks: prev.masks.map((m) => (m.id === id ? { ...m, ...data } : m)),
+@@@ -455,15 -853,125 +824,137 @@@
+      }));
+    };
+  
+++<<<<<<< HEAD
+ +  const handleDuplicateContainer = (container: MaskContainer) => {
+ +    if (adjustments.masks.length === 0) {
+ +      setIsMaskListEmpty(false);
+ +    }
+ +    const newC = JSON.parse(JSON.stringify(container));
+ +    newC.id = uuidv4();
+ +    newC.name = `${container.name} Copy`;
+ +    newC.subMasks.forEach((sm: SubMask) => (sm.id = uuidv4()));
+ +    setAdjustments((prev: Adjustments) => ({ ...prev, masks: [...prev.masks, newC] }));
+++=======
++   const cloneMaskContainerData = (
++     container: MaskContainer,
++     options: { invert?: boolean; rename?: boolean } = {},
++   ): MaskContainer => {
++     const clonedContainer = JSON.parse(JSON.stringify(container));
++ 
++     clonedContainer.id = uuidv4();
++     clonedContainer.invert = options.invert ? !clonedContainer.invert : clonedContainer.invert;
++     clonedContainer.name = options.rename === false ? clonedContainer.name : `${container.name} Copy`;
++     clonedContainer.subMasks = clonedContainer.subMasks.map((subMask: SubMask) => ({
++       ...subMask,
++       id: uuidv4(),
++     }));
++ 
++     return clonedContainer;
++   };
++ 
++   const cloneSubMaskData = (subMask: SubMask, options: { invert?: boolean; rename?: boolean } = {}): SubMask => {
++     const clonedSubMask = JSON.parse(JSON.stringify(subMask));
++ 
++     clonedSubMask.id = uuidv4();
++     clonedSubMask.invert = options.invert ? !clonedSubMask.invert : clonedSubMask.invert;
++     clonedSubMask.name = options.rename === false ? clonedSubMask.name : `${getSubMaskName(subMask)} Copy`;
++ 
++     return clonedSubMask;
++   };
++ 
++   const copyMaskToClipboard = (container: MaskContainer) => {
++     setCopiedMask(JSON.parse(JSON.stringify(container)));
++   };
++ 
++   const copySubMaskToClipboard = (subMask: SubMask) => {
++     setCopiedSubMask(JSON.parse(JSON.stringify(subMask)));
++   };
++ 
++   const insertMaskContainer = (container: MaskContainer, insertIndex?: number) => {
++     setAdjustments((prev: Adjustments) => {
++       const newMasks = [...(prev.masks || [])];
++       const targetIndex = Math.max(0, Math.min(insertIndex ?? newMasks.length, newMasks.length));
++ 
++       newMasks.splice(targetIndex, 0, container);
++ 
++       return { ...prev, masks: newMasks };
++     });
++ 
++     onSelectContainer(container.id);
++     onSelectMask(null);
++     setExpandedContainers((prev) => new Set(prev).add(container.id));
++   };
++ 
++   const insertSubMaskIntoContainer = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     setAdjustments((prev: Adjustments) => ({
++       ...prev,
++       masks: prev.masks.map((container) => {
++         if (container.id !== containerId) {
++           return container;
++         }
++ 
++         const newSubMasks = [...container.subMasks];
++         const targetIndex = Math.max(0, Math.min(insertIndex ?? newSubMasks.length, newSubMasks.length));
++ 
++         newSubMasks.splice(targetIndex, 0, subMask);
++ 
++         return { ...container, subMasks: newSubMasks };
++       }),
++     }));
++ 
++     onSelectContainer(containerId);
++     onSelectMask(subMask.id);
++     setExpandedContainers((prev) => new Set(prev).add(containerId));
++   };
++ 
++   const handleDuplicateContainer = (container: MaskContainer) => {
++     const containerIndex = adjustments.masks.findIndex((mask) => mask.id === container.id);
++     const duplicatedContainer = cloneMaskContainerData(container, { rename: true });
++ 
++     insertMaskContainer(duplicatedContainer, containerIndex >= 0 ? containerIndex + 1 : undefined);
++   };
++ 
++   const handleDuplicateAndInvertContainer = (container: MaskContainer) => {
++     const containerIndex = adjustments.masks.findIndex((mask) => mask.id === container.id);
++     const duplicatedContainer = cloneMaskContainerData(container, { invert: true, rename: true });
++ 
++     insertMaskContainer(duplicatedContainer, containerIndex >= 0 ? containerIndex + 1 : undefined);
++   };
++ 
++   const handlePasteMask = (insertAfterContainerId?: string) => {
++     if (!copiedMask) {
++       return;
++     }
++ 
++     const pastedContainer = cloneMaskContainerData(copiedMask, { rename: false });
++     const containerIndex = insertAfterContainerId
++       ? adjustments.masks.findIndex((mask) => mask.id === insertAfterContainerId)
++       : -1;
++ 
++     insertMaskContainer(pastedContainer, containerIndex >= 0 ? containerIndex + 1 : undefined);
++   };
++ 
++   const handleDuplicateSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     const duplicatedSubMask = cloneSubMaskData(subMask, { rename: true });
++ 
++     insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
++   };
++ 
++   const handleDuplicateAndInvertSubMask = (containerId: string, subMask: SubMask, insertIndex?: number) => {
++     const duplicatedSubMask = cloneSubMaskData(subMask, { invert: true, rename: true });
++ 
++     insertSubMaskIntoContainer(containerId, duplicatedSubMask, insertIndex);
++   };
++ 
++   const handlePasteSubMask = (containerId: string, insertIndex?: number) => {
++     if (!copiedSubMask) {
++       return;
++     }
++ 
++     const pastedSubMask = cloneSubMaskData(copiedSubMask, { rename: false });
++ 
++     insertSubMaskIntoContainer(containerId, pastedSubMask, insertIndex);
+++>>>>>>> upstream/main
+    };
+  
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+@@@ -645,106 -1140,101 +1134,144 @@@
+          onClick={handleDeselect}
+          onContextMenu={handlePanelContextMenu}
+        >
+ -        <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+ -          <h2 className="text-xl font-bold text-primary text-shadow-shiny">Masking</h2>
+ -          <div className="flex items-center gap-1">
+ -            <button
+ -              className={clsx(
+ -                'p-2 rounded-full transition-colors',
+ -                isWaveformVisible ? 'bg-surface hover:bg-card-active' : 'hover:bg-surface',
+ -              )}
+ -              onClick={onToggleWaveform}
+ -              data-tooltip="Toggle Analytics Display"
+ -            >
+ -              <ChartArea size={18} />
+ -            </button>
+ -            <button
+ -              className="p-2 rounded-full hover:bg-surface transition-colors"
+ -              onClick={handleResetAllMasks}
+ -              data-tooltip="Reset Masking"
+ -            >
+ -              <RotateCcw size={18} />
+ -            </button>
+ -          </div>
+ +        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface h-[69px]">
+ +          <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('masking.title')}</h2>
+ +          <button
+ +            className="p-2 rounded-full hover:bg-surface transition-colors"
+ +            onClick={handleResetAllMasks}
+ +            data-tooltip={t('masking.resetMasking')}
+ +          >
+ +            <RotateCcw size={18} />
+ +          </button>
+          </div>
+  
+ -        <AnimatePresence initial={false}>
+ -          {isWaveformVisible && (
+ -            <motion.div
+ -              initial={{ height: 0, opacity: 0 }}
+ -              animate={{ height: waveformHeight || 256, opacity: 1 }}
+ -              exit={{ height: 0, opacity: 0 }}
+ -              transition={{ duration: isResizingWaveform ? 0 : 0.2, ease: 'easeOut' }}
+ -              className="shrink-0 flex flex-col relative border-b border-surface overflow-hidden"
+ -            >
+ -              <div className="grow w-full h-full p-4 pb-2 min-h-0">
+ -                <Waveform
+ -                  waveformData={waveform || null}
+ -                  histogram={histogram}
+ -                  displayMode={activeWaveformChannel || 'luma'}
+ -                  setDisplayMode={setActiveWaveformChannel || (() => {})}
+ -                  showClipping={adjustments.showClipping || false}
+ -                  onToggleClipping={() => {
+ -                    setAdjustments((prev: Adjustments) => ({
+ -                      ...prev,
+ -                      showClipping: !prev.showClipping,
+ -                    }));
+ -                  }}
+ +        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
+++<<<<<<< HEAD
+ +          <div className="p-4 pb-2 z-10 flex-shrink-0">
+ +            <p className="text-sm mb-3 font-semibold text-text-primary">
+ +              {activeMaskContainerId ? t('masking.addToMask') : t('masking.createNewMask')}
+ +            </p>
+ +            <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
+ +              {getMaskPanelCreationTypes(t).map((maskType: MaskType) => (
+ +                <DraggableGridItem
+ +                  key={maskType.type || maskType.id}
+ +                  maskType={maskType}
+ +                  onClick={(e: React.MouseEvent) =>
+ +                    maskType.id === 'others' ? handleAddOthersMask(e) : maskType.type && handleGridClick(maskType.type)
+ +                  }
+ +                  isDraggable={maskType.id !== 'others'}
+ +                  activeMaskContainerId={activeMaskContainerId}
+                  />
+ -              </div>
+ -              <Resizer direction={Orientation.Horizontal} onMouseDown={handleWaveformResize} />
+ -            </motion.div>
+ -          )}
+ -        </AnimatePresence>
+ +              ))}
+ +            </div>
+ +          </div>
+  
+ -        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-h-0">
+ +          <AnimatePresence>
+ +            {isSettingsPanelEverOpened && (
+++=======
++           <AnimatePresence mode="wait">
++             {adjustments.masks.length === 0 ? (
+++>>>>>>> upstream/main
++               <motion.div
++                 key="empty-masks-grid"
++                 initial={{ opacity: 0 }}
++                 animate={{ opacity: 1 }}
++                 exit={{ opacity: 0 }}
++                 transition={{ duration: 0.2 }}
++                 className="p-4 pb-2 z-10 shrink-0"
++               >
++                 <p className="text-sm mb-3 font-semibold text-text-primary">Create New Mask</p>
++                 <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
++                   {MASK_PANEL_CREATION_TYPES.map((maskType: MaskType) => (
++                     <DraggableGridItem
++                       key={maskType.type || maskType.id}
++                       maskType={maskType}
++                       onClick={(e: any) =>
++                         maskType.id === 'others' ? handleAddOthersMask(e) : handleGridClick(maskType.type)
++                       }
++                       onRightClick={(e: React.MouseEvent) => handleGridRightClick(e, maskType.type)}
++                       isDraggable={maskType.id !== 'others'}
++                       activeMaskContainerId={activeMaskContainerId}
++                     />
++                   ))}
++                 </div>
++               </motion.div>
++             ) : (
+                <motion.div
++                 key="masks-list-container"
+                  ref={setRootDroppableRef}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+-                 className={`flex-col px-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
++                 className={`flex-col px-4 pt-4 pb-2 space-y-1 transition-colors ${isRootOver ? 'bg-surface' : ''}`}
+                >
+++<<<<<<< HEAD
+ +                <p className="text-sm my-3 font-semibold text-text-primary">{t('masking.title')}</p>
+++=======
++                 <p className="text-sm mb-3 font-semibold text-text-primary">Masks</p>
+++>>>>>>> upstream/main
+  
+                  <AnimatePresence
+                    initial={false}
+                    mode="popLayout"
+                    onExitComplete={() => {
+++<<<<<<< HEAD
+ +                    if (adjustments.masks.length === 0) {
+ +                      setIsMaskListEmpty(true);
+ +                    }
+ +                  }}
+ +                >
+ +                  {isMaskListEmpty ? (
+ +                    <motion.div
+ +                      key="empty-masks-placeholder"
+ +                      initial={{ opacity: 0 }}
+ +                      animate={{ opacity: 1 }}
+ +                      exit={{ opacity: 0 }}
+ +                      className="text-center text-text-secondary text-sm py-4 opacity-70"
+ +                    >
+ +                      {t('masking.noMasksCreated')}
+ +                    </motion.div>
+ +                  ) : (
+ +                    adjustments.masks.map((container) => (
+ +                      <ContainerRow
+ +                        key={container.id}
+ +                        container={container}
+ +                        isSelected={activeMaskContainerId === container.id && activeMaskId === null}
+ +                        hasActiveChild={activeMaskContainerId === container.id && activeMaskId !== null}
+ +                        isExpanded={expandedContainers.has(container.id ?? '')}
+ +                        onToggle={() => handleToggleExpand(container.id as string)}
+ +                        onSelect={() => {
+ +                          onSelectContainer(container.id ?? null);
+ +                          onSelectMask(null);
+ +                        }}
+ +                        renamingId={renamingId}
+ +                        setRenamingId={setRenamingId}
+ +                        tempName={tempName}
+ +                        setTempName={setTempName}
+ +                        updateContainer={updateContainer}
+ +                        handleDelete={handleDeleteContainer}
+ +                        handleDuplicate={handleDuplicateContainer}
+ +                        setCopiedMask={setCopiedMask}
+ +                        copiedMask={copiedMask}
+ +                        presets={presets}
+ +                        setAdjustments={setAdjustments}
+ +                        activeDragItem={activeDragItem}
+ +                        activeMaskId={activeMaskId}
+ +                        onSelectContainer={onSelectContainer}
+ +                        onSelectMask={onSelectMask}
+ +                        updateSubMask={updateSubMask}
+ +                        handleDeleteSubMask={handleDeleteSubMask}
+ +                        analyzingSubMaskId={analyzingSubMaskId}
+ +                      />
+ +                    ))
+ +                  )}
+ +                </AnimatePresence>
+ +
+ +                <AnimatePresence
+ +                  onExitComplete={() => {
+++=======
+++>>>>>>> upstream/main
+                      if (pendingAction) {
+                        pendingAction();
+                        setPendingAction(null);
+@@@ -933,35 -1485,17 +1519,41 @@@ function ContainerRow(
+    onSelectMask,
+    updateSubMask,
+    handleDeleteSubMask,
+ -  handleDuplicateSubMask,
+ -  handleDuplicateAndInvertSubMask,
+ -  handlePasteSubMask,
+ -  copySubMaskToClipboard,
+ -  copiedSubMask,
+    analyzingSubMaskId,
+++<<<<<<< HEAD
+ +}: {
+ +  container: MaskContainer;
+ +  isSelected: boolean;
+ +  hasActiveChild: boolean;
+ +  isExpanded: boolean;
+ +  onToggle: () => void;
+ +  onSelect: () => void;
+ +  renamingId: string | null;
+ +  setRenamingId: (id: string | null) => void;
+ +  tempName: string;
+ +  setTempName: (name: string) => void;
+ +  updateContainer: (id: string, data: Partial<MaskContainer>) => void;
+ +  handleDelete: (id: string) => void;
+ +  handleDuplicate: (container: MaskContainer) => void;
+ +  setCopiedMask: (mask: MaskContainer) => void;
+ +  copiedMask: MaskContainer | null;
+ +  presets: UserPreset[];
+ +  setAdjustments: (updater: Adjustments | ((prev: Adjustments) => Adjustments)) => void;
+ +  activeDragItem: DragData | null;
+ +  activeMaskId: string | null;
+ +  onSelectContainer: (id: string | null) => void;
+ +  onSelectMask: (id: string | null) => void;
+ +  updateSubMask: (id: string, data: Partial<SubMask>) => void;
+ +  handleDeleteSubMask: (containerId: string, subMaskId: string) => void;
+ +  analyzingSubMaskId: string | null;
+ +}) {
+++=======
++   setIsMaskControlHovered,
++   onAddComponent,
++ }: any) {
+++>>>>>>> upstream/main
+    const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+ -    id: container.id,
+ +    id: container.id ?? '',
+      data: { type: 'Container', item: container },
+    });
+    const {
+@@@ -969,17 -1503,9 +1561,15 @@@
+      listeners,
+      setNodeRef: setDraggableRef,
+      isDragging,
+++<<<<<<< HEAD
+ +  } = useDraggable({ id: container.id ?? '', data: { type: 'Container', item: container } });
+ +  const [isSubMaskListEmpty, setIsSubMaskListEmpty] = useState(container.subMasks.length === 0);
+++=======
++   } = useDraggable({ id: container.id, data: { type: 'Container', item: container } });
+++>>>>>>> upstream/main
+    const { showContextMenu } = useContextMenu();
+ +  const { t } = useTranslation();
+  
+-   useEffect(() => {
+-     if (container.subMasks.length > 0 && isSubMaskListEmpty) {
+-       setIsSubMaskListEmpty(false);
+-     }
+-   }, [container.subMasks.length, isSubMaskListEmpty]);
+- 
+    const setCombinedRef = (node: HTMLElement | null) => {
+      setDroppableRef(node);
+      setDraggableRef(node);
+@@@ -1406,29 -1985,9 +2006,34 @@@ function SettingsPanel(
+    isSettingsSectionOpen,
+    setSettingsSectionOpen,
+    presets,
+++<<<<<<< HEAD
+ +}: {
+ +  container: MaskContainer | undefined;
+ +  activeSubMask: SubMask | null;
+ +  aiModelDownloadStatus: string | null;
+ +  brushSettings: BrushSettings | null;
+ +  setBrushSettings: (brushSettings: BrushSettings) => void;
+ +  updateContainer: (id: string, data: Partial<MaskContainer>) => void;
+ +  updateSubMask: (id: string, data: Partial<SubMask>) => void;
+ +  histogram: unknown;
+ +  appSettings: AppSettings | null;
+ +  isGeneratingAiMask: boolean;
+ +  setIsMaskControlHovered: (hovered: boolean) => void;
+ +  collapsibleState: Record<string, boolean>;
+ +  setCollapsibleState: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+ +  copiedSectionAdjustments: { section: string; values: Record<string, unknown> } | null;
+ +  setCopiedSectionAdjustments: (v: { section: string; values: Record<string, unknown> } | null) => void;
+ +  onDragStateChange?: (isDragging: boolean) => void;
+ +  isSettingsSectionOpen: boolean;
+ +  setSettingsSectionOpen: (open: boolean) => void;
+ +  presets: UserPreset[];
+ +}) {
+++=======
++   onGenerateAiDepthMask,
++ }: any) {
+++>>>>>>> upstream/main
+    const { showContextMenu } = useContextMenu();
+ +  const { t } = useTranslation();
+    const isActive = !!container;
+    const presetButtonRef = useRef<HTMLButtonElement>(null);
+  
+@@@ -1485,25 -2041,39 +2090,44 @@@
+      }
+    };
+  
+ -  const handleMaskPropertyChange = (key: string, value: any) => {
+ +  const handleMaskPropertyChange = (key: string, value: unknown) => {
+      if (!isActive) return;
+ -    updateContainer(container.id, { [key]: value });
+ +    updateContainer(container!.id!, { [key]: value } as Partial<MaskContainer>);
+    };
+  
+-   const handleSubMaskParameterChange = (key: string, value: number) => {
++   const handleSubMaskParametersChange = (changes: Record<string, number>) => {
+      if (!isActive || !activeSubMask) return;
+-     updateSubMask(activeSubMask.id, { parameters: { ...activeSubMask.parameters, [key]: value } });
++     const newParams = { ...activeSubMask.parameters, ...changes };
++     updateSubMask(activeSubMask.id, { parameters: newParams });
+    };
+  
++   const handleDepthRangeChange = (values: { minDepth: number; maxDepth: number; minFade: number; maxFade: number }) => {
++     if (!isActive || !activeSubMask) return;
++ 
++     const newParams = {
++       ...activeSubMask.parameters,
++       minDepth: 100 - values.maxDepth,
++       maxDepth: 100 - values.minDepth,
++       minFade: values.maxFade,
++       maxFade: values.minFade,
++     };
++     updateSubMask(activeSubMask.id, { parameters: newParams });
++   };
++ 
+++<<<<<<< HEAD
+ +  const subMaskConfig = activeSubMask ? getSubMaskConfig(t)[activeSubMask.type as Mask] || {} : {};
+ +  const isAiMask = activeSubMask && ['ai-subject', 'ai-foreground', 'ai-sky'].includes(activeSubMask.type);
+++=======
++   const subMaskConfig = activeSubMask ? SUB_MASK_CONFIG[activeSubMask.type] || {} : {};
++   const isAiMask = activeSubMask && ['ai-subject', 'ai-foreground', 'ai-sky', 'ai-depth'].includes(activeSubMask.type);
+++>>>>>>> upstream/main
+    const isComponentMode = !!activeSubMask;
+  
+ -  const setMaskContainerAdjustments = (updater: any) => {
+ +  const setMaskContainerAdjustments = (updater: MaskAdjustments | ((prev: MaskAdjustments) => MaskAdjustments)) => {
+      if (!isActive) return;
+ -    const currentAdjustments = container.adjustments;
+ +    const currentAdjustments = container!.adjustments;
+      const newAdjustments = typeof updater === 'function' ? updater(currentAdjustments) : updater;
+ -    updateContainer(container.id, { adjustments: newAdjustments });
+ +    updateContainer(container!.id!, { adjustments: newAdjustments });
+    };
+  
+    const handleToggleSection = (section: string) =>
+@@@ -1651,7 -2221,18 +2275,22 @@@
+                    </div>
+                  </div>
+                )}
+++<<<<<<< HEAD
+ +              {subMaskConfig.parameters?.map((param: SubMaskParameter) => (
+++=======
++ 
++               {activeSubMask.type === Mask.AiDepth && (
++                 <DepthRangePicker
++                   minDepth={100 - (activeSubMask.parameters?.maxDepth ?? 100)}
++                   maxDepth={100 - (activeSubMask.parameters?.minDepth ?? 0)}
++                   minFade={activeSubMask.parameters?.maxFade ?? 15}
++                   maxFade={activeSubMask.parameters?.minFade ?? 15}
++                   onChange={handleDepthRangeChange}
++                 />
++               )}
++ 
++               {subMaskConfig.parameters?.map((param: any) => (
+++>>>>>>> upstream/main
+                  <Slider
+                    key={param.key}
+                    label={param.label}
+@@@ -1659,12 -2240,9 +2298,18 @@@
+                    max={param.max}
+                    step={param.step}
+                    defaultValue={param.defaultValue}
+++<<<<<<< HEAD
+ +                  value={((activeSubMask.parameters?.[param.key] as number) || 0) * (param.multiplier || 1)}
+ +                  onChange={(e) =>
+ +                    handleSubMaskParameterChange(
+ +                      param.key,
+ +                      parseFloat(String(e.target.value)) / (param.multiplier || 1),
+ +                    )
+++=======
++                   value={(activeSubMask.parameters[param.key] || 0) * (param.multiplier || 1)}
++                   onChange={(e: any) =>
++                     handleSubMaskParametersChange({ [param.key]: parseFloat(e.target.value) / (param.multiplier || 1) })
+++>>>>>>> upstream/main
+                    }
+                  />
+                ))}
+diff --cc src/hooks/useThumbnails.tsx
+index 3b6e5b0d,2aa3b7f8..00000000
+--- a/src/hooks/useThumbnails.tsx
++++ b/src/hooks/useThumbnails.tsx
