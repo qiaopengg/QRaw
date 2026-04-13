@@ -55,11 +55,12 @@ export function usePresets(currentAdjustments: Adjustments) {
     loadPresets();
   }, [loadPresets]);
 
-  const addPreset = (name: string, folderId = null) => {
+  const addPreset = (name: string, folderId: string | null = null, customAdjustments?: Partial<Adjustments>) => {
     const presetAdjustments: Record<string, unknown> = {};
+    const sourceAdjustments = { ...currentAdjustments, ...customAdjustments };
     for (const key of COPYABLE_ADJUSTMENT_KEYS) {
-      if (Object.prototype.hasOwnProperty.call(currentAdjustments, key)) {
-        presetAdjustments[key] = currentAdjustments[key];
+      if (Object.prototype.hasOwnProperty.call(sourceAdjustments, key)) {
+        presetAdjustments[key] = sourceAdjustments[key as keyof Adjustments];
       }
     }
 

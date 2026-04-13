@@ -1,7 +1,10 @@
 use crate::style_transfer::{
     DynamicConstraintClampRecord, DynamicConstraintDebugInfo,
-    build_dynamic_constraint_window_from_image, clamp_value_with_dynamic_window,
+    build_dynamic_constraint_window_from_image, clamp_value_with_dynamic_window, extract_features
 };
+use crate::gpu_processing::{process_and_get_dynamic_image, RenderRequest};
+use crate::image_processing::{downscale_f32_image, get_all_adjustments_from_json};
+use crate::{AppState, get_or_init_gpu_context};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -32,13 +35,36 @@ pub struct ChatMessage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdjustmentSuggestion {
     pub key: String,
-    pub value: f64,
+    #[serde(default)]
+    pub value: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complex_value: Option<serde_json::Value>,
+    #[serde(default)]
     pub label: String,
+    #[serde(default)]
     pub min: f64,
+    #[serde(default)]
     pub max: f64,
+    #[serde(default)]
     pub reason: String,
+}
+
+impl AdjustmentSuggestion {
+    pub fn get_f64_value(&self) -> f64 {
+        if let Some(n) = self.value.as_f64() {
+            n
+        } else if let Some(n) = self.value.as_i64() {
+            n as f64
+        } else if let Some(s) = self.value.as_str() {
+            s.parse::<f64>().unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    }
+    
+    pub fn set_f64_value(&mut self, val: f64) {
+        self.value = json!(val);
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -62,12 +88,203 @@ pub struct StreamChunkPayload {
     pub result: Option<ChatAdjustResponse>,
 }
 
+fn current_numeric_value(map: &Value, key: &str) -> f64 {
+    map.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
+}
+
+fn apply_guardrails(
+    adjustments: &mut Vec<AdjustmentSuggestion>,
+    current: &Value,
+    window: &crate::style_transfer::DynamicConstraintWindow,
+) -> Vec<DynamicConstraintClampRecord> {
+    let mut clamps = Vec::new();
+
+    let cur_exposure = current_numeric_value(current, "exposure");
+    let cur_highlights = current_numeric_value(current, "highlights");
+    let cur_whites = current_numeric_value(current, "whites");
+    let cur_shadows = current_numeric_value(current, "shadows");
+    let cur_blacks = current_numeric_value(current, "blacks");
+    let cur_saturation = current_numeric_value(current, "saturation");
+    let cur_vibrance = current_numeric_value(current, "vibrance");
+
+    let find_idx = |k: &str| {
+        adjustments
+            .iter()
+            .position(|a| a.key == k && a.complex_value.is_none())
+    };
+
+    let idx_exposure = find_idx("exposure");
+    let idx_highlights = find_idx("highlights");
+    let idx_whites = find_idx("whites");
+    let idx_shadows = find_idx("shadows");
+    let idx_blacks = find_idx("blacks");
+    let idx_saturation = find_idx("saturation");
+    let idx_vibrance = find_idx("vibrance");
+
+    let mut exposure_delta = idx_exposure
+        .map(|i| adjustments[i].get_f64_value() - cur_exposure)
+        .unwrap_or(0.0);
+    let mut highlights_delta = idx_highlights
+        .map(|i| adjustments[i].get_f64_value() - cur_highlights)
+        .unwrap_or(0.0);
+    let mut whites_delta = idx_whites
+        .map(|i| adjustments[i].get_f64_value() - cur_whites)
+        .unwrap_or(0.0);
+
+    let mut shadows_delta = idx_shadows
+        .map(|i| adjustments[i].get_f64_value() - cur_shadows)
+        .unwrap_or(0.0);
+    let mut blacks_delta = idx_blacks
+        .map(|i| adjustments[i].get_f64_value() - cur_blacks)
+        .unwrap_or(0.0);
+
+    let mut saturation_delta = idx_saturation
+        .map(|i| adjustments[i].get_f64_value() - cur_saturation)
+        .unwrap_or(0.0);
+    let mut vibrance_delta = idx_vibrance
+        .map(|i| adjustments[i].get_f64_value() - cur_vibrance)
+        .unwrap_or(0.0);
+
+    let mut apply_value = |key: &str, idx: Option<usize>, original: f64, value: f64, note: &str| {
+        let Some(i) = idx else { return };
+        let (clamped, reason) = clamp_value_with_dynamic_window(key, value, window);
+        let adj = &mut adjustments[i];
+        adj.set_f64_value(clamped);
+        let note_text = reason.unwrap_or_else(|| note.to_string());
+        adj.reason = if adj.reason.is_empty() {
+            note_text.clone()
+        } else {
+            format!("{}；{}", adj.reason, note_text)
+        };
+        clamps.push(DynamicConstraintClampRecord {
+            key: key.to_string(),
+            label: adj.label.clone(),
+            original,
+            clamped,
+            reason: note.to_string(),
+        });
+    };
+
+    let highlight_push = exposure_delta.max(0.0)
+        + (highlights_delta.max(0.0) / 50.0)
+        + (whites_delta.max(0.0) / 50.0);
+    let highlight_allow = (0.65 - window.highlight_risk * 0.55).max(0.15).min(0.65);
+    if highlight_push > highlight_allow && highlight_push.is_finite() {
+        let scale = (highlight_allow / highlight_push).max(0.0).min(1.0);
+        if exposure_delta > 0.0 {
+            let original = cur_exposure + exposure_delta;
+            exposure_delta *= scale;
+            apply_value(
+                "exposure",
+                idx_exposure,
+                original,
+                cur_exposure + exposure_delta,
+                "审美护栏：限制提亮组合",
+            );
+        }
+        if highlights_delta > 0.0 {
+            let original = cur_highlights + highlights_delta;
+            highlights_delta *= scale;
+            apply_value(
+                "highlights",
+                idx_highlights,
+                original,
+                cur_highlights + highlights_delta,
+                "审美护栏：限制提亮组合",
+            );
+        }
+        if whites_delta > 0.0 {
+            let original = cur_whites + whites_delta;
+            whites_delta *= scale;
+            apply_value(
+                "whites",
+                idx_whites,
+                original,
+                cur_whites + whites_delta,
+                "审美护栏：限制提亮组合",
+            );
+        }
+    }
+
+    let shadow_push = (-exposure_delta).max(0.0)
+        + ((-shadows_delta).max(0.0) / 50.0)
+        + ((-blacks_delta).max(0.0) / 50.0);
+    let shadow_allow = (0.65 - window.shadow_risk * 0.55).max(0.15).min(0.65);
+    if shadow_push > shadow_allow && shadow_push.is_finite() {
+        let scale = (shadow_allow / shadow_push).max(0.0).min(1.0);
+        if exposure_delta < 0.0 {
+            let original = cur_exposure + exposure_delta;
+            exposure_delta *= scale;
+            apply_value(
+                "exposure",
+                idx_exposure,
+                original,
+                cur_exposure + exposure_delta,
+                "审美护栏：限制压暗组合",
+            );
+        }
+        if shadows_delta < 0.0 {
+            let original = cur_shadows + shadows_delta;
+            shadows_delta *= scale;
+            apply_value(
+                "shadows",
+                idx_shadows,
+                original,
+                cur_shadows + shadows_delta,
+                "审美护栏：限制压暗组合",
+            );
+        }
+        if blacks_delta < 0.0 {
+            let original = cur_blacks + blacks_delta;
+            blacks_delta *= scale;
+            apply_value(
+                "blacks",
+                idx_blacks,
+                original,
+                cur_blacks + blacks_delta,
+                "审美护栏：限制压暗组合",
+            );
+        }
+    }
+
+    let sat_push =
+        (saturation_delta.max(0.0) / 40.0) + (vibrance_delta.max(0.0) / 40.0);
+    let sat_allow = (0.7 - window.saturation_risk * 0.6).max(0.15).min(0.7);
+    if sat_push > sat_allow && sat_push.is_finite() {
+        let scale = (sat_allow / sat_push).max(0.0).min(1.0);
+        if saturation_delta > 0.0 {
+            let original = cur_saturation + saturation_delta;
+            saturation_delta *= scale;
+            apply_value(
+                "saturation",
+                idx_saturation,
+                original,
+                cur_saturation + saturation_delta,
+                "审美护栏：限制饱和组合",
+            );
+        }
+        if vibrance_delta > 0.0 {
+            let original = cur_vibrance + vibrance_delta;
+            vibrance_delta *= scale;
+            apply_value(
+                "vibrance",
+                idx_vibrance,
+                original,
+                cur_vibrance + vibrance_delta,
+                "审美护栏：限制饱和组合",
+            );
+        }
+    }
+
+    clamps
+}
+
 fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -> String {
     let adj_str = serde_json::to_string_pretty(current_adjustments).unwrap_or_default();
     let constraint_str = serde_json::to_string_pretty(constraint_window).unwrap_or_default();
 
     format!(
-        r#"你是一位专业摄影师助手，帮助用户通过自然语言调整照片参数。
+        r#"你是一位专业摄影师助手，帮助用户通过自然语言调整照片参数，并且必须稳定输出可解析的严格 JSON。
 
 ## 你的任务
 根据用户的描述，推断出最合适的调整参数，以 JSON 格式返回。
@@ -77,6 +294,20 @@ fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -
 2. 必须参考"当前图像参数"，基于当前值做调整。用户可能已经手动拖过滑块。
 3. 如果用户说"再亮一点"，在当前 exposure 基础上增加，而不是从 0 开始。
 4. 如果用户说"太过了"或"回退一点"，在当前值基础上反向微调。
+5. 多轮对话以"当前图像参数"为唯一事实来源：历史对话只用于理解意图，不能覆盖当前参数数值。
+6. 用户说"只调整X/其它保持不变"时，只输出 X 对应的 key，不要输出其它参数。
+7. 用户说"撤销/回到上一步/恢复一点"时，把相关参数向当前值回退 30%~50%，输出回退后的最终绝对值。
+8. 不确定时宁可不调：允许返回空数组 adjustments: []。
+
+## 允许的参数 key（白名单，禁止输出其它 key）
+- 全局调整: exposure, brightness, contrast, highlights, shadows, whites, blacks, saturation, vibrance, temperature, tint, clarity, dehaze, structure, sharpness, vignetteAmount
+- HSL 颜色调整 (只输出对应的颜色层): hsl
+
+如果用户想要调整特定颜色（例如："将橙色转换为金黄色"或"让天空更蓝"），你必须输出 `hsl` 对象。
+- hsl 的 `complex_value` 格式：`{{"<color>": {{"hue": <偏移值>, "saturation": <增量>, "luminance": <增量>}}}}`
+- `<color>` 必须从以下 8 种中选择：`reds, oranges, yellows, greens, aquas, blues, purples, magentas`
+- 偏移值范围：-100 到 100（整数）。
+例如将橙色变黄：`{{"key": "hsl", "complex_value": {{"oranges": {{"hue": 20, "saturation": 0, "luminance": 0}}}}, "label": "HSL颜色", "reason": "将橙色偏移向黄色"}}`
 
 ## 参数范围说明（步长）
 - exposure（曝光）: -5.0 ~ 5.0，步长 0.01，0为原始
@@ -115,6 +346,11 @@ fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -
 - "再...一点" → 在当前值基础上小幅增量调整（±5~15）
 - "太过了/回退" → 在当前值基础上反向调整（回退 30%~50%）
 
+## 数值与步长（必须遵守）
+- exposure 必须是 0.01 的倍数（例如 0.23、-1.07）
+- 其它整数步长参数必须输出整数（不要输出 12.3 这类小数）
+- 所有数值必须是合法 JSON number（禁止 NaN / Infinity / 字符串数字）
+
 ## 当前图像参数
 ```json
 {adj_str}
@@ -125,13 +361,18 @@ fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -
 {constraint_str}
 ```
 
-## 输出格式（严格 JSON，禁止输出任何其他文字）
+## 输出格式（严格 JSON，禁止输出任何其他文字/Markdown/代码块）
+- 最终回复必须是单个 JSON 对象，前后不允许任何多余字符
+- 禁止使用 ```json 代码块、禁止注释、禁止尾随逗号
+- 字段名与字符串必须使用双引号
+
 {{
   "understanding": "用一句话描述你对用户意图的理解",
   "adjustments": [
     {{
-      "key": "参数键名",
-      "value": 数值,
+      "key": "参数键名 (例如 hsl 或 exposure)",
+      "value": 数值 (如果是数字),
+      "complex_value": 复杂对象 (仅当 key 为 hsl 时提供，如 {{"oranges": {{"hue": 10, "saturation": 0, "luminance": 0}}}}),
       "label": "中文参数名",
       "min": 最小值,
       "max": 最大值,
@@ -141,14 +382,18 @@ fn build_system_prompt(current_adjustments: &Value, constraint_window: &Value) -
 }}
 
 只返回需要调整的参数（与当前值不同的），最多返回8个最重要的参数。
+如果无需调整，返回：
+{{ "understanding": "...", "adjustments": [] }}
 
 ## 安全约束（必须遵守）
 - exposure 绝对值不得超过 2.5（即 -2.5 ~ 2.5）
 - 其他参数绝对值不得超过 80（即 -80 ~ 80）
 - 用户说"太亮/太暗/太过了"时，只做小幅调整（exposure ±0.3~0.8，其他参数 ±10~30）
 - 绝对禁止把 exposure 设为 3.0 以上或 -3.0 以下
+- 注意：如果当前图片为全白（曝光过度），你必须把 exposure、highlights 和 whites 的值设置为极低的负数（如 exposure -2.5, highlights -100），以拉回画面细节。
 - 如果用户的描述模糊，宁可保守调整也不要激进
-- 输出值必须落在动态约束窗口 bands 对应的 hard_min/hard_max 内"#,
+- 输出值必须落在动态约束窗口 bands 对应的 hard_min/hard_max 内 (对于 HSL, min 为 -100, max 为 100)
+- 对于普通数值参数，min/max 必须等于该 key 在动态约束窗口 bands 中的 hard_min/hard_max；如果 bands 中不存在该 key，则不要输出该 adjustment"#,
         adj_str = adj_str,
         constraint_str = constraint_str
     )
@@ -222,6 +467,7 @@ pub async fn chat_adjust(
     llm_model: Option<String>,
     current_image_path: Option<String>,
     app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
 ) -> Result<ChatAdjustResponse, String> {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(180))
@@ -378,6 +624,11 @@ pub async fn chat_adjust(
 
     let mut clamps = Vec::new();
     for adj in &mut parsed.adjustments {
+        // 跳过复杂对象 (如 hsl) 的动态边界检查
+        if adj.key == "hsl" {
+            continue;
+        }
+
         if let Some(band) = constraint_window.bands.get(&adj.key) {
             adj.min = adj.min.max(band.hard_min);
             adj.max = adj.max.min(band.hard_max);
@@ -386,10 +637,10 @@ pub async fn chat_adjust(
                 adj.max = band.hard_max;
             }
         }
-        let original = adj.value;
+        let original = adj.get_f64_value();
         let (clamped, reason) =
-            clamp_value_with_dynamic_window(&adj.key, adj.value, &constraint_window);
-        adj.value = clamped;
+            clamp_value_with_dynamic_window(&adj.key, original, &constraint_window);
+        adj.set_f64_value(clamped);
         if let Some(reason_text) = reason {
             clamps.push(DynamicConstraintClampRecord {
                 key: adj.key.clone(),
@@ -405,14 +656,86 @@ pub async fn chat_adjust(
             }
         }
     }
+
+    let guardrail_clamps =
+        apply_guardrails(&mut parsed.adjustments, &current_adjustments, &constraint_window);
+    clamps.extend(guardrail_clamps);
+
     let constraint_debug = DynamicConstraintDebugInfo {
         window: constraint_window.clone(),
         clamp_count: clamps.len(),
-        clamps,
+        clamps: clamps.clone(),
     };
     parsed.constraint_debug = serde_json::to_value(&constraint_debug).ok();
 
-    // 推送完成事件
+    if let Some(ref path) = current_image_path {
+        if let Ok(context) = get_or_init_gpu_context(&state) {
+            if let Ok(loaded) = state.original_image.lock() {
+                if let Some(original) = &*loaded {
+                    if original.path == *path {
+                        let mut merged_adjustments = current_adjustments.clone();
+                        if let Some(obj) = merged_adjustments.as_object_mut() {
+                            for adj in &parsed.adjustments {
+                                if adj.key == "hsl" && adj.complex_value.is_some() {
+                                    if let Some(v) = &adj.complex_value {
+                                        obj.insert(adj.key.clone(), v.clone());
+                                    }
+                                } else {
+                                    obj.insert(adj.key.clone(), json!(adj.value));
+                                }
+                            }
+                        }
+                        let preview_base = downscale_f32_image(&original.image, 200, 200);
+                        let all_adjustments = get_all_adjustments_from_json(&merged_adjustments, original.is_raw);
+                        if let Ok(processed_image) = process_and_get_dynamic_image(
+                            &context,
+                            &state,
+                            &preview_base,
+                            0,
+                            RenderRequest {
+                                adjustments: all_adjustments,
+                                mask_bitmaps: &[],
+                                lut: None,
+                                roi: None,
+                            },
+                            "chat_adjust_verification",
+                        ) {
+                            let result_features = extract_features(&processed_image);
+                            let mut needed_fix = false;
+                            if result_features.clipped_highlight_ratio > 0.10 {
+                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "exposure") {
+                                    adj.set_f64_value(adj.get_f64_value() - 0.5);
+                                    adj.reason = format!("{}；图像域验证：触发过曝自愈，强制降曝光", adj.reason);
+                                    needed_fix = true;
+                                }
+                            }
+                            if result_features.shadow_ratio > 0.30 && result_features.p10_luminance < 0.05 {
+                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "shadows") {
+                                    adj.set_f64_value(adj.get_f64_value() + 20.0);
+                                    adj.reason = format!("{}；图像域验证：触发死黑自愈，强制拉阴影", adj.reason);
+                                    needed_fix = true;
+                                }
+                            }
+                            if result_features.mean_saturation > 0.65 {
+                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "vibrance") {
+                                    adj.set_f64_value(adj.get_f64_value() - 20.0);
+                                    adj.reason = format!("{}；图像域验证：触发超饱和自愈，强制降饱和", adj.reason);
+                                    needed_fix = true;
+                                }
+                            }
+                            if needed_fix {
+                                if let Some(dbg) = parsed.constraint_debug.as_mut().and_then(|v| v.as_object_mut()) {
+                                    dbg.insert("image_verified".to_string(), json!(true));
+                                    dbg.insert("auto_corrected".to_string(), json!(true));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let _ = app_handle.emit(
         "chat-stream-chunk",
         StreamChunkPayload {

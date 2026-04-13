@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
+use reqwest::Client;
+use base64::{Engine as _, engine::general_purpose};
+use std::io::Cursor;
+use tauri::Emitter;
 
 const EARLY_EXIT_STYLE_DISTANCE_THRESHOLD: f64 = 0.22;
 const LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD: f64 = 0.68;
@@ -182,6 +186,15 @@ struct StyleTransferPreparedContext {
     expert_preset_id: Option<&'static str>,
 }
 
+#[derive(Clone, Copy)]
+struct StyleTransferAlgoOptions {
+    pure_algorithm: bool,
+    enable_feature_mapping: bool,
+    enable_auto_refine: bool,
+    enable_expert_preset: bool,
+    enable_lut: bool,
+}
+
 struct AlgorithmPipelineResult {
     adjustments: Vec<StyleTransferSuggestion>,
     style_debug: StyleTransferDebugInfo,
@@ -225,18 +238,24 @@ fn build_style_transfer_context(
     cur_img: DynamicImage,
     current_adjustments: &Value,
     tuning: StyleTransferTuning,
+    enable_expert_preset: bool,
 ) -> StyleTransferPreparedContext {
     let ref_features = extract_features(&ref_img);
     let cur_features = extract_features(&cur_img);
-    let expert_tags = derive_style_tags(
-        ref_features.mean_luminance,
-        ref_features.p10_luminance,
-        ref_features.p90_luminance,
-        ref_features.contrast_spread,
-        ref_features.mean_saturation,
-        ref_features.rb_ratio,
-    );
-    let expert_preset_id = select_expert_preset(&expert_tags).map(|p| p.id);
+    let (expert_tags, expert_preset_id) = if enable_expert_preset {
+        let tags = derive_style_tags(
+            ref_features.mean_luminance,
+            ref_features.p10_luminance,
+            ref_features.p90_luminance,
+            ref_features.contrast_spread,
+            ref_features.mean_saturation,
+            ref_features.rb_ratio,
+        );
+        let preset_id = select_expert_preset(&tags).map(|p| p.id);
+        (tags, preset_id)
+    } else {
+        (Vec::new(), None)
+    };
     let constraint_window = build_dynamic_constraint_window_for_style_transfer(
         &cur_features,
         &ref_features,
@@ -287,21 +306,41 @@ fn apply_numeric_suggestions(base: &Value, suggestions: &[StyleTransferSuggestio
 fn run_algorithm_pipeline(
     ctx: &StyleTransferPreparedContext,
     current_adjustments: &Value,
+    options: StyleTransferAlgoOptions,
 ) -> AlgorithmPipelineResult {
-    let (seeded_adjustments, expert_preset) = ctx
-        .expert_preset_id
-        .and_then(|id| get_expert_preset_by_id(id))
-        .map(|preset| (merge_shallow_objects(current_adjustments, &preset.adjustments), Some(preset)))
-        .unwrap_or_else(|| (current_adjustments.clone(), None));
+    let (seeded_adjustments, expert_preset) = if options.enable_expert_preset {
+        ctx.expert_preset_id
+            .and_then(|id| get_expert_preset_by_id(id))
+            .map(|preset| {
+                (
+                    merge_shallow_objects(current_adjustments, &preset.adjustments),
+                    Some(preset),
+                )
+            })
+            .unwrap_or_else(|| (current_adjustments.clone(), None))
+    } else {
+        (current_adjustments.clone(), None)
+    };
 
-    let mut adjustments = map_features_to_adjustments(
-        &ctx.ref_features,
-        &ctx.cur_features,
-        &seeded_adjustments,
-        ctx.tuning,
-    );
+    let mut adjustments = if options.enable_feature_mapping {
+        map_features_to_adjustments(
+            &ctx.ref_features,
+            &ctx.cur_features,
+            &seeded_adjustments,
+            ctx.tuning,
+        )
+    } else {
+        Vec::new()
+    };
 
     let matched_curves = generate_matched_curves(&ctx.ref_img, &ctx.cur_img, ctx.tuning.style_strength);
+    let matched_hsl = generate_matched_hsl(
+        &ctx.ref_img,
+        &ctx.cur_img,
+        ctx.tuning.style_strength,
+        &ctx.constraint_window,
+    );
+
     adjustments.push(StyleTransferSuggestion {
         key: "curves".to_string(),
         value: 0.0,
@@ -311,22 +350,63 @@ fn run_algorithm_pipeline(
         max: 1.0,
         reason: "使用直方图匹配精准还原参考图的高级胶片色调与非线性反差".to_string(),
     });
-    let auto_refine_rounds = auto_refine_suggestions_by_error(
-        &ctx.ref_features,
-        &ctx.cur_features,
-        &seeded_adjustments,
-        &mut adjustments,
-        ctx.tuning,
-    );
-    apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
-    let mut constraint_debug =
-        apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+    if matched_hsl
+        .as_object()
+        .map(|o| !o.is_empty())
+        .unwrap_or(false)
+    {
+        adjustments.push(StyleTransferSuggestion {
+            key: "hsl".to_string(),
+            value: 0.0,
+            complex_value: Some(matched_hsl),
+            label: "颜色混合器 (HSL)".to_string(),
+            min: -100.0,
+            max: 100.0,
+            reason: "对齐参考图的8色相区间色相/饱和/明度画像，实现颜色风格迁移".to_string(),
+        });
+    }
+
+    if options.pure_algorithm {
+        let predicted_features = estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
+        let style_debug = build_style_debug_info(
+            &ctx.ref_features,
+            &ctx.cur_features,
+            &predicted_features,
+            ctx.tuning,
+            0,
+            None,
+        );
+        return AlgorithmPipelineResult {
+            adjustments,
+            style_debug,
+        };
+    }
+    let auto_refine_rounds = if options.enable_auto_refine {
+        auto_refine_suggestions_by_error(
+            &ctx.ref_features,
+            &ctx.cur_features,
+            &seeded_adjustments,
+            &mut adjustments,
+            ctx.tuning,
+        )
+    } else {
+        0
+    };
+    let mut constraint_debug = if options.pure_algorithm {
+        None
+    } else {
+        apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+        Some(apply_dynamic_constraints_to_style_suggestions(
+            &mut adjustments,
+            &ctx.constraint_window,
+        ))
+    };
     let mut predicted_features =
         estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
 
     let mut extra_refine_rounds: u32 = 0;
     let residual = style_error_breakdown(&ctx.ref_features, &predicted_features, ctx.tuning).total;
-    if residual > 0.40 {
+    if options.enable_auto_refine && options.enable_feature_mapping && residual > 0.40 {
         let next_adjustments_value = apply_numeric_suggestions(&seeded_adjustments, &adjustments);
         let second_pass = map_features_to_adjustments(
             &ctx.ref_features,
@@ -350,8 +430,13 @@ fn run_algorithm_pipeline(
                 adjustments.push(s2);
             }
         }
-        apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
-        constraint_debug = apply_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+        if !options.pure_algorithm {
+            apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+            constraint_debug = Some(apply_dynamic_constraints_to_style_suggestions(
+                &mut adjustments,
+                &ctx.constraint_window,
+            ));
+        }
         predicted_features =
             estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
         extra_refine_rounds = 1;
@@ -362,49 +447,52 @@ fn run_algorithm_pipeline(
         &predicted_features,
         ctx.tuning,
         auto_refine_rounds + extra_refine_rounds,
-        Some(constraint_debug),
+        constraint_debug,
     );
-    if let Some(preset) = expert_preset {
-        let mut existing_keys: HashMap<String, bool> = HashMap::new();
-        for s in adjustments.iter() {
-            existing_keys.insert(s.key.clone(), true);
-        }
-        if let Some(map) = preset.adjustments.as_object() {
-            for (k, v) in map.iter() {
-                if existing_keys.contains_key(k) {
-                    continue;
-                }
-                if let Some(num) = v.as_f64() {
-                    if let Some((label, min, max)) = action_meta(k) {
+    if options.enable_expert_preset {
+        if let Some(preset) = expert_preset {
+            let mut existing_keys: HashMap<String, bool> = HashMap::new();
+            for s in adjustments.iter() {
+                existing_keys.insert(s.key.clone(), true);
+            }
+            if let Some(map) = preset.adjustments.as_object() {
+                for (k, v) in map.iter() {
+                    if existing_keys.contains_key(k) {
+                        continue;
+                    }
+                    if let Some(num) = v.as_f64() {
+                        if let Some((label, min, max)) = action_meta(k) {
+                            adjustments.push(StyleTransferSuggestion {
+                                key: k.clone(),
+                                value: num,
+                                complex_value: None,
+                                label: label.to_string(),
+                                min,
+                                max,
+                                reason: format!("专家预设：{}", preset.name),
+                            });
+                        }
+                    } else {
+                        let label = action_meta(k)
+                            .map(|(l, _, _)| l.to_string())
+                            .unwrap_or_else(|| format!("专家预设：{}", preset.name));
                         adjustments.push(StyleTransferSuggestion {
                             key: k.clone(),
-                            value: num,
-                            complex_value: None,
-                            label: label.to_string(),
-                            min,
-                            max,
+                            value: 0.0,
+                            complex_value: Some(v.clone()),
+                            label,
+                            min: 0.0,
+                            max: 1.0,
                             reason: format!("专家预设：{}", preset.name),
                         });
                     }
-                } else {
-                    let label = action_meta(k)
-                        .map(|(l, _, _)| l.to_string())
-                        .unwrap_or_else(|| format!("专家预设：{}", preset.name));
-                    adjustments.push(StyleTransferSuggestion {
-                        key: k.clone(),
-                        value: 0.0,
-                        complex_value: Some(v.clone()),
-                        label,
-                        min: 0.0,
-                        max: 1.0,
-                        reason: format!("专家预设：{}", preset.name),
-                    });
                 }
             }
         }
     }
     
-    if let Some(lut_data) = generate_3d_lut_with_ot_tps(&ctx.cur_img, &ctx.ref_img, 17) {
+    if options.enable_lut {
+        if let Some(lut_data) = generate_3d_lut_with_ot_tps(&ctx.cur_img, &ctx.ref_img, 17) {
         adjustments.push(StyleTransferSuggestion {
             key: "lutSize".to_string(),
             value: 17.0,
@@ -432,6 +520,7 @@ fn run_algorithm_pipeline(
             max: 100.0,
             reason: "".to_string(),
         });
+        }
     }
 AlgorithmPipelineResult {
         adjustments,
@@ -870,6 +959,29 @@ pub fn build_dynamic_constraint_window_from_image(
         if Path::new(path).exists() {
             if let Ok(img) = smart_open_image(path) {
                 let feat = extract_features(&img);
+                
+                // 检查是否为纯白色图片（高亮度，低对比度，几乎没有色彩）
+                if feat.mean_luminance > 0.95 && feat.contrast_spread < 0.05 && feat.mean_saturation < 0.05 {
+                    let mut window = build_dynamic_constraint_window(&feat, current_adjustments, "image_white_override");
+                    // 强制要求 AI 必须降低曝光和高光，拉回细节
+                    if let Some(band) = window.bands.get_mut("exposure") {
+                        band.hard_max = -1.0;
+                        band.soft_max = -1.5;
+                        band.hard_min = -3.0;
+                    }
+                    if let Some(band) = window.bands.get_mut("highlights") {
+                        band.hard_max = -30.0;
+                        band.soft_max = -50.0;
+                        band.hard_min = -100.0;
+                    }
+                    if let Some(band) = window.bands.get_mut("whites") {
+                        band.hard_max = -20.0;
+                        band.soft_max = -40.0;
+                        band.hard_min = -100.0;
+                    }
+                    return window;
+                }
+                
                 return build_dynamic_constraint_window(&feat, current_adjustments, "image");
             }
         }
@@ -1203,7 +1315,7 @@ fn build_blocked_reasons(
 }
 
 /// 从图像中提取风格特征向量
-fn extract_features(img: &DynamicImage) -> StyleFeatures {
+pub fn extract_features(img: &DynamicImage) -> StyleFeatures {
     let (w, h) = img.dimensions();
     let total_pixels = (w as f64) * (h as f64);
     if total_pixels == 0.0 {
@@ -2010,7 +2122,7 @@ fn action_meta(key: &str) -> Option<(&'static str, f64, f64)> {
         "clarity" => Some(("清晰度", -100.0, 100.0)),
         "vignetteAmount" => Some(("暗角", -100.0, 100.0)),
         "curves" => Some(("色彩曲线", 0.0, 1.0)),
-        "hsl" => Some(("HSL", 0.0, 1.0)),
+        "hsl" => Some(("HSL", -100.0, 100.0)),
         _ => None,
     }
 }
@@ -2726,33 +2838,49 @@ fn generate_matched_curves(
     cur_img: &DynamicImage,
     strength: f64,
 ) -> serde_json::Value {
+    let s = strength.max(0.0).min(1.0);
     let mut ref_hist = vec![[0u32; 256]; 4];
     let mut cur_hist = vec![[0u32; 256]; 4];
 
-    for p in ref_img.to_rgb8().pixels() {
-        ref_hist[0][p[0] as usize] += 1;
-        ref_hist[1][p[1] as usize] += 1;
-        ref_hist[2][p[2] as usize] += 1;
-        let luma = (p[0] as f32 * 0.2126 + p[1] as f32 * 0.7152 + p[2] as f32 * 0.0722).round() as usize;
-        ref_hist[3][luma.min(255)] += 1;
-    }
-    for p in cur_img.to_rgb8().pixels() {
-        cur_hist[0][p[0] as usize] += 1;
-        cur_hist[1][p[1] as usize] += 1;
-        cur_hist[2][p[2] as usize] += 1;
-        let luma = (p[0] as f32 * 0.2126 + p[1] as f32 * 0.7152 + p[2] as f32 * 0.0722).round() as usize;
-        cur_hist[3][luma.min(255)] += 1;
+    let accum = |img: &DynamicImage, hist: &mut Vec<[u32; 256]>| {
+        for p in img.to_rgb8().pixels() {
+            let r = p[0] as usize;
+            let g = p[1] as usize;
+            let b = p[2] as usize;
+            hist[0][r] += 1;
+            hist[1][g] += 1;
+            hist[2][b] += 1;
+            let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
+                .round()
+                .max(0.0)
+                .min(255.0) as usize;
+            hist[3][luma] += 1;
+        }
+    };
+
+    accum(ref_img, &mut ref_hist);
+    accum(cur_img, &mut cur_hist);
+
+    // 解决偏灰元凶 1：直方图峰值裁剪 (Histogram Peak Clipping)
+    // 限制每个亮度级别的最大像素比例为 1.5%，防止 CDF 出现垂直跳跃，从而保证生成的曲线永远具有斜率（对比度）
+    for c in 0..4 {
+        let ref_total: u32 = ref_hist[c].iter().sum();
+        let cur_total: u32 = cur_hist[c].iter().sum();
+        let clip_limit_ref = (ref_total as f64 * 0.015).max(1.0) as u32;
+        let clip_limit_cur = (cur_total as f64 * 0.015).max(1.0) as u32;
+        for i in 0..256 {
+            ref_hist[c][i] = ref_hist[c][i].min(clip_limit_ref);
+            cur_hist[c][i] = cur_hist[c][i].min(clip_limit_cur);
+        }
     }
 
     let mut ref_cdf = vec![[0.0; 256]; 4];
     let mut cur_cdf = vec![[0.0; 256]; 4];
-
     for c in 0..4 {
-        let mut ref_sum = 0;
-        let mut cur_sum = 0;
+        let mut ref_sum = 0u32;
+        let mut cur_sum = 0u32;
         let ref_total: u32 = ref_hist[c].iter().sum();
         let cur_total: u32 = cur_hist[c].iter().sum();
-
         for i in 0..256 {
             ref_sum += ref_hist[c][i];
             cur_sum += cur_hist[c][i];
@@ -2765,34 +2893,236 @@ fn generate_matched_curves(
     let channels = ["red", "green", "blue", "luma"];
 
     for (c, ch_name) in channels.iter().enumerate() {
-        let mut points = Vec::new();
+        let mut points = Vec::with_capacity(16);
         let mut prev_y = 0.0;
-        for &x_val in &[0, 64, 128, 192, 255] {
-            let target_cdf = cur_cdf[c][x_val];
-            let mut best_y = x_val;
-            let mut min_diff = 1.0;
-            for y in 0..256 {
-                let diff = (ref_cdf[c][y] - target_cdf).abs();
-                if diff < min_diff {
-                    min_diff = diff;
-                    best_y = y;
+        
+        for step in 0..16 {
+            let x = if step == 15 { 255 } else { step * 17 };
+            let target_prob = cur_cdf[c][x];
+            
+            let mut y = 255;
+            for j in 0..256 {
+                if ref_cdf[c][j] >= target_prob {
+                    y = j;
+                    break;
                 }
             }
-
-            let blended_y = (x_val as f64 * (1.0 - strength)) + (best_y as f64 * strength);
-            let safe_y = blended_y.clamp((x_val as f64 - 50.0).max(0.0), (x_val as f64 + 50.0).min(255.0));
-            let monotonic_y = safe_y.max(prev_y);
-            prev_y = monotonic_y;
-
-            points.push(serde_json::json!({
-                "x": x_val as f64,
-                "y": monotonic_y
-            }));
+            
+            let mut final_y = (x as f64) * (1.0 - s) + (y as f64) * s;
+            // 解决偏灰元凶 2：删除了强制锁死 0 和 255 的代码，允许曲线忠实还原参考图的黑场和白场
+            final_y = final_y.max(prev_y).min(255.0);
+            
+            prev_y = final_y;
+            points.push(serde_json::json!({ "x": x as f64, "y": final_y.round() }));
         }
         curves.insert(ch_name.to_string(), serde_json::json!(points));
     }
 
     serde_json::Value::Object(curves)
+}
+
+
+
+
+
+fn rgb_to_hsv(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let c_max = r.max(g).max(b);
+    let c_min = r.min(g).min(b);
+    let delta = c_max - c_min;
+    let mut h = 0.0;
+    if delta > 1e-9 {
+        if (c_max - r).abs() < 1e-9 {
+            h = 60.0 * (((g - b) / delta) % 6.0);
+        } else if (c_max - g).abs() < 1e-9 {
+            h = 60.0 * (((b - r) / delta) + 2.0);
+        } else {
+            h = 60.0 * (((r - g) / delta) + 4.0);
+        }
+    }
+    if h < 0.0 {
+        h += 360.0;
+    }
+    let s = if c_max > 1e-9 { delta / c_max } else { 0.0 };
+    (h, s, c_max)
+}
+
+fn hsl_influence(hue: f64, center: f64, width: f64) -> f64 {
+    let dist = (hue - center).abs().min(360.0 - (hue - center).abs());
+    let falloff = dist / (width * 0.5);
+    (-1.5 * falloff * falloff).exp()
+}
+
+fn generate_matched_hsl(
+    ref_img: &DynamicImage,
+    cur_img: &DynamicImage,
+    strength: f64,
+    constraint_window: &DynamicConstraintWindow,
+) -> serde_json::Value {
+    let s = strength.max(0.0).min(1.0);
+    let ranges: [(f64, f64); 8] = [
+        (358.0, 35.0),
+        (25.0, 45.0),
+        (60.0, 40.0),
+        (115.0, 90.0),
+        (180.0, 60.0),
+        (225.0, 60.0),
+        (280.0, 55.0),
+        (330.0, 50.0),
+    ];
+    let keys: [&str; 8] = [
+        "reds",
+        "oranges",
+        "yellows",
+        "greens",
+        "aquas",
+        "blues",
+        "purples",
+        "magentas",
+    ];
+    
+    let mut ref_w = [0.0f64; 8];
+    let mut ref_sum_sin = [0.0f64; 8];
+    let mut ref_sum_cos = [0.0f64; 8];
+    let mut ref_sum_sat = [0.0f64; 8];
+    let mut ref_sum_lum = [0.0f64; 8];
+
+    let mut cur_w = [0.0f64; 8];
+    let mut cur_sum_sin = [0.0f64; 8];
+    let mut cur_sum_cos = [0.0f64; 8];
+    let mut cur_sum_sat = [0.0f64; 8];
+    let mut cur_sum_lum = [0.0f64; 8];
+
+    let accumulate = |img: &DynamicImage,
+                      w: &mut [f64; 8],
+                      sum_sin: &mut [f64; 8],
+                      sum_cos: &mut [f64; 8],
+                      sum_sat: &mut [f64; 8],
+                      sum_lum: &mut [f64; 8]| {
+        for p in img.to_rgb8().pixels() {
+            let r = p[0] as f64 / 255.0;
+            let g = p[1] as f64 / 255.0;
+            let b = p[2] as f64 / 255.0;
+            
+            // 严格对齐 Shader 里的亮度与 HSL 转换
+            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            if luma < 0.02 || luma > 0.98 { continue; }
+            
+            let (hue, sat, _) = rgb_to_hsv(r, g, b);
+            if sat < 0.05 { continue; } // 忽略无色彩像素
+
+            let mut raw = [0.0f64; 8];
+            let mut sum_raw = 0.0;
+            for i in 0..8 {
+                let infl = hsl_influence(hue, ranges[i].0, ranges[i].1);
+                raw[i] = infl;
+                sum_raw += infl;
+            }
+            if sum_raw < 1e-9 { continue; }
+
+            let hue_rad = hue.to_radians();
+            let h_sin = hue_rad.sin();
+            let h_cos = hue_rad.cos();
+
+            for i in 0..8 {
+                let norm = raw[i] / sum_raw;
+                if norm < 0.01 { continue; }
+                
+                w[i] += norm;
+                sum_sin[i] += norm * h_sin;
+                sum_cos[i] += norm * h_cos;
+                sum_sat[i] += norm * sat;
+                sum_lum[i] += norm * luma;
+            }
+        }
+    };
+
+    accumulate(ref_img, &mut ref_w, &mut ref_sum_sin, &mut ref_sum_cos, &mut ref_sum_sat, &mut ref_sum_lum);
+    accumulate(cur_img, &mut cur_w, &mut cur_sum_sin, &mut cur_sum_cos, &mut cur_sum_sat, &mut cur_sum_lum);
+
+    // 引入色彩中介关联逻辑：色相画像邻域平滑
+    // 目的：实现“中介转换”。例如目标图只有黄色，但参考图是绿色调。
+    // 通过让黄色区间“借用”邻近绿色区间的画像特征，使黄色能感知到绿色的趋势，从而实现 黄->绿->莫兰迪绿 的引导。
+    let smooth_profile = |w: &mut [f64; 8], s: &mut [f64; 8], c: &mut [f64; 8], sat: &mut [f64; 8], lum: &mut [f64; 8]| {
+        let mut nw = [0.0; 8]; let mut ns = [0.0; 8]; let mut nc = [0.0; 8]; let mut nsat = [0.0; 8]; let mut nlum = [0.0; 8];
+        for i in 0..8 {
+            let prev = if i == 0 { 7 } else { i - 1 };
+            let next = if i == 7 { 0 } else { i + 1 };
+            // 权重分配：自身 60%，左右邻居各 20%
+            let kernel = [0.2, 0.6, 0.2];
+            nw[i] = w[prev] * kernel[0] + w[i] * kernel[1] + w[next] * kernel[2];
+            ns[i] = s[prev] * kernel[0] + s[i] * kernel[1] + s[next] * kernel[2];
+            nc[i] = c[prev] * kernel[0] + c[i] * kernel[1] + c[next] * kernel[2];
+            nsat[i] = sat[prev] * kernel[0] + sat[i] * kernel[1] + sat[next] * kernel[2];
+            nlum[i] = lum[prev] * kernel[0] + lum[i] * kernel[1] + lum[next] * kernel[2];
+        }
+        *w = nw; *s = ns; *c = nc; *sat = nsat; *lum = nlum;
+    };
+    
+    smooth_profile(&mut ref_w, &mut ref_sum_sin, &mut ref_sum_cos, &mut ref_sum_sat, &mut ref_sum_lum);
+    smooth_profile(&mut cur_w, &mut cur_sum_sin, &mut cur_sum_cos, &mut cur_sum_sat, &mut cur_sum_lum);
+
+    let sat_guard = (1.0 - constraint_window.saturation_risk * 0.65).max(0.25).min(1.0);
+
+    let mut out = serde_json::Map::new();
+    for i in 0..8 {
+        // 降低门限，因为平滑后每个区间都会有一定权重，从而激活“中介色”
+        if ref_w[i] < 20.0 || cur_w[i] < 20.0 {
+            continue;
+        }
+
+        // 1. 计算圆周平均 Hue
+        let ref_mean_hue = ref_sum_sin[i].atan2(ref_sum_cos[i]).to_degrees();
+        let cur_mean_hue = cur_sum_sin[i].atan2(cur_sum_cos[i]).to_degrees();
+        
+        let mut delta_hue = ref_mean_hue - cur_mean_hue;
+        if delta_hue > 180.0 { delta_hue -= 360.0; }
+        if delta_hue < -180.0 { delta_hue += 360.0; }
+        
+        // 引入“不相干颜色门限”：如果色相差距超过 50 度（意味着跨越了几乎两个大色相区），则认为是不相干颜色。
+        // 使用平滑的余弦衰减，防止强行将红色扭曲成蓝色等不自然行为。
+        let hue_affinity = (delta_hue.abs() / 50.0).min(1.0);
+        let hue_gate = (1.0 - hue_affinity * hue_affinity).max(0.0);
+        
+        // Shader: hue += slider * 0.3 * 2.0; 故 slider = delta / 0.6
+        let hue_slider = (delta_hue / 0.6 * s * hue_gate).round().max(-100.0).min(100.0);
+
+        // 2. 计算平均 Saturation
+        let ref_mean_sat = ref_sum_sat[i] / ref_w[i];
+        let cur_mean_sat = (cur_sum_sat[i] / cur_w[i]).max(0.01);
+        
+        // 解决偏灰元凶 3：消除双重饱和度/明度叠加 (Double Dipping)
+        // RGB曲线本身已经极大改变了全图的饱和度，如果 HSL 再拉满，画面会失控。此处削弱系数为 0.4。
+        let sat_slider = (((ref_mean_sat / cur_mean_sat) - 1.0) * 100.0 * s * sat_guard * 0.4)
+            .round()
+            .max(-100.0)
+            .min(100.0);
+
+        // 3. 计算平均 Luminance
+        let ref_mean_lum = ref_sum_lum[i] / ref_w[i];
+        let cur_mean_lum = (cur_sum_lum[i] / cur_w[i]).max(0.01);
+        
+        // 明度曲线 (Luma Curve) 已经完美对齐了全图的亮度。如果 HSL 再次应用亮度差值，会导致“暗的变更暗，亮的变更亮”，引发严重死灰。
+        // 此处将 Luminance 的系数极大削弱 (0.1)，让它只做极其微弱的局部修饰，不干扰全局曲线。
+        let lum_slider = (((ref_mean_lum / cur_mean_lum) - 1.0) * 100.0 * s * 0.1)
+            .round()
+            .max(-100.0)
+            .min(100.0);
+
+        if hue_slider.abs() < 1.0 && sat_slider.abs() < 1.0 && lum_slider.abs() < 1.0 {
+            continue;
+        }
+
+        out.insert(
+            keys[i].to_string(),
+            json!({
+                "hue": hue_slider,
+                "saturation": sat_slider,
+                "luminance": lum_slider
+            }),
+        );
+    }
+
+    serde_json::Value::Object(out)
 }
 
 /// 将两组特征的差异映射为滑块调整参数（优化版：更精准的感知映射）
@@ -3637,45 +3967,374 @@ pub async fn analyze_style_transfer(
     style_strength: Option<f64>,
     highlight_guard_strength: Option<f64>,
     skin_protect_strength: Option<f64>,
+    pure_algorithm: Option<bool>,
+    enable_expert_preset: Option<bool>,
+    enable_feature_mapping: Option<bool>,
+    enable_auto_refine: Option<bool>,
+    enable_lut: Option<bool>,
+    enable_vlm: Option<bool>,
+    llm_endpoint: Option<String>,
+    llm_api_key: Option<String>,
+    llm_model: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<StyleTransferResponse, String> {
     let tuning = StyleTransferTuning::from_options(
         style_strength,
         highlight_guard_strength,
         skin_protect_strength,
     );
+    let pure_algorithm = pure_algorithm.unwrap_or(false);
+    let enable_expert_preset = if pure_algorithm {
+        false
+    } else {
+        enable_expert_preset.unwrap_or(true)
+    };
+    let enable_feature_mapping = if pure_algorithm {
+        false
+    } else {
+        enable_feature_mapping.unwrap_or(true)
+    };
+    let enable_auto_refine = if pure_algorithm {
+        false
+    } else {
+        enable_auto_refine.unwrap_or(true)
+    };
+    let enable_lut = if pure_algorithm { false } else { enable_lut.unwrap_or(true) };
+    let enable_vlm = if pure_algorithm { false } else { enable_vlm.unwrap_or(true) };
     validate_style_transfer_paths(&reference_path, &current_image_path)?;
     let (ref_img, cur_img) =
         load_style_transfer_images(&reference_path, &current_image_path).await?;
         
-    tokio::task::spawn_blocking(move || {
-        let ctx = build_style_transfer_context(ref_img, cur_img, &current_adjustments, tuning);
-        let (early_exit_threshold, _) =
+    let endpoint_for_check = llm_endpoint.clone();
+    let current_adjustments_for_vlm = current_adjustments.clone();
+
+    let (algorithm_result, suffix, early_exit_res, ctx_images) = tokio::task::spawn_blocking(move || {
+        let ctx = build_style_transfer_context(
+            ref_img,
+            cur_img,
+            &current_adjustments,
+            tuning,
+            enable_expert_preset,
+        );
+        let (early_exit_threshold, llm_trigger) =
             adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
-        if ctx.baseline_error.total < early_exit_threshold {
+        if !pure_algorithm && ctx.baseline_error.total < early_exit_threshold {
             let suffix = build_expert_preset_suffix(&ctx);
             let mut res = build_style_transfer_early_exit_response(&ctx);
             if !suffix.is_empty() {
                 res.understanding = format!("{}{}", res.understanding, suffix);
             }
-            return Ok(res);
+            return Ok::<(Option<AlgorithmPipelineResult>, String, Option<StyleTransferResponse>, Option<(DynamicImage, DynamicImage)>), String>((None, String::new(), Some(res), None));
         }
-        let algorithm_result = run_algorithm_pipeline(&ctx, &current_adjustments);
+        let needs_vlm = enable_vlm && endpoint_for_check.is_some() && ctx.baseline_error.total >= llm_trigger;
+        let images = if needs_vlm {
+            Some((ctx.ref_img.clone(), ctx.cur_img.clone()))
+        } else {
+            None
+        };
+
+        let algorithm_result = run_algorithm_pipeline(
+            &ctx,
+            &current_adjustments,
+            StyleTransferAlgoOptions {
+                pure_algorithm,
+                enable_feature_mapping,
+                enable_auto_refine,
+                enable_expert_preset,
+                enable_lut,
+            },
+        );
         let suffix = build_expert_preset_suffix(&ctx);
-        Ok(build_algorithm_response(
-            algorithm_result.adjustments,
-            algorithm_result.style_debug,
-            &suffix,
-            true,
-        ))
+        Ok::<(Option<AlgorithmPipelineResult>, String, Option<StyleTransferResponse>, Option<(DynamicImage, DynamicImage)>), String>((Some(algorithm_result), suffix, None, images))
     })
     .await
-    .map_err(|e| format!("分析任务失败: {}", e))?
+    .map_err(|e| format!("分析任务失败: {}", e))??;
+
+    if let Some(res) = early_exit_res {
+        return Ok(res);
+    }
+    
+    let algorithm_result = algorithm_result.unwrap();
+    let mut final_res = build_algorithm_response(
+        algorithm_result.adjustments.clone(),
+        algorithm_result.style_debug.clone(),
+        &suffix,
+        true,
+    );
+
+    if let Some((ref_img, cur_img)) = ctx_images {
+        if let Some(endpoint) = llm_endpoint {
+            let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
+                "chunk_type": "thinking",
+                "text": "\n\n正在启动视觉大模型进行深度风格匹配...\n",
+                "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+            }));
+            
+            match run_vlm_refinement(
+                &endpoint,
+                llm_api_key.as_deref(),
+                llm_model.as_deref(),
+                &ref_img,
+                &cur_img,
+                &current_adjustments_for_vlm,
+                &algorithm_result.adjustments,
+                &app_handle
+            ).await {
+                Ok(vlm_res) => {
+                    if !vlm_res.understanding.is_empty() {
+                        final_res.understanding = format!("{}\n\n[视觉模型微调]\n{}", final_res.understanding, vlm_res.understanding);
+                    }
+                    if !vlm_res.adjustments.is_empty() {
+                        let mut keyed: HashMap<String, usize> = HashMap::new();
+                        for (idx, s) in final_res.adjustments.iter().enumerate() {
+                            keyed.insert(s.key.clone(), idx);
+                        }
+                        for s in vlm_res.adjustments.clone() {
+                            let candidate = StyleTransferSuggestion {
+                                key: s.key.clone(),
+                                value: s.get_f64_value(),
+                                complex_value: s.complex_value,
+                                label: s.label,
+                                min: s.min,
+                                max: s.max,
+                                reason: s.reason,
+                            };
+                            if let Some(idx) = keyed.get(&candidate.key).copied() {
+                                final_res.adjustments[idx] = candidate;
+                            } else {
+                                keyed.insert(candidate.key.clone(), final_res.adjustments.len());
+                                final_res.adjustments.push(candidate);
+                            }
+                        }
+                    }
+                    let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
+                        "chunk_type": "done",
+                        "text": "",
+                        "result": crate::llm_chat::ChatAdjustResponse {
+                            understanding: final_res.understanding.clone(),
+                            adjustments: final_res.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
+                                key: s.key.clone(),
+                                value: serde_json::json!(s.value),
+                                complex_value: s.complex_value.clone(),
+                                label: s.label.clone(),
+                                min: s.min,
+                                max: s.max,
+                                reason: s.reason.clone()
+                            }).collect(),
+                            style_debug: final_res.style_debug.clone().map(|d| serde_json::to_value(d).unwrap()),
+                            constraint_debug: None
+                        }
+                    }));
+                }
+                Err(e) => {
+                    let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
+                        "chunk_type": "error",
+                        "text": format!("\n视觉模型微调失败: {}\n", e),
+                        "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                    }));
+                }
+            }
+        }
+    } else {
+        let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
+            "chunk_type": "done",
+            "text": "",
+            "result": crate::llm_chat::ChatAdjustResponse {
+                understanding: final_res.understanding.clone(),
+                adjustments: final_res.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
+                    key: s.key.clone(),
+                    value: serde_json::json!(s.value),
+                    complex_value: s.complex_value.clone(),
+                    label: s.label.clone(),
+                    min: s.min,
+                    max: s.max,
+                    reason: s.reason.clone()
+                }).collect(),
+                style_debug: final_res.style_debug.clone().map(|d| serde_json::to_value(d).unwrap()),
+                constraint_debug: None
+            }
+        }));
+    }
+    
+    Ok(final_res)
+}
+
+fn image_to_base64_jpeg(img: &DynamicImage) -> String {
+    let mut buf = Cursor::new(Vec::new());
+    let (w, h) = img.dimensions();
+    let resized = if w > 1024 || h > 1024 {
+        img.resize(1024, 1024, image::imageops::FilterType::Triangle)
+    } else {
+        img.clone()
+    };
+    resized.write_to(&mut buf, image::ImageFormat::Jpeg).unwrap();
+    general_purpose::STANDARD.encode(buf.get_ref())
+}
+
+async fn run_vlm_refinement(
+    endpoint: &str,
+    api_key: Option<&str>,
+    model: Option<&str>,
+    ref_img: &DynamicImage,
+    cur_img: &DynamicImage,
+    current_adjustments: &Value,
+    suggested_adjustments: &[StyleTransferSuggestion],
+    app_handle: &tauri::AppHandle,
+) -> Result<crate::llm_chat::ChatAdjustResponse, String> {
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let model_name = model.unwrap_or("qwen2.5vl:7b").trim();
+    let model_name = if model_name.is_empty() || model_name.eq_ignore_ascii_case("auto") {
+        "qwen2.5vl:7b"
+    } else {
+        model_name
+    };
+
+    let ref_b64 = image_to_base64_jpeg(ref_img);
+    let cur_b64 = image_to_base64_jpeg(cur_img);
+
+    let system_prompt = "你是一位专业摄影师和调色专家。请观察参考图(第一张)和当前图(第二张)，以及初步的参数调整建议。请根据参考图的风格，对当前图的参数进行微调，以达到更好的风格匹配效果。请以JSON格式返回结果，包含understanding和adjustments。";
+    let user_text = format!("当前参数: {}\n初步建议: {}", current_adjustments, serde_json::to_string(suggested_adjustments).unwrap_or_default());
+
+    let messages = json!([
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": user_text
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", ref_b64)
+                    }
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", cur_b64)
+                    }
+                }
+            ]
+        }
+    ]);
+
+    let url = format!("{}/v1/chat/completions", endpoint.trim_end_matches('/'));
+    let request_body = json!({
+        "model": model_name,
+        "messages": messages,
+        "temperature": 0.3,
+        "stream": true
+    });
+
+    let mut req = client.post(&url).json(&request_body);
+    if let Some(key) = api_key {
+        if !key.is_empty() {
+            req = req.bearer_auth(key);
+        }
+    }
+
+    let response = req.send().await.map_err(|e| format!("请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("LLM 返回错误 {}: {}", status, body));
+    }
+
+    let mut full_content = String::new();
+    let mut in_thinking = false;
+    let mut thinking_buffer = String::new();
+
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut line_buffer = String::new();
+    
+    use tauri::Emitter;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("流读取错误: {}", e))?;
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        line_buffer.push_str(&chunk_str);
+
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line = line_buffer[..newline_pos].trim().to_string();
+            line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+            if line.is_empty() || line == "data: [DONE]" {
+                continue;
+            }
+
+            if let Some(json_str) = line.strip_prefix("data: ") {
+                if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                        if delta_content.is_empty() {
+                            continue;
+                        }
+
+                        full_content.push_str(delta_content);
+
+                        if delta_content.contains("<think>") {
+                            in_thinking = true;
+                        }
+
+                        if in_thinking {
+                            thinking_buffer.push_str(delta_content);
+                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            if !clean.is_empty() {
+                                let _ = app_handle.emit(
+                                    "style-transfer-stream",
+                                    json!({
+                                        "chunk_type": "thinking",
+                                        "text": clean,
+                                        "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                                    }),
+                                );
+                            }
+                        }
+
+                        if delta_content.contains("</think>") {
+                            in_thinking = false;
+                            thinking_buffer.clear();
+                            let _ = app_handle.emit(
+                                "style-transfer-stream",
+                                json!({
+                                    "chunk_type": "thinking",
+                                    "text": "\n正在生成微调参数...\n",
+                                    "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let json_str = crate::llm_chat::extract_json(&full_content)?;
+    let parsed: crate::llm_chat::ChatAdjustResponse = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "解析 JSON 失败: {}，原始内容: {}",
+            e,
+            &full_content[..full_content.len().min(500)]
+        )
+    })?;
+
+    Ok(parsed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{DynamicImage, Rgb, RgbImage};
+    use image::{Rgb, RgbImage};
 
     fn assert_finite_features(feat: &StyleFeatures) {
         let values = [

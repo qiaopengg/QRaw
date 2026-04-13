@@ -16,10 +16,12 @@ import {
   Brain,
   ChevronRight,
   SlidersHorizontal,
+  Save,
 } from 'lucide-react';
 import { AppSettings, Invokes } from '../../ui/AppProperties';
 import { Adjustments, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
 import Slider from '../../ui/Slider';
+import { usePresets } from '../../../hooks/usePresets';
 
 const DEFAULT_MODEL = 'auto';
 
@@ -34,9 +36,20 @@ const PRESET_MODELS = [
   { label: 'llama3.2:3b', value: 'llama3.2:3b', desc: '英文场景' },
 ];
 
+const HSL_COLOR_LABELS: Record<string, string> = {
+  reds: '红色',
+  oranges: '橙色',
+  yellows: '黄色',
+  greens: '绿色',
+  aquas: '青色',
+  blues: '蓝色',
+  purples: '紫色',
+  magentas: '洋红',
+};
+
 interface AdjustmentSuggestion {
   key: string;
-  value: number;
+  value: any;
   complex_value?: any;
   label: string;
   min: number;
@@ -151,7 +164,7 @@ interface ChatMessage {
   content: string;
   thinkingContent?: string;
   adjustments?: AdjustmentSuggestion[];
-  appliedValues?: Record<string, number>;
+  appliedValues?: Record<string, any>;
   styleDebug?: StyleDebugInfo;
   constraintDebug?: ConstraintDebugInfo;
 }
@@ -191,7 +204,7 @@ function formatStyleTransferConfig(value: number): string {
   return value.toFixed(2).replace(/\.00$/, '');
 }
 
-function getSimpleAdjustments(adj: Adjustments): Record<string, number> {
+function getSimpleAdjustments(adj: Adjustments): Record<string, any> {
   return {
     exposure: adj.exposure,
     brightness: adj.brightness,
@@ -209,6 +222,7 @@ function getSimpleAdjustments(adj: Adjustments): Record<string, number> {
     structure: adj.structure,
     sharpness: adj.sharpness,
     vignetteAmount: adj.vignetteAmount,
+    hsl: adj.hsl,
   };
 }
 
@@ -216,6 +230,20 @@ function clampAdjustmentValue(key: string, value: number): number {
   if (key === 'exposure') return Math.max(-2.5, Math.min(2.5, Number(value.toFixed(2))));
   if (key === 'sharpness') return Math.max(0, Math.min(100, Math.round(value)));
   return Math.max(-80, Math.min(80, Math.round(value)));
+}
+
+function mergeAdjustments(prev: Adjustments, patch: Partial<Adjustments>): Adjustments {
+  const next = { ...prev, ...patch } as Adjustments;
+  const patchHsl = (patch as any).hsl;
+  if (!patchHsl || typeof patchHsl !== 'object') return next;
+  const prevHsl = (prev as any).hsl || {};
+  const mergedHsl: any = { ...prevHsl };
+  Object.entries(patchHsl).forEach(([color, values]) => {
+    if (!values || typeof values !== 'object') return;
+    mergedHsl[color] = { ...(prevHsl[color] || {}), ...(values as any) };
+  });
+  (next as any).hsl = mergedHsl;
+  return next;
 }
 
 // 检测 Ollama 是否在线
@@ -300,6 +328,14 @@ export default function ChatPanel({
     formatStyleTransferConfig(styleTransferHighlightGuard ?? 1.0),
   );
   const [skinProtectInput, setSkinProtectInput] = useState(formatStyleTransferConfig(styleTransferSkinProtect ?? 1.0));
+  const [pureStyleTransfer, setPureStyleTransfer] = useState(true);
+  const [enableStyleTransferLut, setEnableStyleTransferLut] = useState(true);
+  const [enableStyleTransferExpertPreset, setEnableStyleTransferExpertPreset] = useState(true);
+  const [enableStyleTransferFeatureMapping, setEnableStyleTransferFeatureMapping] = useState(true);
+  const [enableStyleTransferAutoRefine, setEnableStyleTransferAutoRefine] = useState(true);
+  const [enableStyleTransferVlm, setEnableStyleTransferVlm] = useState(true);
+
+  const { addPreset } = usePresets(adjustments);
 
   const saveStyleTransferConfig = useCallback(
     (key: 'styleTransferStrength' | 'styleTransferHighlightGuard' | 'styleTransferSkinProtect', raw: string) => {
@@ -394,6 +430,35 @@ export default function ChatPanel({
     [setAdjustments],
   );
 
+  const handleHslSliderChange = useCallback(
+    (
+      msgId: string,
+      color: string,
+      channel: 'hue' | 'saturation' | 'luminance',
+      e: { target: { value: number | string } } | React.ChangeEvent<HTMLInputElement>,
+    ) => {
+      const numericValue = parseFloat(String(e.target.value));
+      if (isNaN(numericValue)) return;
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== msgId || !msg.adjustments) return msg;
+          const keyPath = `hsl.${color}.${channel}`;
+          return { ...msg, appliedValues: { ...(msg.appliedValues || {}), [keyPath]: numericValue } };
+        }),
+      );
+      setAdjustments((prev) =>
+        mergeAdjustments(prev, {
+          hsl: {
+            [color]: {
+              [channel]: numericValue,
+            },
+          },
+        } as any),
+      );
+    },
+    [setAdjustments],
+  );
+
   const applyAllSuggestions = useCallback(
     (msg: ChatMessage) => {
       if (!msg.adjustments) return;
@@ -401,7 +466,7 @@ export default function ChatPanel({
       msg.adjustments.forEach((s) => {
         (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
       });
-      setAdjustments((prev) => ({ ...prev, ...updates }));
+      setAdjustments((prev) => mergeAdjustments(prev, updates));
     },
     [setAdjustments],
   );
@@ -452,8 +517,10 @@ export default function ChatPanel({
 
     const history: LlmChatMessage[] = messages.map((m) => {
       if (m.role === 'assistant' && m.adjustments && m.adjustments.length > 0) {
+        const formatApplied = (v: any) =>
+          v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v);
         const adjSummary = m.adjustments
-          .map((a) => `${a.label}(${a.key}): ${m.appliedValues?.[a.key] ?? a.value}`)
+          .map((a) => `${a.label}(${a.key}): ${formatApplied(m.appliedValues?.[a.key] ?? a.value)}`)
           .join(', ');
         return { role: m.role, content: `${m.content}\n[已应用调整: ${adjSummary}]` };
       }
@@ -478,9 +545,9 @@ export default function ChatPanel({
         // 流结束，更新最终结果
         const updates: Partial<Adjustments> = {};
         result.adjustments.forEach((s) => {
-          (updates as Record<string, number>)[s.key] = s.value;
+          (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
         });
-        if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+        if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
 
         setMessages((prev) =>
           prev.map((msg) =>
@@ -489,7 +556,9 @@ export default function ChatPanel({
                   ...msg,
                   content: result.understanding,
                   adjustments: result.adjustments,
-                  appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                  appliedValues: Object.fromEntries(
+                    result.adjustments.map((s) => [s.key, s.complex_value !== undefined ? s.complex_value : s.value]),
+                  ),
                   styleDebug: result.style_debug,
                   constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                 }
@@ -593,7 +662,7 @@ export default function ChatPanel({
           result.adjustments.forEach((s) => {
             (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
           });
-          if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+          if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
 
           setMessages((prev) =>
             prev.map((msg) =>
@@ -602,7 +671,9 @@ export default function ChatPanel({
                     ...msg,
                     content: result.understanding,
                     adjustments: result.adjustments,
-                    appliedValues: Object.fromEntries(result.adjustments.map((s) => [s.key, s.value])),
+                    appliedValues: Object.fromEntries(
+                      result.adjustments.map((s) => [s.key, s.complex_value !== undefined ? s.complex_value : s.value]),
+                    ),
                     styleDebug: result.style_debug,
                     constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                   }
@@ -620,13 +691,22 @@ export default function ChatPanel({
           styleStrength: tuning.styleStrength,
           highlightGuardStrength: tuning.highlightGuardStrength,
           skinProtectStrength: tuning.skinProtectStrength,
+          pureAlgorithm: pureStyleTransfer,
+          enableExpertPreset: enableStyleTransferExpertPreset,
+          enableFeatureMapping: enableStyleTransferFeatureMapping,
+          enableAutoRefine: enableStyleTransferAutoRefine,
+          enableLut: enableStyleTransferLut,
+          enableVlm: enableStyleTransferVlm,
+          llmEndpoint: endpoint,
+          llmApiKey: llmApiKey || null,
+          llmModel: activeModel || null,
         });
 
         const updates: Partial<Adjustments> = {};
         result.adjustments.forEach((s) => {
           (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
         });
-        if (Object.keys(updates).length > 0) setAdjustments((prev) => ({ ...prev, ...updates }));
+        if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
 
         setMessages((prev) =>
           prev.map((msg) =>
@@ -863,6 +943,64 @@ export default function ChatPanel({
                     className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
                   />
                 </label>
+                <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                  <span>纯算法（仅 Curves + HSL）</span>
+                  <input
+                    type="checkbox"
+                    checked={pureStyleTransfer}
+                    onChange={(e) => setPureStyleTransfer(e.target.checked)}
+                    className="accent-blue-500"
+                  />
+                </label>
+                {!pureStyleTransfer && (
+                  <div className="space-y-1">
+                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                      <span>启用 LUT</span>
+                      <input
+                        type="checkbox"
+                        checked={enableStyleTransferLut}
+                        onChange={(e) => setEnableStyleTransferLut(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                      <span>启用专家预设</span>
+                      <input
+                        type="checkbox"
+                        checked={enableStyleTransferExpertPreset}
+                        onChange={(e) => setEnableStyleTransferExpertPreset(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                      <span>启用特征映射</span>
+                      <input
+                        type="checkbox"
+                        checked={enableStyleTransferFeatureMapping}
+                        onChange={(e) => setEnableStyleTransferFeatureMapping(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                      <span>启用自动 refine</span>
+                      <input
+                        type="checkbox"
+                        checked={enableStyleTransferAutoRefine}
+                        onChange={(e) => setEnableStyleTransferAutoRefine(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                      <span>启用 VLM 微调</span>
+                      <input
+                        type="checkbox"
+                        checked={enableStyleTransferVlm}
+                        onChange={(e) => setEnableStyleTransferVlm(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                    </label>
+                  </div>
+                )}
                 <label className="space-y-1 block">
                   <span className="text-[9px] text-text-secondary/85">高光保护</span>
                   <input
@@ -1086,17 +1224,73 @@ export default function ChatPanel({
                   )}
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-text-secondary">{t('chat.suggestions')}</span>
-                    <button
-                      onClick={() => applyAllSuggestions(msg)}
-                      className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-                    >
-                      {t('chat.applyAll')}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          const updates: Partial<Adjustments> = {};
+                          msg.adjustments?.forEach((s) => {
+                            (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
+                          });
+                          applyAllSuggestions(msg);
+                          const name = prompt('请输入预设名称', 'AI 预设');
+                          if (name) addPreset(name, null, updates);
+                        }}
+                        className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
+                        title="将当前调整保存为预设"
+                      >
+                        <Save size={10} />
+                        保存为预设
+                      </button>
+                      <button
+                        onClick={() => applyAllSuggestions(msg)}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                      >
+                        {t('chat.applyAll')}
+                      </button>
+                    </div>
                   </div>
                   {msg.adjustments.map((s) => (
                     <div key={s.key} className="space-y-0.5">
                       {s.reason && <p className="text-[9px] text-text-secondary opacity-60">{s.reason}</p>}
-                      {s.complex_value !== undefined ? (
+                      {s.key === 'hsl' && s.complex_value !== undefined && typeof s.complex_value === 'object' ? (
+                        <div className="rounded border border-surface bg-surface/30 px-2 py-1.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-text-primary">{s.label || '颜色混合器'}</span>
+                            <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                              HSL
+                            </span>
+                          </div>
+                          {Object.entries(s.complex_value as Record<string, any>).map(([color, v]) => (
+                            <div key={color} className="space-y-0.5">
+                              <div className="text-[9px] text-text-secondary/80">{HSL_COLOR_LABELS[color] || color}</div>
+                              <Slider
+                                label="色相"
+                                min={-100}
+                                max={100}
+                                step={1}
+                                value={(adjustments.hsl as any)?.[color]?.hue ?? 0}
+                                onChange={(e) => handleHslSliderChange(msg.id, color, 'hue', e)}
+                              />
+                              <Slider
+                                label="饱和度"
+                                min={-100}
+                                max={100}
+                                step={1}
+                                value={(adjustments.hsl as any)?.[color]?.saturation ?? 0}
+                                onChange={(e) => handleHslSliderChange(msg.id, color, 'saturation', e)}
+                              />
+                              <Slider
+                                label="明度"
+                                min={-100}
+                                max={100}
+                                step={1}
+                                value={(adjustments.hsl as any)?.[color]?.luminance ?? 0}
+                                onChange={(e) => handleHslSliderChange(msg.id, color, 'luminance', e)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : s.complex_value !== undefined ? (
                         <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">
                           <span className="text-[10px] text-text-primary">{s.label}</span>
                           <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
