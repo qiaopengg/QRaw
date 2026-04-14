@@ -4,7 +4,7 @@ use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use image::imageops::{self, FilterType};
 use image::{
     DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma, Rgb, Rgb32FImage, Rgba, RgbaImage,
@@ -62,11 +62,17 @@ const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b5
 const CULL_FACE_DETECTOR_FILENAME: &str = "yolov8n-face.onnx";
 const CULL_EXPRESSION_FILENAME: &str = "face_expression.onnx";
 const CULL_AESTHETIC_FILENAME: &str = "nima.onnx";
+const CULL_YUNET_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
 
 const DEFAULT_CULL_EXPRESSION_URL: &str =
     "https://huggingface.co/JackCui/facefusion/resolve/main/face_landmarker_5_68.onnx?download=true";
 const DEFAULT_CULL_EXPRESSION_SHA256: &str =
     "ea05f7d9d014ae1d9cdc6e9c72643d8f00d198b5db3fdd384148ddff499a613e";
+
+const DEFAULT_CULL_YUNET_URL: &str =
+    "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
+const DEFAULT_CULL_YUNET_SHA256: &str =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
@@ -83,6 +89,7 @@ pub struct ClipModels {
 
 pub struct CullingModels {
     pub face_detector: Mutex<Session>,
+    pub yunet_detector: Option<Mutex<Session>>,
     pub expression_model: Option<Mutex<Session>>,
     pub aesthetic_model: Option<Mutex<Session>>,
 }
@@ -660,6 +667,9 @@ pub async fn get_or_init_culling_models(
 
     let face_url = get_model_env("FACE_DETECTOR", "URL");
     let face_sha = get_model_env("FACE_DETECTOR", "SHA256");
+    let yunet_url = get_model_env("YUNET", "URL").or_else(|| Some(DEFAULT_CULL_YUNET_URL.to_string()));
+    let yunet_sha =
+        get_model_env("YUNET", "SHA256").or_else(|| Some(DEFAULT_CULL_YUNET_SHA256.to_string()));
     let expr_url = get_model_env("EXPRESSION", "URL").or_else(|| Some(DEFAULT_CULL_EXPRESSION_URL.to_string()));
     let expr_sha =
         get_model_env("EXPRESSION", "SHA256").or_else(|| Some(DEFAULT_CULL_EXPRESSION_SHA256.to_string()));
@@ -675,6 +685,15 @@ pub async fn get_or_init_culling_models(
         face_sha.as_deref(),
     )
     .await?;
+    let yunet_path = ensure_model(
+        app_handle,
+        &models_dir,
+        CULL_YUNET_FILENAME,
+        "YUNET",
+        yunet_url.as_deref(),
+        yunet_sha.as_deref(),
+    )
+    .await.ok();
     let expr_path = ensure_model(
         app_handle,
         &models_dir,
@@ -698,6 +717,11 @@ pub async fn get_or_init_culling_models(
     let _ = ort::init().with_name("AI-Culling").commit();
 
     let face_detector = Session::builder()?.commit_from_file(face_path)?;
+    let yunet_detector = if let Some(p) = yunet_path {
+        Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
+    } else {
+        None
+    };
     let expression_model = if let Some(p) = expr_path {
         Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
     } else { None };
@@ -709,6 +733,7 @@ pub async fn get_or_init_culling_models(
 
     let models = Arc::new(CullingModels {
         face_detector: Mutex::new(face_detector),
+        yunet_detector,
         expression_model,
         aesthetic_model,
     });
@@ -738,6 +763,16 @@ pub struct FaceBox {
     pub x2: f32,
     pub y2: f32,
     pub score: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct YunetFace {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub score: f32,
+    pub landmarks: [(f32, f32); 5],
 }
 
 fn sigmoid(x: f32) -> f32 {
@@ -794,6 +829,35 @@ fn nms(mut boxes: Vec<FaceBox>, iou_thresh: f32) -> Vec<FaceBox> {
     kept
 }
 
+fn iou_yunet(a: &YunetFace, b: &YunetFace) -> f32 {
+    let x1 = a.x1.max(b.x1);
+    let y1 = a.y1.max(b.y1);
+    let x2 = a.x2.min(b.x2);
+    let y2 = a.y2.min(b.y2);
+    let w = (x2 - x1).max(0.0);
+    let h = (y2 - y1).max(0.0);
+    let inter = w * h;
+    let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
+    let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
+    let union = area_a + area_b - inter;
+    if union <= 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
+fn nms_yunet(mut faces: Vec<YunetFace>, iou_thresh: f32) -> Vec<YunetFace> {
+    faces.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let mut kept: Vec<YunetFace> = Vec::new();
+    for f in faces {
+        if kept.iter().all(|k| iou_yunet(k, &f) < iou_thresh) {
+            kept.push(f);
+        }
+    }
+    kept
+}
+
 fn letterbox_rgb_nchw_0_1(image: &DynamicImage, size: u32) -> (Array4<f32>, f32, f32, f32) {
     let rgb = image.to_rgb8();
     let (w, h) = rgb.dimensions();
@@ -816,6 +880,20 @@ fn letterbox_rgb_nchw_0_1(image: &DynamicImage, size: u32) -> (Array4<f32>, f32,
         arr[[0, 2, yf, xf]] = p[2] as f32 / 255.0;
     }
     (arr, scale, pad_x as f32, pad_y as f32)
+}
+
+fn resize_rgb_nchw_0_255(image: &DynamicImage, w: u32, h: u32) -> Array4<f32> {
+    let rgb = image.to_rgb8();
+    let resized = imageops::resize(&rgb, w, h, FilterType::Triangle);
+    let mut arr = Array4::<f32>::zeros((1, 3, h as usize, w as usize));
+    for (x, y, p) in resized.enumerate_pixels() {
+        let xf = x as usize;
+        let yf = y as usize;
+        arr[[0, 0, yf, xf]] = p[0] as f32;
+        arr[[0, 1, yf, xf]] = p[1] as f32;
+        arr[[0, 2, yf, xf]] = p[2] as f32;
+    }
+    arr
 }
 
 pub fn detect_faces_yolov8(
@@ -911,6 +989,89 @@ pub fn detect_faces_yolov8(
     Ok(nms(boxes, iou_thresh))
 }
 
+pub fn detect_faces_yunet(image: &DynamicImage, yunet_mutex: &Mutex<Session>) -> Result<Vec<YunetFace>> {
+    let input_size: u32 = env::var("QRAW_YUNET_INPUT_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(320);
+    let conf_thresh: f32 = env::var("QRAW_YUNET_CONF_THRESH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.6);
+    let iou_thresh: f32 = env::var("QRAW_YUNET_IOU_THRESH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.3);
+
+    let (img_w, img_h) = image.dimensions();
+    if img_w == 0 || img_h == 0 {
+        return Ok(Vec::new());
+    }
+
+    let input = resize_rgb_nchw_0_255(image, input_size, input_size);
+    let input_dyn = input.into_dyn();
+    let input_val = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
+
+    let out_dyn = {
+        let mut session = yunet_mutex.lock().unwrap();
+        let outputs = session.run(ort::inputs![input_val])?;
+        outputs[0].try_extract_array::<f32>()?.to_owned()
+    };
+    let shape = out_dyn.shape().to_vec();
+    let flat = out_dyn.into_raw_vec();
+
+    let (num, stride) = match shape.as_slice() {
+        [1, n, m] => (*n, *m),
+        [n, m] => (*n, *m),
+        _ => return Ok(Vec::new()),
+    };
+    if stride < 15 {
+        return Ok(Vec::new());
+    }
+
+    let sx = img_w as f32 / input_size as f32;
+    let sy = img_h as f32 / input_size as f32;
+
+    let mut faces: Vec<YunetFace> = Vec::new();
+    for i in 0..num {
+        let base = i * stride;
+        if base + 14 >= flat.len() {
+            break;
+        }
+        let x = flat[base + 0];
+        let y = flat[base + 1];
+        let w = flat[base + 2];
+        let h = flat[base + 3];
+        let score = flat[base + 4];
+        if score < conf_thresh {
+            continue;
+        }
+        let x1 = (x * sx).clamp(0.0, img_w as f32);
+        let y1 = (y * sy).clamp(0.0, img_h as f32);
+        let x2 = ((x + w) * sx).clamp(0.0, img_w as f32);
+        let y2 = ((y + h) * sy).clamp(0.0, img_h as f32);
+        if x2 <= x1 || y2 <= y1 {
+            continue;
+        }
+        let mut lms = [(0.0f32, 0.0f32); 5];
+        for k in 0..5 {
+            let lx = flat[base + 5 + k * 2] * sx;
+            let ly = flat[base + 6 + k * 2] * sy;
+            lms[k] = (lx.clamp(0.0, img_w as f32), ly.clamp(0.0, img_h as f32));
+        }
+        faces.push(YunetFace {
+            x1,
+            y1,
+            x2,
+            y2,
+            score,
+            landmarks: lms,
+        });
+    }
+
+    Ok(nms_yunet(faces, iou_thresh))
+}
+
 pub fn run_expression_model(
     face_crop: &DynamicImage,
     expression_mutex: &Mutex<Session>,
@@ -973,73 +1134,112 @@ pub fn run_expression_model(
         }
 
         if flat.len() >= 136 && flat.len() % 2 == 0 {
-        let mut pts: Vec<(f32, f32)> = Vec::with_capacity(flat.len() / 2);
-        for i in 0..(flat.len() / 2) {
-            pts.push((flat[i * 2], flat[i * 2 + 1]));
-        }
+            let mut pts: Vec<(f32, f32)> = Vec::with_capacity(flat.len() / 2);
+            for i in 0..(flat.len() / 2) {
+                pts.push((flat[i * 2], flat[i * 2 + 1]));
+            }
+
             let max_abs = pts
-            .iter()
-            .map(|(x, y)| x.abs().max(y.abs()))
-            .fold(0.0f32, |a, b| a.max(b));
+                .iter()
+                .map(|(x, y)| x.abs().max(y.abs()))
+                .fold(0.0f32, |a, b| a.max(b));
             if max_abs <= 2.0 {
                 let s = size as f32;
-            for p in pts.iter_mut() {
-                p.0 *= s;
-                p.1 *= s;
+                for p in pts.iter_mut() {
+                    p.0 *= s;
+                    p.1 *= s;
+                }
             }
-        }
 
-        let dist = |a: (f32, f32), b: (f32, f32)| -> f32 {
-            let dx = a.0 - b.0;
-            let dy = a.1 - b.1;
-            (dx * dx + dy * dy).sqrt()
-        };
+            let dist = |a: (f32, f32), b: (f32, f32)| -> f32 {
+                let dx = a.0 - b.0;
+                let dy = a.1 - b.1;
+                (dx * dx + dy * dy).sqrt()
+            };
 
-        let eye_ear = |p: &[(f32, f32)], base: usize| -> f32 {
-            let p1 = p[base + 0];
-            let p2 = p[base + 1];
-            let p3 = p[base + 2];
-            let p4 = p[base + 3];
-            let p5 = p[base + 4];
-            let p6 = p[base + 5];
-            let a = dist(p2, p6);
-            let b = dist(p3, p5);
-            let c = dist(p1, p4).max(1e-6);
-            (a + b) / (2.0 * c)
-        };
+            let mean_pt = |p: &[(f32, f32)]| -> (f32, f32) {
+                if p.is_empty() {
+                    return (0.0, 0.0);
+                }
+                let mut sx = 0.0f32;
+                let mut sy = 0.0f32;
+                for (x, y) in p {
+                    sx += *x;
+                    sy += *y;
+                }
+                (sx / p.len() as f32, sy / p.len() as f32)
+            };
+
+            let rotate = |pt: (f32, f32), c: (f32, f32), cos_t: f32, sin_t: f32| -> (f32, f32) {
+                let x = pt.0 - c.0;
+                let y = pt.1 - c.1;
+                (x * cos_t - y * sin_t + c.0, x * sin_t + y * cos_t + c.1)
+            };
+
+            let eye_ear = |p: &[(f32, f32)], base: usize| -> f32 {
+                let p1 = p[base + 0];
+                let p2 = p[base + 1];
+                let p3 = p[base + 2];
+                let p4 = p[base + 3];
+                let p5 = p[base + 4];
+                let p6 = p[base + 5];
+                let a = dist(p2, p6);
+                let b = dist(p3, p5);
+                let c = dist(p1, p4).max(1e-6);
+                (a + b) / (2.0 * c)
+            };
 
             if pts.len() >= 68 {
-            let ear_r = eye_ear(&pts, 36);
-            let ear_l = eye_ear(&pts, 42);
-            let ear = ((ear_r + ear_l) / 2.0).clamp(0.0, 1.0);
-            let thr = env::var("QRAW_EAR_BLINK_THRESH")
-                .ok()
-                .and_then(|v| v.parse::<f32>().ok())
-                .unwrap_or(0.21);
-            let width = env::var("QRAW_EAR_BLINK_WIDTH")
-                .ok()
-                .and_then(|v| v.parse::<f32>().ok())
-                .unwrap_or(0.08)
-                .max(1e-6);
-            let blink_prob = ((thr - ear) / width).clamp(0.0, 1.0);
+                let re = mean_pt(&pts[36..42]);
+                let le = mean_pt(&pts[42..48]);
+                let iod = dist(re, le);
+                if iod < 18.0 {
+                    return Err(anyhow!("landmarks_too_small"));
+                }
 
-            let mouth_w = dist(pts[48], pts[54]);
-            let mouth_h = dist(pts[51], pts[57]).max(1e-6);
-            let ratio = mouth_w / mouth_h;
-            let smile_thr = env::var("QRAW_SMILE_RATIO_THRESH")
-                .ok()
-                .and_then(|v| v.parse::<f32>().ok())
-                .unwrap_or(2.0);
-            let smile_width = env::var("QRAW_SMILE_RATIO_WIDTH")
-                .ok()
-                .and_then(|v| v.parse::<f32>().ok())
-                .unwrap_or(1.0)
-                .max(1e-6);
-            let smile_prob = ((ratio - smile_thr) / smile_width).clamp(0.0, 1.0);
+                let angle = (le.1 - re.1).atan2(le.0 - re.0);
+                let cos_t = (-angle).cos();
+                let sin_t = (-angle).sin();
+                let center = ((re.0 + le.0) * 0.5, (re.1 + le.1) * 0.5);
+                for p in pts.iter_mut() {
+                    *p = rotate(*p, center, cos_t, sin_t);
+                }
 
-            return Ok((blink_prob, smile_prob));
+                let ear_r = eye_ear(&pts, 36);
+                let ear_l = eye_ear(&pts, 42);
+
+                let thr = env::var("QRAW_EAR_BLINK_THRESH")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.21);
+                let width = env::var("QRAW_EAR_BLINK_WIDTH")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.08)
+                    .max(1e-6);
+                let blink_r = ((thr - ear_r) / width).clamp(0.0, 1.0);
+                let blink_l = ((thr - ear_l) / width).clamp(0.0, 1.0);
+                let blink_prob = blink_r.max(blink_l);
+
+                let mouth_w = dist(pts[48], pts[54]).max(1e-6);
+                let inner_h = dist(pts[62], pts[66]);
+                let outer_h = dist(pts[51], pts[57]);
+                let mouth_h = if inner_h > 1e-3 { inner_h } else { outer_h }.max(1e-6);
+                let ratio = mouth_w / mouth_h;
+                let smile_thr = env::var("QRAW_SMILE_RATIO_THRESH")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(2.0);
+                let smile_width = env::var("QRAW_SMILE_RATIO_WIDTH")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(1.0)
+                    .max(1e-6);
+                let smile_prob = ((ratio - smile_thr) / smile_width).clamp(0.0, 1.0);
+
+                return Ok((blink_prob, smile_prob));
+            }
         }
-    }
         let eye_val = *flat.get(eye_idx).unwrap_or(&flat[0]);
         let smile_val = *flat.get(smile_idx).unwrap_or_else(|| flat.get(1).unwrap_or(&flat[0]));
 

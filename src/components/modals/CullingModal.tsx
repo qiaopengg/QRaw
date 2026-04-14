@@ -495,6 +495,11 @@ export default function CullingModal({
                                   {formatReasons(group.representative.reasons)}
                                 </Text>
                               )}
+                              {group.representative.faceDetectorType && (
+                                <Text as="div" variant={TextVariants.small} color={TextColors.secondary}>
+                                  Face: {group.representative.faceDetectorType}
+                                </Text>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -517,6 +522,11 @@ export default function CullingModal({
                                 {dup.reasons?.length > 0 && (
                                   <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
                                     {formatReasons(dup.reasons)}
+                                  </Text>
+                                )}
+                                {dup.faceDetectorType && (
+                                  <Text as="div" variant={TextVariants.small} color={TextColors.secondary}>
+                                    Face: {dup.faceDetectorType}
                                   </Text>
                                 )}
                               </ImageThumbnail>
@@ -544,6 +554,11 @@ export default function CullingModal({
                       {img.reasons?.length > 0 && (
                         <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
                           {formatReasons(img.reasons)}
+                        </Text>
+                      )}
+                      {img.faceDetectorType && (
+                        <Text as="div" variant={TextVariants.small} color={TextColors.secondary}>
+                          Face: {img.faceDetectorType}
                         </Text>
                       )}
                     </ImageThumbnail>

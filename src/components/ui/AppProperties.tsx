@@ -348,6 +348,8 @@ export interface ImageAnalysisResult {
   height: number;
   suggestedRating: number;
   reasons: string[];
+  scoreBreakdown?: Record<string, number>;
+  faceDetectorType?: string;
 }
 
 export interface CullGroup {
