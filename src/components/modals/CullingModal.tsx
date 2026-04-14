@@ -98,12 +98,14 @@ export default function CullingModal({
     similarityThreshold: 28,
     filterBlurry: true,
     blurThreshold: 100.0,
+    checkExpression: true,
+    expressionStrictness: 50,
     profile: 'default',
   });
 
   const [selectedRejects, setSelectedRejects] = useState<Set<string>>(new Set());
   const [action, setAction] = useState<CullAction>('reject');
-  const [activeTab, setActiveTab] = useState<'similar' | 'blurry'>('similar');
+  const [activeTab, setActiveTab] = useState<'similar' | 'blurry' | 'badExpressions'>('similar');
 
   const actionOptions = useMemo(() => getCullActions(t), [t]);
 
@@ -152,12 +154,12 @@ export default function CullingModal({
     if (!isOpen) return;
     setSettings((s) => {
       if (preset === 'balanced') {
-        return { ...s, groupSimilar: true, similarityThreshold: 28, filterBlurry: true, blurThreshold: 100.0 };
+        return { ...s, groupSimilar: true, similarityThreshold: 28, filterBlurry: true, blurThreshold: 100.0, checkExpression: true, expressionStrictness: 50 };
       }
       if (preset === 'conservative') {
-        return { ...s, groupSimilar: true, similarityThreshold: 22, filterBlurry: true, blurThreshold: 75.0 };
+        return { ...s, groupSimilar: true, similarityThreshold: 22, filterBlurry: true, blurThreshold: 75.0, checkExpression: true, expressionStrictness: 20 };
       }
-      return { ...s, groupSimilar: true, similarityThreshold: 36, filterBlurry: true, blurThreshold: 150.0 };
+      return { ...s, groupSimilar: true, similarityThreshold: 36, filterBlurry: true, blurThreshold: 150.0, checkExpression: true, expressionStrictness: 80 };
     });
   }, [preset, isOpen]);
 
@@ -205,12 +207,20 @@ export default function CullingModal({
     setSelectedRejects(next);
   };
 
+  const handleSelectAllBadExpr = () => {
+    if (!suggestions) return;
+    const next = new Set<string>();
+    suggestions.badExpressions?.forEach((img) => next.add(img.path));
+    setSelectedRejects(next);
+  };
+
   const handleClearSelection = () => {
     setSelectedRejects(new Set());
   };
 
   const numSimilar = suggestions?.similarGroups.reduce((acc, group) => acc + group.duplicates.length, 0) || 0;
   const numBlurry = suggestions?.blurryImages.length || 0;
+  const numBadExpr = suggestions?.badExpressions?.length || 0;
 
   const renderSettings = () => (
     <>
@@ -314,6 +324,29 @@ export default function CullingModal({
                 </div>
               )}
             </div>
+            <div>
+              <Switch
+                label={t('culling.checkExpression') || 'Check Facial Expressions'}
+                checked={settings.checkExpression}
+                onChange={(v) => setSettings((s) => ({ ...s, checkExpression: v }))}
+              />
+              {settings.checkExpression && (
+                <div className="mt-2 pl-4 border-l-2 border-border-color ml-1">
+                  <Slider
+                    label={t('culling.expressionStrictness') || 'Expression Strictness'}
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={settings.expressionStrictness}
+                    defaultValue={50}
+                    onChange={(e) => setSettings((s) => ({ ...s, expressionStrictness: Number(e.target.value) }))}
+                  />
+                  <Text variant={TextVariants.small} className="mt-1">
+                    {t('culling.expressionStrictnessDescription') || 'Higher values penalize unnatural expressions more strictly.'}
+                  </Text>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -396,8 +429,8 @@ export default function CullingModal({
             </Text>
           </div>
         </div>
-        <div className="border-b border-surface mb-4 shrink-0">
-          <nav className="-mb-px flex space-x-4" aria-label="Tabs">
+        <div className="border-b border-surface mb-4 shrink-0 overflow-x-auto">
+          <nav className="-mb-px flex space-x-4 min-w-max px-2" aria-label="Tabs">
             {numSimilar > 0 && (
               <button
                 onClick={() => setActiveTab('similar')}
@@ -424,6 +457,19 @@ export default function CullingModal({
                 <span className="bg-surface text-text-secondary rounded-full px-2 py-0.5 text-xs">{numBlurry}</span>
               </button>
             )}
+            {numBadExpr > 0 && (
+              <button
+                onClick={() => setActiveTab('badExpressions')}
+                className={`${
+                  activeTab === 'badExpressions'
+                    ? 'border-accent text-accent'
+                    : 'border-transparent text-text-secondary hover:text-text-primary hover:border-gray-300'
+                } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm`}
+              >
+                {t('culling.badExpressions') || 'Bad Expressions'}{' '}
+                <span className="bg-surface text-text-secondary rounded-full px-2 py-0.5 text-xs">{numBadExpr}</span>
+              </button>
+            )}
           </nav>
         </div>
 
@@ -446,6 +492,15 @@ export default function CullingModal({
                   onClick={handleSelectAllBlurry}
                 >
                   {t('culling.selectAllBlurry')}
+                </button>
+              )}
+              {activeTab === 'badExpressions' && numBadExpr > 0 && (
+                <button
+                  type="button"
+                  className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
+                  onClick={handleSelectAllBadExpr}
+                >
+                  {t('culling.selectAllBadExpr') || 'Select All'}
                 </button>
               )}
               <button
@@ -550,6 +605,33 @@ export default function CullingModal({
                     >
                       <Text as="div" variant={TextVariants.small} color={TextColors.white}>
                         {t('culling.sharpnessScore', { score: img.sharpnessMetric.toFixed(0) })}
+                      </Text>
+                      {img.reasons?.length > 0 && (
+                        <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
+                          {formatReasons(img.reasons)}
+                        </Text>
+                      )}
+                      {img.faceDetectorType && (
+                        <Text as="div" variant={TextVariants.small} color={TextColors.secondary}>
+                          Face: {img.faceDetectorType}
+                        </Text>
+                      )}
+                    </ImageThumbnail>
+                  ))}
+                </div>
+              )}
+              {activeTab === 'badExpressions' && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  {suggestions.badExpressions?.map((img) => (
+                    <ImageThumbnail
+                      key={img.path}
+                      path={img.path}
+                      thumbnails={thumbnails}
+                      isSelected={selectedRejects.has(img.path)}
+                      onToggle={() => handleToggleReject(img.path)}
+                    >
+                      <Text as="div" variant={TextVariants.small} color={TextColors.white}>
+                        {t('culling.score', { score: img.qualityScore.toFixed(2) })}
                       </Text>
                       {img.reasons?.length > 0 && (
                         <Text as="div" variant={TextVariants.small} color={TextColors.accent}>

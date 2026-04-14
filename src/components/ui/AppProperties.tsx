@@ -335,6 +335,8 @@ export interface CullingSettings {
   blurThreshold: number;
   groupSimilar: boolean;
   filterBlurry: boolean;
+  checkExpression: boolean;
+  expressionStrictness: number;
   profile: CullingProfile;
 }
 
@@ -360,5 +362,6 @@ export interface CullGroup {
 export interface CullingSuggestions {
   similarGroups: CullGroup[];
   blurryImages: ImageAnalysisResult[];
+  badExpressions: ImageAnalysisResult[];
   failedPaths: string[];
 }

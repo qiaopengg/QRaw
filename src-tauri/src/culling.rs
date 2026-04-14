@@ -42,10 +42,22 @@ pub struct CullingSettings {
     pub filter_blurry: bool,
     #[serde(default = "default_culling_profile")]
     pub profile: CullingProfile,
+    #[serde(default = "default_true")]
+    pub check_expression: bool,
+    #[serde(default = "default_expression_strictness")]
+    pub expression_strictness: u32,
 }
 
 fn default_culling_profile() -> CullingProfile {
     CullingProfile::Default
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_expression_strictness() -> u32 {
+    50
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -84,6 +96,7 @@ pub struct CullGroup {
 pub struct CullingSuggestions {
     pub similar_groups: Vec<CullGroup>,
     pub blurry_images: Vec<ImageAnalysisResult>,
+    pub bad_expressions: Vec<ImageAnalysisResult>,
     pub failed_paths: Vec<String>,
 }
 
@@ -267,6 +280,8 @@ fn analyze_image(
     linear_mode: String,
     profile: &CullingProfile,
     blur_threshold: f64,
+    check_expression: bool,
+    expression_strictness: u32,
     clip_models: Option<&ClipModels>,
     clip_text_inputs: Option<&(Vec<String>, Vec<i64>, Vec<i64>, usize)>,
     culling_models: Option<&CullingModels>,
@@ -310,8 +325,6 @@ fn analyze_image(
     .to_image();
     let center_focus_metric = calculate_laplacian_variance(&center_crop);
 
-    let mut reasons: Vec<String> = Vec::new();
-    let mut face_score: Option<f64> = None;
     let mut max_face_area_ratio: f64 = 0.0;
     let mut blink_prob: f64 = 0.0;
     let mut smile_prob: f64 = 0.0;
@@ -320,10 +333,21 @@ fn analyze_image(
     let mut clip_vec: Option<Vec<f32>> = None;
     let mut primary_face_bbox: Option<(u32, u32, u32, u32)> = None;
 
+    let mut face_score: Option<f64> = None;
+    let mut unnatural_expression_max = 0.0;
+    let expression_strictness_factor = (expression_strictness.min(100) as f64) / 100.0;
+    
+    // Default 0.6. Strictness 0 -> 0.9, 50 -> 0.6, 100 -> 0.3
+    let blink_thresh = 0.9 - 0.6 * expression_strictness_factor;
+    // Default 0.5. Strictness 0 -> 0.8, 50 -> 0.5, 100 -> 0.2
+    let unnatural_thresh = 0.8 - 0.6 * expression_strictness_factor;
+
     let is_portrait_profile = matches!(profile, CullingProfile::Portrait);
-    let exp_skip = if is_portrait_profile { 4.5 } else { 3.0 };
-    let shadow_skip = if is_portrait_profile { 85.0 } else { 60.0 };
-    let highlight_skip = if is_portrait_profile { 85.0 } else { 60.0 };
+    let is_landscape_profile = matches!(profile, CullingProfile::Landscape);
+
+    let exp_skip = if is_portrait_profile { 4.5 } else if is_landscape_profile { 5.0 } else { 3.0 };
+    let shadow_skip = if is_portrait_profile { 85.0 } else if is_landscape_profile { 95.0 } else { 60.0 };
+    let highlight_skip = if is_portrait_profile { 85.0 } else if is_landscape_profile { 95.0 } else { 60.0 };
     let skip_face = sharpness_metric < (blur_threshold * 0.25).max(5.0);
     let skip_heavy = skip_face
         || exposure_stops.abs() > exp_skip
@@ -441,6 +465,7 @@ fn analyze_image(
                     if !primary_faces.is_empty() {
                         let mut blink_max = 0.0f64;
                         let mut smile_sum = 0.0f64;
+                        let mut unnatural_max = 0.0f64;
                         let mut expr_count = 0usize;
 
                         for (face, ratio) in primary_faces {
@@ -491,15 +516,24 @@ fn analyze_image(
                                 }
                             }
                             if let Some(expr_model) = &models.expression_model {
-                                match run_expression_model(&crop_dyn, expr_model) {
-                                    Ok((b, s)) => {
-                                        blink_max = blink_max.max(b as f64);
-                                        smile_sum += s as f64;
-                                        expr_count += 1;
+                                if check_expression {
+                                    match run_expression_model(&crop_dyn, expr_model) {
+                                        Ok((b, s, u)) => {
+                                            blink_max = blink_max.max(b as f64);
+                                            smile_sum += s as f64;
+                                            unnatural_max = unnatural_max.max(u as f64);
+                                            expr_count += 1;
+                                        }
+                                        Err(_) => {
+                                            ai_fallback = true;
+                                        }
                                     }
-                                    Err(_) => {
-                                        ai_fallback = true;
-                                    }
+                                } else {
+                                    // If expression check is disabled, just assume good expressions
+                                    blink_max = 0.0;
+                                    smile_sum += 0.5; 
+                                    unnatural_max = 0.0;
+                                    expr_count += 1;
                                 }
                             } else {
                                 ai_fallback = true;
@@ -512,8 +546,18 @@ fn analyze_image(
                         } else {
                             0.0
                         };
+                        
                         let base = (1.0 - blink_prob).clamp(0.0, 1.0);
-                        face_score = Some((base * (0.85 + 0.15 * smile_prob)).clamp(0.0, 1.0));
+                        let mut final_face_score = base * (0.85 + 0.15 * smile_prob);
+                        
+                        if is_portrait_profile && check_expression {
+                            let max_penalty = 0.2 + 0.4 * expression_strictness_factor;
+                            let penalty = (unnatural_max * max_penalty).clamp(0.0, max_penalty);
+                            final_face_score -= penalty; 
+                        }
+                        
+                        face_score = Some(final_face_score.clamp(0.0, 1.0));
+                        unnatural_expression_max = unnatural_max;
                     }
                 }
                 Err(_) => {
@@ -587,7 +631,12 @@ fn analyze_image(
     let k_blur = (2.0f64.ln()) / bt;
     let norm_blur = (1.0 - (-k_blur * sharpness_metric).exp()).clamp(0.0, 1.0);
     let norm_center_blur = (1.0 - (-k_blur * center_focus_metric).exp()).clamp(0.0, 1.0);
-    let blended_blur = (norm_blur * 0.6) + (norm_center_blur * 0.4);
+    
+    let blended_blur = if is_landscape_profile {
+        norm_center_blur.max(norm_blur)
+    } else {
+        (norm_blur * 0.6) + (norm_center_blur * 0.4)
+    };
 
     let capture_time = get_creation_date_from_path(Path::new(path)).timestamp_millis();
 
@@ -625,15 +674,33 @@ fn analyze_image(
                 face_highlight_clip = Some(face_clip);
                 bg_highlight_clip = Some(bg_clip.max(0.0));
 
-                if bg_clip > 0.08 && face_clip < 0.02 {
+                if bg_clip > 0.05 && face_clip < 0.05 && bg_clip > face_clip * 1.5 {
                     halo_forgiven = true;
                 }
 
+                if halo_forgiven {
+                    exposure_metric = exposure_metric.max(0.6);
+                }
+                
                 exposure_metric = (0.7 * face_metric) + (0.3 * exposure_metric);
                 exposure_metric = exposure_metric.clamp(0.0, 1.0);
                 let _ = global_mean;
                 let _ = global_clip;
             }
+        }
+    } else if is_landscape_profile {
+        let clip_thresh: u8 = 250;
+        let (_, global_clip, _) = mean_and_highlight_clip(&gray_thumbnail, 0, 0, thumb_w, thumb_h, clip_thresh);
+        
+        if global_clip > 0.05 {
+            let max_highlight_penalty = 0.5;
+            let current_penalty = 1.0 - exposure_metric;
+            let capped_penalty = current_penalty.min(max_highlight_penalty);
+            exposure_metric = 1.0 - capped_penalty;
+        }
+        
+        if auto.shadows.abs() > 40.0 && auto.highlights.abs() > 40.0 {
+            exposure_metric = exposure_metric.max(0.65);
         }
     }
 
@@ -687,21 +754,27 @@ fn analyze_image(
     if blended_blur < 0.15 {
         quality_score *= 0.5;
     }
-    let blink_thresh = if is_portrait_profile { 0.7 } else { 0.6 };
-    if has_large_face && blink_prob > blink_thresh {
+    let base_blink_thresh = if is_portrait_profile { blink_thresh } else { blink_thresh + 0.1 };
+    if has_large_face && check_expression && blink_prob > base_blink_thresh {
         quality_score *= 0.6;
     }
+    if is_portrait_profile && check_expression && unnatural_expression_max > unnatural_thresh {
+        quality_score *= 0.65; // Severe penalty to ensure it drops to 1-2 stars
+    }
+
     quality_score = quality_score.clamp(0.0, 1.0);
 
     let calibrated_score = quality_score;
 
     let hash = hasher.hash_image(&thumbnail);
 
+    let mut reasons: Vec<String> = Vec::new();
     if blended_blur < 0.2 {
         reasons.push("blurSevere".to_string());
     } else if blended_blur < 0.4 {
         reasons.push("blurMild".to_string());
     }
+    
     if is_portrait_profile && has_large_face {
         if let Some(fm) = face_exposure_metric {
             if fm < 0.35 {
@@ -716,6 +789,12 @@ fn analyze_image(
                 reasons.push("exposurePoor".to_string());
             }
         }
+    } else if is_landscape_profile {
+        if exposure_stops.abs() > 4.0 || auto.shadows.abs() > 80.0 {
+            reasons.push("exposureSevere".to_string());
+        } else if exposure_stops.abs() > 2.0 {
+            reasons.push("exposurePoor".to_string());
+        }
     } else {
         if exposure_stops.abs() > 3.0 || auto.shadows.abs() > 60.0 || auto.highlights.abs() > 60.0 {
             reasons.push("exposureSevere".to_string());
@@ -723,8 +802,12 @@ fn analyze_image(
             reasons.push("exposurePoor".to_string());
         }
     }
-    if has_large_face && blink_prob > blink_thresh {
+
+    if has_large_face && check_expression && blink_prob > base_blink_thresh {
         reasons.push("blinkDetected".to_string());
+    }
+    if is_portrait_profile && check_expression && unnatural_expression_max > unnatural_thresh {
+        reasons.push("unnaturalExpression".to_string());
     }
     if smile_prob > 0.8 {
         reasons.push("smileGood".to_string());
@@ -750,6 +833,7 @@ fn analyze_image(
     score_breakdown.insert("exposure".to_string(), exposure_metric);
     score_breakdown.insert("blinkProb".to_string(), blink_prob);
     score_breakdown.insert("smileProb".to_string(), smile_prob);
+    score_breakdown.insert("unnaturalProb".to_string(), unnatural_expression_max);
     if let Some(v) = face_exposure_metric {
         score_breakdown.insert("faceExposure".to_string(), v);
     }
@@ -990,6 +1074,8 @@ pub async fn cull_images(
                 lrm.clone(),
                 &profile_for_workers,
                 settings.blur_threshold,
+                settings.check_expression,
+                settings.expression_strictness,
                 clip_models_for_workers.as_deref(),
                 clip_text_inputs_for_workers.as_deref(),
                 culling_models_for_workers.as_deref(),
@@ -1191,6 +1277,20 @@ pub async fn cull_images(
             a.sharpness_metric
                 .partial_cmp(&b.sharpness_metric)
                 .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    if settings.check_expression {
+        for i in 0..successful_analyses.len() {
+            let item = &successful_analyses[i];
+            if item.result.reasons.iter().any(|r| r == "unnaturalExpression" || r == "blinkDetected") {
+                suggestions.bad_expressions.push(item.result.clone());
+            }
+        }
+        suggestions.bad_expressions.sort_by(|a, b| {
+            let a_unnatural = a.score_breakdown.get("unnaturalProb").copied().unwrap_or(0.0);
+            let b_unnatural = b.score_breakdown.get("unnaturalProb").copied().unwrap_or(0.0);
+            b_unnatural.partial_cmp(&a_unnatural).unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 

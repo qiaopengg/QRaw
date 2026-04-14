@@ -568,6 +568,7 @@
     "autoAppliedNoticeDetail": "You can optionally batch-apply actions to selected images.",
     "selectAllDuplicates": "Select all duplicates",
     "selectAllBlurry": "Select all blurry",
+    "selectAllBadExpr": "Select All Bad Expr",
     "selectedCount": "Selected: {{count}}",
     "confirmDelete": "Move selected images to Trash?",
     "reasons": {
@@ -576,6 +577,7 @@
       "exposureSevere": "Severely exposed",
       "exposurePoor": "Poor exposure",
       "blinkDetected": "Eyes closed",
+      "unnaturalExpression": "Unnatural Expression",
       "smileGood": "Nice expression",
       "aiFallback": "AI analysis fallback"
     },
@@ -585,6 +587,9 @@
     "filterBlurry": "Filter Blurry Images",
     "blurThreshold": "Blur Threshold",
     "blurThresholdDescription": "Images with a sharpness score below this value are flagged. Higher is stricter.",
+      "checkExpression": "Check Facial Expressions",
+      "expressionStrictness": "Expression Strictness",
+      "expressionStrictnessDescription": "Higher values penalize unnatural expressions (like blinking, awkward talking) more strictly.",
     "startCulling": "Start Culling",
     "starting": "Starting...",
     "cullingFailed": "Culling Failed",
@@ -593,6 +598,7 @@
     "cullingSuggestions": "Culling Suggestions",
     "similarGroups": "Similar Groups",
     "blurryImages": "Blurry Images",
+    "badExpressions": "Bad Expressions",
     "group": "Group {{index}}",
     "bestImage": "Best Image",
     "duplicates": "Duplicates ({{count}})",

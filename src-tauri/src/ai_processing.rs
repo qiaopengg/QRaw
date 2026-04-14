@@ -60,14 +60,14 @@ const DEPTH_INPUT_SIZE: u32 = 518;
 const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b526304f2562be";
 
 const CULL_FACE_DETECTOR_FILENAME: &str = "yolov8n-face.onnx";
-const CULL_EXPRESSION_FILENAME: &str = "face_expression.onnx";
+const CULL_EXPRESSION_FILENAME: &str = "emotion-ferplus-8.onnx";
 const CULL_AESTHETIC_FILENAME: &str = "nima.onnx";
 const CULL_YUNET_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
 
 const DEFAULT_CULL_EXPRESSION_URL: &str =
-    "https://huggingface.co/JackCui/facefusion/resolve/main/face_landmarker_5_68.onnx?download=true";
+    "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx";
 const DEFAULT_CULL_EXPRESSION_SHA256: &str =
-    "ea05f7d9d014ae1d9cdc6e9c72643d8f00d198b5db3fdd384148ddff499a613e";
+    "a2a2ba6a335a3b29c21acb6272f962bd3d47f84952aaffa03b60986e04efa61c";
 
 const DEFAULT_CULL_YUNET_URL: &str =
     "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
@@ -924,7 +924,7 @@ pub fn detect_faces_yolov8(
         outputs[0].try_extract_array::<f32>()?.to_owned()
     };
     let shape = out_dyn.shape().to_vec();
-    let flat = out_dyn.into_raw_vec();
+    let flat = out_dyn.into_raw_vec_and_offset().0;
 
     let (num_boxes, stride) = match shape.as_slice() {
         [1, n, m] => (*n, *m),
@@ -1018,7 +1018,7 @@ pub fn detect_faces_yunet(image: &DynamicImage, yunet_mutex: &Mutex<Session>) ->
         outputs[0].try_extract_array::<f32>()?.to_owned()
     };
     let shape = out_dyn.shape().to_vec();
-    let flat = out_dyn.into_raw_vec();
+    let flat = out_dyn.into_raw_vec_and_offset().0;
 
     let (num, stride) = match shape.as_slice() {
         [1, n, m] => (*n, *m),
@@ -1075,199 +1075,83 @@ pub fn detect_faces_yunet(image: &DynamicImage, yunet_mutex: &Mutex<Session>) ->
 pub fn run_expression_model(
     face_crop: &DynamicImage,
     expression_mutex: &Mutex<Session>,
-) -> Result<(f32, f32)> {
-    let configured_size: Option<u32> = env::var("QRAW_EXPR_INPUT_SIZE").ok().and_then(|v| v.parse().ok());
-    let sizes: Vec<u32> = if let Some(s) = configured_size {
-        vec![s]
-    } else {
-        vec![112, 192, 256]
-    };
-    let eye_idx: usize = env::var("QRAW_EXPR_EYE_OPEN_IDX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let smile_idx: usize = env::var("QRAW_EXPR_SMILE_IDX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1);
-    let invert_eye: bool = env::var("QRAW_EXPR_EYE_OPEN_INVERT")
-        .ok()
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    let normalize = env::var("QRAW_EXPR_NORMALIZE").unwrap_or_else(|_| "0_1".to_string());
+) -> Result<(f32, f32, f32)> {
+    let gray = face_crop.to_luma8();
+    let size = 64;
+    let resized = imageops::resize(&gray, size, size, FilterType::Triangle);
+    let mut arr = Array4::<f32>::zeros((1, 1, size as usize, size as usize));
+    
+    for (x, y, p) in resized.enumerate_pixels() {
+        arr[[0, 0, y as usize, x as usize]] = p[0] as f32; // FERPlus uses 0-255 grayscale
+    }
 
-    let rgb = face_crop.to_rgb8();
+    let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
     let mut last_err: Option<anyhow::Error> = None;
-    for size in sizes {
-        let resized = imageops::resize(&rgb, size, size, FilterType::Triangle);
-        let mut arr = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
-        for (x, y, p) in resized.enumerate_pixels() {
-            let xf = x as usize;
-            let yf = y as usize;
-            let mut r = p[0] as f32 / 255.0;
-            let mut g = p[1] as f32 / 255.0;
-            let mut b = p[2] as f32 / 255.0;
-            if normalize == "minus1_1" {
-                r = (r - 0.5) / 0.5;
-                g = (g - 0.5) / 0.5;
-                b = (b - 0.5) / 0.5;
+    
+    let out_dyns = {
+        let mut session = expression_mutex.lock().unwrap();
+        match session.run(ort::inputs!["Input3" => input_val]) {
+            Ok(outputs) => {
+                let mut extracted: Vec<ndarray::ArrayD<f32>> = Vec::new();
+                for out in outputs.iter() {
+                    if let Ok(arr) = out.1.try_extract_array::<f32>() {
+                        extracted.push(arr.to_owned());
+                    }
+                }
+                extracted
             }
-            arr[[0, 0, yf, xf]] = r;
-            arr[[0, 1, yf, xf]] = g;
-            arr[[0, 2, yf, xf]] = b;
-        }
-
-        let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
-        let out_dyn = {
-            let mut session = expression_mutex.lock().unwrap();
-            match session.run(ort::inputs![input_val]) {
-                Ok(outputs) => outputs[0].try_extract_array::<f32>()?.to_owned(),
-                Err(e) => {
-                    last_err = Some(e.into());
-                    continue;
-                }
-            }
-        };
-        let flat = out_dyn.into_raw_vec();
-        if flat.is_empty() {
-            return Ok((0.5, 0.5));
-        }
-
-        if flat.len() >= 136 && flat.len() % 2 == 0 {
-            let mut pts: Vec<(f32, f32)> = Vec::with_capacity(flat.len() / 2);
-            for i in 0..(flat.len() / 2) {
-                pts.push((flat[i * 2], flat[i * 2 + 1]));
-            }
-
-            let max_abs = pts
-                .iter()
-                .map(|(x, y)| x.abs().max(y.abs()))
-                .fold(0.0f32, |a, b| a.max(b));
-            if max_abs <= 2.0 {
-                let s = size as f32;
-                for p in pts.iter_mut() {
-                    p.0 *= s;
-                    p.1 *= s;
-                }
-            }
-
-            let dist = |a: (f32, f32), b: (f32, f32)| -> f32 {
-                let dx = a.0 - b.0;
-                let dy = a.1 - b.1;
-                (dx * dx + dy * dy).sqrt()
-            };
-
-            let mean_pt = |p: &[(f32, f32)]| -> (f32, f32) {
-                if p.is_empty() {
-                    return (0.0, 0.0);
-                }
-                let mut sx = 0.0f32;
-                let mut sy = 0.0f32;
-                for (x, y) in p {
-                    sx += *x;
-                    sy += *y;
-                }
-                (sx / p.len() as f32, sy / p.len() as f32)
-            };
-
-            let rotate = |pt: (f32, f32), c: (f32, f32), cos_t: f32, sin_t: f32| -> (f32, f32) {
-                let x = pt.0 - c.0;
-                let y = pt.1 - c.1;
-                (x * cos_t - y * sin_t + c.0, x * sin_t + y * cos_t + c.1)
-            };
-
-            let eye_ear = |p: &[(f32, f32)], base: usize| -> f32 {
-                let p1 = p[base + 0];
-                let p2 = p[base + 1];
-                let p3 = p[base + 2];
-                let p4 = p[base + 3];
-                let p5 = p[base + 4];
-                let p6 = p[base + 5];
-                let a = dist(p2, p6);
-                let b = dist(p3, p5);
-                let c = dist(p1, p4).max(1e-6);
-                (a + b) / (2.0 * c)
-            };
-
-            if pts.len() >= 68 {
-                let re = mean_pt(&pts[36..42]);
-                let le = mean_pt(&pts[42..48]);
-                let iod = dist(re, le);
-                if iod < 18.0 {
-                    return Err(anyhow!("landmarks_too_small"));
-                }
-
-                let angle = (le.1 - re.1).atan2(le.0 - re.0);
-                let cos_t = (-angle).cos();
-                let sin_t = (-angle).sin();
-                let center = ((re.0 + le.0) * 0.5, (re.1 + le.1) * 0.5);
-                for p in pts.iter_mut() {
-                    *p = rotate(*p, center, cos_t, sin_t);
-                }
-
-                let ear_r = eye_ear(&pts, 36);
-                let ear_l = eye_ear(&pts, 42);
-
-                let thr = env::var("QRAW_EAR_BLINK_THRESH")
-                    .ok()
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.21);
-                let width = env::var("QRAW_EAR_BLINK_WIDTH")
-                    .ok()
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.08)
-                    .max(1e-6);
-                let blink_r = ((thr - ear_r) / width).clamp(0.0, 1.0);
-                let blink_l = ((thr - ear_l) / width).clamp(0.0, 1.0);
-                let blink_prob = blink_r.max(blink_l);
-
-                let mouth_w = dist(pts[48], pts[54]).max(1e-6);
-                let inner_h = dist(pts[62], pts[66]);
-                let outer_h = dist(pts[51], pts[57]);
-                let mouth_h = if inner_h > 1e-3 { inner_h } else { outer_h }.max(1e-6);
-                let ratio = mouth_w / mouth_h;
-                let smile_thr = env::var("QRAW_SMILE_RATIO_THRESH")
-                    .ok()
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(2.0);
-                let smile_width = env::var("QRAW_SMILE_RATIO_WIDTH")
-                    .ok()
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(1.0)
-                    .max(1e-6);
-                let smile_prob = ((ratio - smile_thr) / smile_width).clamp(0.0, 1.0);
-
-                return Ok((blink_prob, smile_prob));
+            Err(e) => {
+                return Err(e.into());
             }
         }
-        let eye_val = *flat.get(eye_idx).unwrap_or(&flat[0]);
-        let smile_val = *flat.get(smile_idx).unwrap_or_else(|| flat.get(1).unwrap_or(&flat[0]));
-
-    let mut eye_open = if (0.0..=1.0).contains(&eye_val) {
-        eye_val
-    } else {
-        sigmoid(eye_val)
-    };
-    let mut smile = if (0.0..=1.0).contains(&smile_val) {
-        smile_val
-    } else {
-        sigmoid(smile_val)
     };
 
-    if invert_eye {
-        eye_open = 1.0 - eye_open;
-    }
-    eye_open = eye_open.clamp(0.0, 1.0);
-    smile = smile.clamp(0.0, 1.0);
-
-        let blink_prob = (1.0 - eye_open).clamp(0.0, 1.0);
-        return Ok((blink_prob, smile));
+    if out_dyns.is_empty() {
+        return Ok((0.0, 0.5, 0.0));
     }
 
-    if let Some(e) = last_err {
-        return Err(e);
+    let flat = out_dyns[0].clone().into_raw_vec_and_offset().0;
+    if flat.len() < 8 {
+        return Ok((0.0, 0.5, 0.0));
     }
-    Ok((0.5, 0.5))
+
+    // Apply softmax to get probabilities
+    let probs = softmax_1d(&flat[..8]);
+
+    // 0: neutral, 1: happiness, 2: surprise, 3: sadness, 4: anger, 5: disgust, 6: fear, 7: contempt
+    let smile_prob = probs[1];
+    
+    // Define unnatural as negative emotions that look awkward in typical portrait photography
+    let mut unnatural_prob = probs[3] + probs[4] + probs[5] + probs[6] + probs[7];
+
+    // High entropy = ambiguous expression (e.g., mid-speech, awkward transition)
+    let mut entropy = 0.0;
+    for p in &probs {
+        if *p > 1e-6 {
+            entropy -= p * p.ln();
+        }
+    }
+    
+    // Max entropy for 8 classes is ln(8) ≈ 2.079. 
+    // If entropy > 1.2, it's very ambiguous.
+    if entropy > 1.2 && !entropy.is_nan() {
+        unnatural_prob += (entropy - 1.2) * 0.5;
+    }
+    
+    // Add surprise penalty if it's awkward (surprise but no smile/happiness)
+    if probs[2] > 0.4 && probs[1] < 0.2 {
+        unnatural_prob += probs[2] * 0.5;
+    }
+
+    if unnatural_prob.is_nan() {
+        unnatural_prob = 0.0;
+    }
+    unnatural_prob = unnatural_prob.clamp(0.0, 1.0);
+    
+    // We cannot detect blink with this model. Fallback to 0.
+    let blink_prob = 0.0;
+
+    Ok((blink_prob, smile_prob, unnatural_prob))
 }
 
 pub fn score_aesthetics_nima(
@@ -1302,7 +1186,7 @@ pub fn score_aesthetics_nima(
         let outputs = session.run(ort::inputs![input_val])?;
         outputs[0].try_extract_array::<f32>()?.to_owned()
     };
-    let flat = out_dyn.into_raw_vec();
+    let flat = out_dyn.into_raw_vec_and_offset().0;
     if flat.len() < 10 {
         return Ok(5.0);
     }
