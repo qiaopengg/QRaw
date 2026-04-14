@@ -20,6 +20,7 @@ import {
   Search,
   Users,
   X,
+  Aperture,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { List, useListCallbackRef } from 'react-window';
@@ -123,6 +124,7 @@ interface MainLibraryProps {
   onNavigateToCommunity(): void;
   listColumnWidths: ColumnWidths;
   setListColumnWidths: React.Dispatch<React.SetStateAction<ColumnWidths>>;
+  onStartCulling(): void;
 }
 
 interface SearchInputProps {
@@ -1566,6 +1568,7 @@ export default function MainLibrary({
   onNavigateToCommunity,
   listColumnWidths,
   setListColumnWidths,
+  onStartCulling,
 }: MainLibraryProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -2150,6 +2153,13 @@ export default function MainLibrary({
             thumbnailSize={thumbnailSize}
             thumbnailAspectRatio={thumbnailAspectRatio}
           />
+          <Button
+            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+            onClick={onStartCulling}
+            data-tooltip="AI Auto Culling"
+          >
+            <Aperture className="w-8 h-8" />
+          </Button>
           <Button
             className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
             onClick={onNavigateToCommunity}

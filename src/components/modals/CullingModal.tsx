@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle, XCircle, Loader2, Users, Trash2, Star, Tag } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, Users, Trash2, Star, Tag, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CullingSettings, CullingSuggestions, Invokes, Progress } from '../ui/AppProperties';
 import Button from '../ui/Button';
@@ -49,7 +49,7 @@ function ImageThumbnail({ path, thumbnails, isSelected, onToggle, children }: Im
   const thumbnailUrl = thumbnails[path];
   return (
     <div
-      className={`relative group rounded-md overflow-hidden border-2 transition-colors cursor-pointer ${
+      className={`relative group rounded-md overflow-hidden border-2 transition-colors cursor-pointer aspect-[4/3] ${
         isSelected ? 'border-accent' : 'border-transparent hover:border-surface'
       }`}
       onClick={onToggle}
@@ -57,23 +57,18 @@ function ImageThumbnail({ path, thumbnails, isSelected, onToggle, children }: Im
       <img
         src={thumbnailUrl}
         alt={path}
-        className={`w-full h-full object-cover transition-opacity ${isSelected ? 'opacity-100' : 'opacity-75 group-hover:opacity-100'}`}
+        className={`absolute inset-0 w-full h-full object-cover transition-opacity ${isSelected ? 'opacity-100' : 'opacity-75 group-hover:opacity-100'}`}
       />
       <div
         className={`absolute inset-0 bg-black/50 transition-opacity ${
           isSelected ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
         }`}
       />
-      <div className="absolute top-2 right-2">{isSelected && <CheckCircle size={16} className="text-accent" />}</div>
+      <div className="absolute top-2 right-2 z-10">{isSelected && <CheckCircle size={16} className="text-accent" />}</div>
       {children && (
-        <Text
-          as="div"
-          variant={TextVariants.small}
-          color={TextColors.white}
-          className="absolute bottom-0 left-0 right-0 p-1 bg-black/60"
-        >
+        <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-black/60 flex flex-col gap-0.5 z-10">
           {children}
-        </Text>
+        </div>
       )}
     </div>
   );
@@ -94,17 +89,31 @@ export default function CullingModal({
   const [show, setShow] = useState(false);
   const [stage, setStage] = useState<'settings' | 'progress' | 'results'>('settings');
   const { t } = useTranslation();
+  const [isStarting, setIsStarting] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [preset, setPreset] = useState<'balanced' | 'conservative' | 'aggressive'>('balanced');
 
   const [settings, setSettings] = useState<CullingSettings>({
     groupSimilar: true,
     similarityThreshold: 28,
     filterBlurry: true,
     blurThreshold: 100.0,
+    profile: 'default',
   });
 
   const [selectedRejects, setSelectedRejects] = useState<Set<string>>(new Set());
   const [action, setAction] = useState<CullAction>('reject');
   const [activeTab, setActiveTab] = useState<'similar' | 'blurry'>('similar');
+
+  const actionOptions = useMemo(() => getCullActions(t), [t]);
+
+  const formatReasons = useCallback(
+    (reasons?: string[]) => {
+      if (!reasons || reasons.length === 0) return '';
+      return reasons.map((r) => t(`culling.reasons.${r}`, { defaultValue: r })).join(', ');
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -117,6 +126,7 @@ export default function CullingModal({
         setIsMounted(false);
         setStage('settings');
         setSelectedRejects(new Set());
+        setIsStarting(false);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -134,21 +144,34 @@ export default function CullingModal({
 
   useEffect(() => {
     if (stage === 'results' && suggestions) {
-      const initialRejects = new Set<string>();
-      suggestions.similarGroups.forEach((group) => {
-        group.duplicates.forEach((dup) => initialRejects.add(dup.path));
-      });
-      suggestions.blurryImages.forEach((img) => initialRejects.add(img.path));
-      setSelectedRejects(initialRejects);
+      setSelectedRejects(new Set());
     }
   }, [stage, suggestions]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setSettings((s) => {
+      if (preset === 'balanced') {
+        return { ...s, groupSimilar: true, similarityThreshold: 28, filterBlurry: true, blurThreshold: 100.0 };
+      }
+      if (preset === 'conservative') {
+        return { ...s, groupSimilar: true, similarityThreshold: 22, filterBlurry: true, blurThreshold: 75.0 };
+      }
+      return { ...s, groupSimilar: true, similarityThreshold: 36, filterBlurry: true, blurThreshold: 150.0 };
+    });
+  }, [preset, isOpen]);
+
   const handleStartCulling = useCallback(async () => {
+    if (isStarting) return;
     try {
+      setIsStarting(true);
+      setStage('progress');
       await invoke(Invokes.CullImages, { paths: imagePaths, settings });
     } catch (err) {
       console.error('Culling failed to start:', err);
       onError(String(err));
+    } finally {
+      setIsStarting(false);
     }
   }, [imagePaths, settings, onError]);
 
@@ -168,6 +191,24 @@ export default function CullingModal({
     onApply(action, Array.from(selectedRejects));
   };
 
+  const handleSelectAllDuplicates = () => {
+    if (!suggestions) return;
+    const next = new Set<string>();
+    suggestions.similarGroups.forEach((group) => group.duplicates.forEach((d) => next.add(d.path)));
+    setSelectedRejects(next);
+  };
+
+  const handleSelectAllBlurry = () => {
+    if (!suggestions) return;
+    const next = new Set<string>();
+    suggestions.blurryImages.forEach((img) => next.add(img.path));
+    setSelectedRejects(next);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedRejects(new Set());
+  };
+
   const numSimilar = suggestions?.similarGroups.reduce((acc, group) => acc + group.duplicates.length, 0) || 0;
   const numBlurry = suggestions?.blurryImages.length || 0;
 
@@ -181,51 +222,100 @@ export default function CullingModal({
       </Text>
       <div className="space-y-6 text-sm">
         <div>
-          <Switch
-            label={t('culling.groupSimilar')}
-            checked={settings.groupSimilar}
-            onChange={(v) => setSettings((s) => ({ ...s, groupSimilar: v }))}
+          <div className="mb-1">
+            <Text variant={TextVariants.label}>{t('culling.profile') || 'Culling Profile'}</Text>
+          </div>
+          <Dropdown
+            value={settings.profile}
+            onChange={(v: string) => setSettings((s) => ({ ...s, profile: v as any }))}
+            options={[
+              { value: 'default', label: t('culling.profileDefault') || 'Default' },
+              { value: 'portrait', label: t('culling.profilePortrait') || 'Portrait' },
+              { value: 'landscape', label: t('culling.profileLandscape') || 'Landscape' },
+              { value: 'event', label: t('culling.profileEvent') || 'Event' },
+            ]}
           />
-          {settings.groupSimilar && (
-            <div className="mt-2 pl-4 border-l-2 border-border-color ml-1">
-              <Slider
-                label={t('culling.similarityThreshold')}
-                min={1}
-                max={64}
-                step={1}
-                value={settings.similarityThreshold}
-                defaultValue={28}
-                onChange={(e) => setSettings((s) => ({ ...s, similarityThreshold: Number(e.target.value) }))}
-              />
-              <Text variant={TextVariants.small} className="mt-1">
-                {t('culling.similarityThresholdDescription')}
-              </Text>
-            </div>
-          )}
+          <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 mb-4 block">
+            {t('culling.profileDescription') || 'Adjusts quality scoring weights based on photography type.'}
+          </Text>
         </div>
         <div>
-          <Switch
-            label={t('culling.filterBlurry')}
-            checked={settings.filterBlurry}
-            onChange={(v) => setSettings((s) => ({ ...s, filterBlurry: v }))}
+          <div className="mb-1">
+            <Text variant={TextVariants.label}>{t('culling.preset')}</Text>
+          </div>
+          <Dropdown
+            value={preset}
+            onChange={(v: string) => setPreset(v as any)}
+            options={[
+              { value: 'balanced', label: t('culling.presetBalanced') },
+              { value: 'conservative', label: t('culling.presetConservative') },
+              { value: 'aggressive', label: t('culling.presetAggressive') },
+            ]}
           />
-          {settings.filterBlurry && (
-            <div className="mt-2  pl-4 border-l-2 border-border-color ml-1">
-              <Slider
-                label={t('culling.blurThreshold')}
-                min={25}
-                max={500}
-                step={25}
-                value={settings.blurThreshold}
-                defaultValue={100.0}
-                onChange={(e) => setSettings((s) => ({ ...s, blurThreshold: Number(e.target.value) }))}
-              />
-              <Text variant={TextVariants.small} className="mt-1">
-                {t('culling.blurThresholdDescription')}
-              </Text>
-            </div>
-          )}
+          <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 block">
+            {t('culling.presetDescription')}
+          </Text>
         </div>
+        <div className="flex items-center justify-between">
+          <Text variant={TextVariants.label}>{t('culling.advancedOptions')}</Text>
+          <button
+            className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
+            onClick={() => setShowAdvanced((v) => !v)}
+            type="button"
+          >
+            {showAdvanced ? t('culling.hideAdvanced') : t('culling.showAdvanced')}
+          </button>
+        </div>
+        {showAdvanced && (
+          <>
+            <div>
+              <Switch
+                label={t('culling.groupSimilar')}
+                checked={settings.groupSimilar}
+                onChange={(v) => setSettings((s) => ({ ...s, groupSimilar: v }))}
+              />
+              {settings.groupSimilar && (
+                <div className="mt-2 pl-4 border-l-2 border-border-color ml-1">
+                  <Slider
+                    label={t('culling.similarityThreshold')}
+                    min={1}
+                    max={64}
+                    step={1}
+                    value={settings.similarityThreshold}
+                    defaultValue={28}
+                    onChange={(e) => setSettings((s) => ({ ...s, similarityThreshold: Number(e.target.value) }))}
+                  />
+                  <Text variant={TextVariants.small} className="mt-1">
+                    {t('culling.similarityThresholdDescription')}
+                  </Text>
+                </div>
+              )}
+            </div>
+            <div>
+              <Switch
+                label={t('culling.filterBlurry')}
+                checked={settings.filterBlurry}
+                onChange={(v) => setSettings((s) => ({ ...s, filterBlurry: v }))}
+              />
+              {settings.filterBlurry && (
+                <div className="mt-2  pl-4 border-l-2 border-border-color ml-1">
+                  <Slider
+                    label={t('culling.blurThreshold')}
+                    min={25}
+                    max={500}
+                    step={25}
+                    value={settings.blurThreshold}
+                    defaultValue={100.0}
+                    onChange={(e) => setSettings((s) => ({ ...s, blurThreshold: Number(e.target.value) }))}
+                  />
+                  <Text variant={TextVariants.small} className="mt-1">
+                    {t('culling.blurThresholdDescription')}
+                  </Text>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
       <div className="flex justify-end gap-3 mt-8">
         <button
@@ -234,7 +324,9 @@ export default function CullingModal({
         >
           {t('common.cancel')}
         </button>
-        <Button onClick={handleStartCulling}>{t('culling.startCulling')}</Button>
+        <Button onClick={handleStartCulling} disabled={isStarting || imagePaths.length === 0}>
+          {t('culling.startCulling')}
+        </Button>
       </div>
     </>
   );
@@ -290,10 +382,21 @@ export default function CullingModal({
 
     return (
       <>
-        <Text variant={TextVariants.title} className="mb-4">
-          {t('culling.cullingSuggestions')}
-        </Text>
-        <div className="border-b border-surface mb-4">
+        <div className="flex items-start justify-between gap-4 mb-4 shrink-0">
+          <div>
+            <Text variant={TextVariants.title}>{t('culling.cullingSuggestions')}</Text>
+            <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 block">
+              {t('culling.autoAppliedNotice')}
+            </Text>
+          </div>
+          <div className="shrink-0 flex items-center gap-2 text-text-secondary">
+            <Sparkles size={18} className="text-accent" />
+            <Text variant={TextVariants.small} color={TextColors.secondary}>
+              {t('culling.autoAppliedNoticeDetail')}
+            </Text>
+          </div>
+        </div>
+        <div className="border-b border-surface mb-4 shrink-0">
           <nav className="-mb-px flex space-x-4" aria-label="Tabs">
             {numSimilar > 0 && (
               <button
@@ -324,7 +427,39 @@ export default function CullingModal({
           </nav>
         </div>
 
-        <div className="bg-bg-primary rounded-lg p-2 h-[50vh] overflow-y-auto">
+        <div className="bg-bg-primary rounded-lg p-4 flex-1 overflow-y-auto min-h-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {activeTab === 'similar' && numSimilar > 0 && (
+                <button
+                  type="button"
+                  className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
+                  onClick={handleSelectAllDuplicates}
+                >
+                  {t('culling.selectAllDuplicates')}
+                </button>
+              )}
+              {activeTab === 'blurry' && numBlurry > 0 && (
+                <button
+                  type="button"
+                  className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
+                  onClick={handleSelectAllBlurry}
+                >
+                  {t('culling.selectAllBlurry')}
+                </button>
+              )}
+              <button
+                type="button"
+                className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
+                onClick={handleClearSelection}
+              >
+                {t('common.selectNone')}
+              </button>
+            </div>
+            <Text variant={TextVariants.small} color={TextColors.secondary}>
+              {t('culling.selectedCount', { count: selectedRejects.size })}
+            </Text>
+          </div>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -340,32 +475,34 @@ export default function CullingModal({
                       <Text variant={TextVariants.heading} className="mb-2">
                         {t('culling.group', { index: index + 1 })}
                       </Text>
-                      <div className="grid grid-cols-[1fr_3fr] gap-3">
-                        <div>
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <div className="w-full md:w-1/3 lg:w-1/4 shrink-0">
                           <Text variant={TextVariants.label} className="mb-1">
                             {t('culling.bestImage')}
                           </Text>
-                          <div className="relative rounded-md overflow-hidden border-2 border-green-500">
+                          <div className="relative rounded-md overflow-hidden border-2 border-green-500 aspect-[4/3]">
                             <img
                               src={thumbnails[group.representative.path]}
                               alt="Representative"
-                              className="w-full h-full object-cover"
+                              className="absolute inset-0 w-full h-full object-cover"
                             />
-                            <Text
-                              as="div"
-                              variant={TextVariants.small}
-                              color={TextColors.white}
-                              className="absolute bottom-0 left-0 right-0 p-1 bg-black/60"
-                            >
-                              {t('culling.score', { score: group.representative.qualityScore.toFixed(2) })}
-                            </Text>
+                            <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-black/60 flex flex-col gap-0.5 z-10">
+                              <Text as="div" variant={TextVariants.small} color={TextColors.white}>
+                                {t('culling.score', { score: group.representative.qualityScore.toFixed(2) })}
+                              </Text>
+                              {group.representative.reasons?.length > 0 && (
+                                <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
+                                  {formatReasons(group.representative.reasons)}
+                                </Text>
+                              )}
+                            </div>
                           </div>
                         </div>
-                        <div>
+                        <div className="flex-1">
                           <Text variant={TextVariants.label} className="mb-1">
                             {t('culling.duplicates', { count: group.duplicates.length })}
                           </Text>
-                          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
                             {group.duplicates.map((dup) => (
                               <ImageThumbnail
                                 key={dup.path}
@@ -374,7 +511,14 @@ export default function CullingModal({
                                 isSelected={selectedRejects.has(dup.path)}
                                 onToggle={() => handleToggleReject(dup.path)}
                               >
-                                {t('culling.score', { score: dup.qualityScore.toFixed(2) })}
+                                <Text as="div" variant={TextVariants.small} color={TextColors.white}>
+                                  {t('culling.score', { score: dup.qualityScore.toFixed(2) })}
+                                </Text>
+                                {dup.reasons?.length > 0 && (
+                                  <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
+                                    {formatReasons(dup.reasons)}
+                                  </Text>
+                                )}
                               </ImageThumbnail>
                             ))}
                           </div>
@@ -385,7 +529,7 @@ export default function CullingModal({
                 </div>
               )}
               {activeTab === 'blurry' && (
-                <div className="grid grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                   {suggestions.blurryImages.map((img) => (
                     <ImageThumbnail
                       key={img.path}
@@ -394,7 +538,14 @@ export default function CullingModal({
                       isSelected={selectedRejects.has(img.path)}
                       onToggle={() => handleToggleReject(img.path)}
                     >
-                      {t('culling.sharpnessScore', { score: img.sharpnessMetric.toFixed(0) })}
+                      <Text as="div" variant={TextVariants.small} color={TextColors.white}>
+                        {t('culling.sharpnessScore', { score: img.sharpnessMetric.toFixed(0) })}
+                      </Text>
+                      {img.reasons?.length > 0 && (
+                        <Text as="div" variant={TextVariants.small} color={TextColors.accent}>
+                          {formatReasons(img.reasons)}
+                        </Text>
+                      )}
                     </ImageThumbnail>
                   ))}
                 </div>
@@ -403,10 +554,10 @@ export default function CullingModal({
           </AnimatePresence>
         </div>
 
-        <div className="flex justify-between items-center gap-3 mt-6">
+        <div className="flex justify-between items-center gap-3 mt-6 pt-4 border-t border-surface shrink-0">
           <div className="flex-1">
             <Dropdown
-              options={getCullActions(t).map(({ value, label }) => ({ value, label }))}
+              options={actionOptions.map(({ value, label }) => ({ value, label }))}
               value={action}
               onChange={(newValue: CullAction) => setAction(newValue)}
               className="w-full"
@@ -419,7 +570,16 @@ export default function CullingModal({
             >
               {t('common.cancel')}
             </button>
-            <Button onClick={handleApply} disabled={selectedRejects.size === 0}>
+            <Button
+              onClick={() => {
+                if (action === 'delete') {
+                  const ok = window.confirm(t('culling.confirmDelete'));
+                  if (!ok) return;
+                }
+                handleApply();
+              }}
+              disabled={selectedRejects.size === 0}
+            >
               {t('culling.applyToImages', { count: selectedRejects.size })}
             </Button>
           </div>
@@ -448,12 +608,14 @@ export default function CullingModal({
       className={`fixed inset-0 flex items-center justify-center z-50 bg-black/30 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${
         show ? 'opacity-100' : 'opacity-0'
       }`}
-      onClick={onClose}
+      onClick={() => {
+        if (stage !== 'progress') onClose();
+      }}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className={`bg-surface rounded-lg shadow-xl p-6 w-full max-w-3xl transform transition-all duration-300 ease-out ${
+        className={`bg-surface rounded-lg shadow-xl p-6 w-full max-w-4xl transform transition-all duration-300 ease-out flex flex-col max-h-[90vh] ${
           show ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 -translate-y-4'
         }`}
         onClick={(e) => e.stopPropagation()}

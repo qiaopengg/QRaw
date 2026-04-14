@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
@@ -58,6 +59,15 @@ const DEPTH_FILENAME: &str = "depth_anything_v2_vits.onnx";
 const DEPTH_INPUT_SIZE: u32 = 518;
 const DEPTH_SHA256: &str = "d2b11a11c1d4a12b47608fa65a17ee9a4c605b55ee1730c8e3b526304f2562be";
 
+const CULL_FACE_DETECTOR_FILENAME: &str = "yolov8n-face.onnx";
+const CULL_EXPRESSION_FILENAME: &str = "face_expression.onnx";
+const CULL_AESTHETIC_FILENAME: &str = "nima.onnx";
+
+const DEFAULT_CULL_EXPRESSION_URL: &str =
+    "https://huggingface.co/JackCui/facefusion/resolve/main/face_landmarker_5_68.onnx?download=true";
+const DEFAULT_CULL_EXPRESSION_SHA256: &str =
+    "ea05f7d9d014ae1d9cdc6e9c72643d8f00d198b5db3fdd384148ddff499a613e";
+
 pub struct AiModels {
     pub sam_encoder: Mutex<Session>,
     pub sam_decoder: Mutex<Session>,
@@ -69,6 +79,12 @@ pub struct AiModels {
 pub struct ClipModels {
     pub model: Mutex<Session>,
     pub tokenizer: Tokenizer,
+}
+
+pub struct CullingModels {
+    pub face_detector: Mutex<Session>,
+    pub expression_model: Option<Mutex<Session>>,
+    pub aesthetic_model: Option<Mutex<Session>>,
 }
 
 #[derive(Clone)]
@@ -90,6 +106,7 @@ pub struct AiState {
     pub denoise_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
+    pub culling_models: Option<Arc<CullingModels>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub depth_map: Option<CachedDepthMap>,
 }
@@ -170,8 +187,40 @@ fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(models_dir)
 }
 
+fn get_qraw_models_dir() -> Result<PathBuf> {
+    if let Ok(dir) = env::var("QRAW_MODELS_DIR") {
+        let path = PathBuf::from(dir);
+        fs::create_dir_all(&path)?;
+        return Ok(path);
+    }
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve home directory"))?;
+    let path = PathBuf::from(home).join(".qraw").join("models");
+    fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
 async fn download_model(url: &str, dest: &Path) -> Result<()> {
-    let response = reqwest::get(url).await?;
+    let response = match reqwest::get(url).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let mirror_enabled = env::var("QRAW_USE_HF_MIRROR")
+                .ok()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(true);
+            if mirror_enabled {
+                if let Some(rest) = url.strip_prefix("https://huggingface.co/") {
+                    let mirror_url = format!("https://hf-mirror.com/{}", rest);
+                    reqwest::get(mirror_url).await?
+                } else {
+                    return Err(e.into());
+                }
+            } else {
+                return Err(e.into());
+            }
+        }
+    };
     let mut file = fs::File::create(dest)?;
     let mut content = Cursor::new(response.bytes().await?);
     std::io::copy(&mut content, &mut file)?;
@@ -218,6 +267,59 @@ async fn download_and_verify_model(
         }
     }
     Ok(())
+}
+
+fn get_model_env(name: &str, key: &str) -> Option<String> {
+    let env_key = format!("QRAW_MODEL_{}_{}", name, key);
+    env::var(env_key).ok().filter(|v| !v.trim().is_empty())
+}
+
+async fn ensure_model(
+    app_handle: &tauri::AppHandle,
+    models_dir: &Path,
+    filename: &str,
+    model_name: &str,
+    url: Option<&str>,
+    sha256: Option<&str>,
+) -> Result<PathBuf> {
+    let path = models_dir.join(filename);
+    if path.exists() {
+        if let Some(hash) = sha256 {
+            if !verify_sha256(&path, hash)? {
+                if let Some(u) = url {
+                    fs::remove_file(&path).ok();
+                    let _ = app_handle.emit("ai-model-download-start", model_name);
+                    download_model(u, &path).await?;
+                    let _ = app_handle.emit("ai-model-download-finish", model_name);
+                    if !verify_sha256(&path, hash)? {
+                        return Err(anyhow::anyhow!("Failed to verify model {} after download.", model_name));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!("Model {} hash mismatch and no URL provided.", model_name));
+                }
+            }
+        }
+        return Ok(path);
+    }
+
+    if let Some(u) = url {
+        let _ = app_handle.emit("ai-model-download-start", model_name);
+        download_model(u, &path).await?;
+        let _ = app_handle.emit("ai-model-download-finish", model_name);
+        if let Some(hash) = sha256 {
+            if !verify_sha256(&path, hash)? {
+                return Err(anyhow::anyhow!("Failed to verify model {} after download.", model_name));
+            }
+        }
+        return Ok(path);
+    }
+
+    Err(anyhow::anyhow!(
+        "Model {} is missing. Put it in {:?} or set QRAW_MODEL_{}_URL.",
+        model_name,
+        models_dir,
+        model_name
+    ))
 }
 
 pub async fn get_or_init_ai_models(
@@ -326,6 +428,7 @@ pub async fn get_or_init_ai_models(
             denoise_model: None,
             clip_models: None,
             lama_model: None,
+            culling_models: None,
             embeddings: None,
             depth_map: None,
         });
@@ -386,6 +489,7 @@ pub async fn get_or_init_denoise_model(
             denoise_model: Some(denoise_model.clone()),
             clip_models: None,
             lama_model: None,
+            culling_models: None,
             embeddings: None,
             depth_map: None,
         });
@@ -457,6 +561,7 @@ pub async fn get_or_init_clip_models(
             denoise_model: None,
             clip_models: Some(clip_models.clone()),
             lama_model: None,
+            culling_models: None,
             embeddings: None,
             depth_map: None,
         });
@@ -517,12 +622,500 @@ pub async fn get_or_init_lama_model(
             denoise_model: None,
             clip_models: None,
             lama_model: Some(lama_model.clone()),
+            culling_models: None,
             embeddings: None,
             depth_map: None,
         });
     }
 
     Ok(lama_model)
+}
+
+pub async fn get_or_init_culling_models(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<CullingModels>> {
+    if let Some(models) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.culling_models.clone())
+    {
+        return Ok(models);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(models) = ai_state_mutex
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|state| state.culling_models.clone())
+    {
+        return Ok(models);
+    }
+
+    let models_dir = get_qraw_models_dir()?;
+
+    let face_url = get_model_env("FACE_DETECTOR", "URL");
+    let face_sha = get_model_env("FACE_DETECTOR", "SHA256");
+    let expr_url = get_model_env("EXPRESSION", "URL").or_else(|| Some(DEFAULT_CULL_EXPRESSION_URL.to_string()));
+    let expr_sha =
+        get_model_env("EXPRESSION", "SHA256").or_else(|| Some(DEFAULT_CULL_EXPRESSION_SHA256.to_string()));
+    let aes_url = get_model_env("AESTHETIC", "URL");
+    let aes_sha = get_model_env("AESTHETIC", "SHA256");
+
+    let face_path = ensure_model(
+        app_handle,
+        &models_dir,
+        CULL_FACE_DETECTOR_FILENAME,
+        "FACE_DETECTOR",
+        face_url.as_deref(),
+        face_sha.as_deref(),
+    )
+    .await?;
+    let expr_path = ensure_model(
+        app_handle,
+        &models_dir,
+        CULL_EXPRESSION_FILENAME,
+        "EXPRESSION",
+        expr_url.as_deref(),
+        expr_sha.as_deref(),
+    )
+    .await.ok();
+    
+    let aes_path = ensure_model(
+        app_handle,
+        &models_dir,
+        CULL_AESTHETIC_FILENAME,
+        "AESTHETIC",
+        aes_url.as_deref(),
+        aes_sha.as_deref(),
+    )
+    .await.ok();
+
+    let _ = ort::init().with_name("AI-Culling").commit();
+
+    let face_detector = Session::builder()?.commit_from_file(face_path)?;
+    let expression_model = if let Some(p) = expr_path {
+        Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
+    } else { None };
+    let aesthetic_model = if let Some(p) = aes_path {
+        Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
+    } else { None };
+
+    crate::register_exit_handler();
+
+    let models = Arc::new(CullingModels {
+        face_detector: Mutex::new(face_detector),
+        expression_model,
+        aesthetic_model,
+    });
+
+    let mut ai_state_lock = ai_state_mutex.lock().unwrap();
+    if let Some(state) = ai_state_lock.as_mut() {
+        state.culling_models = Some(models.clone());
+    } else {
+        *ai_state_lock = Some(AiState {
+            models: None,
+            denoise_model: None,
+            clip_models: None,
+            lama_model: None,
+            culling_models: Some(models.clone()),
+            embeddings: None,
+            depth_map: None,
+        });
+    }
+
+    Ok(models)
+}
+
+#[derive(Clone, Debug)]
+pub struct FaceBox {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub score: f32,
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+fn softmax_1d(xs: &[f32]) -> Vec<f32> {
+    if xs.is_empty() {
+        return Vec::new();
+    }
+    let m = xs
+        .iter()
+        .cloned()
+        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+    let mut exps = Vec::with_capacity(xs.len());
+    let mut sum = 0.0f32;
+    for &x in xs {
+        let e = (x - m).exp();
+        exps.push(e);
+        sum += e;
+    }
+    if sum <= 0.0 {
+        return vec![0.0; xs.len()];
+    }
+    exps.into_iter().map(|e| e / sum).collect()
+}
+
+fn iou(a: &FaceBox, b: &FaceBox) -> f32 {
+    let x1 = a.x1.max(b.x1);
+    let y1 = a.y1.max(b.y1);
+    let x2 = a.x2.min(b.x2);
+    let y2 = a.y2.min(b.y2);
+    let w = (x2 - x1).max(0.0);
+    let h = (y2 - y1).max(0.0);
+    let inter = w * h;
+    let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
+    let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
+    let union = area_a + area_b - inter;
+    if union <= 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}
+
+fn nms(mut boxes: Vec<FaceBox>, iou_thresh: f32) -> Vec<FaceBox> {
+    boxes.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let mut kept: Vec<FaceBox> = Vec::new();
+    for b in boxes {
+        if kept.iter().all(|k| iou(k, &b) < iou_thresh) {
+            kept.push(b);
+        }
+    }
+    kept
+}
+
+fn letterbox_rgb_nchw_0_1(image: &DynamicImage, size: u32) -> (Array4<f32>, f32, f32, f32) {
+    let rgb = image.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let scale = (size as f32 / w as f32).min(size as f32 / h as f32);
+    let new_w = (w as f32 * scale).round().max(1.0) as u32;
+    let new_h = (h as f32 * scale).round().max(1.0) as u32;
+    let resized = imageops::resize(&rgb, new_w, new_h, FilterType::Triangle);
+
+    let mut canvas = ImageBuffer::from_pixel(size, size, Rgb([114u8, 114u8, 114u8]));
+    let pad_x = ((size - new_w) / 2) as u32;
+    let pad_y = ((size - new_h) / 2) as u32;
+    imageops::replace(&mut canvas, &resized, pad_x as i64, pad_y as i64);
+
+    let mut arr = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
+    for (x, y, p) in canvas.enumerate_pixels() {
+        let xf = x as usize;
+        let yf = y as usize;
+        arr[[0, 0, yf, xf]] = p[0] as f32 / 255.0;
+        arr[[0, 1, yf, xf]] = p[1] as f32 / 255.0;
+        arr[[0, 2, yf, xf]] = p[2] as f32 / 255.0;
+    }
+    (arr, scale, pad_x as f32, pad_y as f32)
+}
+
+pub fn detect_faces_yolov8(
+    image: &DynamicImage,
+    face_detector_mutex: &Mutex<Session>,
+) -> Result<Vec<FaceBox>> {
+    let input_size: u32 = env::var("QRAW_FACE_INPUT_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(640);
+    let conf_thresh: f32 = env::var("QRAW_FACE_CONF_THRESH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.25);
+    let iou_thresh: f32 = env::var("QRAW_FACE_IOU_THRESH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.45);
+
+    let (input, scale, pad_x, pad_y) = letterbox_rgb_nchw_0_1(image, input_size);
+
+    let input_dyn = input.into_dyn();
+    let input_val = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
+
+    let out_dyn = {
+        let mut session = face_detector_mutex.lock().unwrap();
+        let outputs = session.run(ort::inputs![input_val])?;
+        outputs[0].try_extract_array::<f32>()?.to_owned()
+    };
+    let shape = out_dyn.shape().to_vec();
+    let flat = out_dyn.into_raw_vec();
+
+    let (num_boxes, stride) = match shape.as_slice() {
+        [1, n, m] => (*n, *m),
+        [n, m] => (*n, *m),
+        [m] => (1, *m),
+        _ => return Ok(Vec::new()),
+    };
+
+    let (img_w, img_h) = image.dimensions();
+    let mut boxes = Vec::new();
+    for i in 0..num_boxes {
+        let base = i * stride;
+        if base + 4 >= flat.len() {
+            break;
+        }
+        let x = flat[base + 0];
+        let y = flat[base + 1];
+        let w = flat[base + 2];
+        let h = flat[base + 3];
+
+        let conf = if stride == 5 {
+            flat[base + 4]
+        } else if stride >= 10 {
+            flat[base + 4]
+        } else if stride > 5 {
+            let obj = flat[base + 4];
+            let cls = flat[base + 5..base + stride]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+            obj * cls
+        } else {
+            continue;
+        };
+
+        let conf = if (0.0..=1.0).contains(&conf) { conf } else { sigmoid(conf) };
+        if conf < conf_thresh {
+            continue;
+        }
+
+        let x1_in = x - w / 2.0;
+        let y1_in = y - h / 2.0;
+        let x2_in = x + w / 2.0;
+        let y2_in = y + h / 2.0;
+
+        let x1 = ((x1_in - pad_x) / scale).clamp(0.0, img_w as f32);
+        let y1 = ((y1_in - pad_y) / scale).clamp(0.0, img_h as f32);
+        let x2 = ((x2_in - pad_x) / scale).clamp(0.0, img_w as f32);
+        let y2 = ((y2_in - pad_y) / scale).clamp(0.0, img_h as f32);
+
+        if x2 > x1 && y2 > y1 {
+            boxes.push(FaceBox {
+                x1,
+                y1,
+                x2,
+                y2,
+                score: conf,
+            });
+        }
+    }
+
+    Ok(nms(boxes, iou_thresh))
+}
+
+pub fn run_expression_model(
+    face_crop: &DynamicImage,
+    expression_mutex: &Mutex<Session>,
+) -> Result<(f32, f32)> {
+    let configured_size: Option<u32> = env::var("QRAW_EXPR_INPUT_SIZE").ok().and_then(|v| v.parse().ok());
+    let sizes: Vec<u32> = if let Some(s) = configured_size {
+        vec![s]
+    } else {
+        vec![112, 192, 256]
+    };
+    let eye_idx: usize = env::var("QRAW_EXPR_EYE_OPEN_IDX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let smile_idx: usize = env::var("QRAW_EXPR_SMILE_IDX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let invert_eye: bool = env::var("QRAW_EXPR_EYE_OPEN_INVERT")
+        .ok()
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let normalize = env::var("QRAW_EXPR_NORMALIZE").unwrap_or_else(|_| "0_1".to_string());
+
+    let rgb = face_crop.to_rgb8();
+    let mut last_err: Option<anyhow::Error> = None;
+    for size in sizes {
+        let resized = imageops::resize(&rgb, size, size, FilterType::Triangle);
+        let mut arr = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
+        for (x, y, p) in resized.enumerate_pixels() {
+            let xf = x as usize;
+            let yf = y as usize;
+            let mut r = p[0] as f32 / 255.0;
+            let mut g = p[1] as f32 / 255.0;
+            let mut b = p[2] as f32 / 255.0;
+            if normalize == "minus1_1" {
+                r = (r - 0.5) / 0.5;
+                g = (g - 0.5) / 0.5;
+                b = (b - 0.5) / 0.5;
+            }
+            arr[[0, 0, yf, xf]] = r;
+            arr[[0, 1, yf, xf]] = g;
+            arr[[0, 2, yf, xf]] = b;
+        }
+
+        let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
+        let out_dyn = {
+            let mut session = expression_mutex.lock().unwrap();
+            match session.run(ort::inputs![input_val]) {
+                Ok(outputs) => outputs[0].try_extract_array::<f32>()?.to_owned(),
+                Err(e) => {
+                    last_err = Some(e.into());
+                    continue;
+                }
+            }
+        };
+        let flat = out_dyn.into_raw_vec();
+        if flat.is_empty() {
+            return Ok((0.5, 0.5));
+        }
+
+        if flat.len() >= 136 && flat.len() % 2 == 0 {
+        let mut pts: Vec<(f32, f32)> = Vec::with_capacity(flat.len() / 2);
+        for i in 0..(flat.len() / 2) {
+            pts.push((flat[i * 2], flat[i * 2 + 1]));
+        }
+            let max_abs = pts
+            .iter()
+            .map(|(x, y)| x.abs().max(y.abs()))
+            .fold(0.0f32, |a, b| a.max(b));
+            if max_abs <= 2.0 {
+                let s = size as f32;
+            for p in pts.iter_mut() {
+                p.0 *= s;
+                p.1 *= s;
+            }
+        }
+
+        let dist = |a: (f32, f32), b: (f32, f32)| -> f32 {
+            let dx = a.0 - b.0;
+            let dy = a.1 - b.1;
+            (dx * dx + dy * dy).sqrt()
+        };
+
+        let eye_ear = |p: &[(f32, f32)], base: usize| -> f32 {
+            let p1 = p[base + 0];
+            let p2 = p[base + 1];
+            let p3 = p[base + 2];
+            let p4 = p[base + 3];
+            let p5 = p[base + 4];
+            let p6 = p[base + 5];
+            let a = dist(p2, p6);
+            let b = dist(p3, p5);
+            let c = dist(p1, p4).max(1e-6);
+            (a + b) / (2.0 * c)
+        };
+
+            if pts.len() >= 68 {
+            let ear_r = eye_ear(&pts, 36);
+            let ear_l = eye_ear(&pts, 42);
+            let ear = ((ear_r + ear_l) / 2.0).clamp(0.0, 1.0);
+            let thr = env::var("QRAW_EAR_BLINK_THRESH")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.21);
+            let width = env::var("QRAW_EAR_BLINK_WIDTH")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.08)
+                .max(1e-6);
+            let blink_prob = ((thr - ear) / width).clamp(0.0, 1.0);
+
+            let mouth_w = dist(pts[48], pts[54]);
+            let mouth_h = dist(pts[51], pts[57]).max(1e-6);
+            let ratio = mouth_w / mouth_h;
+            let smile_thr = env::var("QRAW_SMILE_RATIO_THRESH")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(2.0);
+            let smile_width = env::var("QRAW_SMILE_RATIO_WIDTH")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(1.0)
+                .max(1e-6);
+            let smile_prob = ((ratio - smile_thr) / smile_width).clamp(0.0, 1.0);
+
+            return Ok((blink_prob, smile_prob));
+        }
+    }
+        let eye_val = *flat.get(eye_idx).unwrap_or(&flat[0]);
+        let smile_val = *flat.get(smile_idx).unwrap_or_else(|| flat.get(1).unwrap_or(&flat[0]));
+
+    let mut eye_open = if (0.0..=1.0).contains(&eye_val) {
+        eye_val
+    } else {
+        sigmoid(eye_val)
+    };
+    let mut smile = if (0.0..=1.0).contains(&smile_val) {
+        smile_val
+    } else {
+        sigmoid(smile_val)
+    };
+
+    if invert_eye {
+        eye_open = 1.0 - eye_open;
+    }
+    eye_open = eye_open.clamp(0.0, 1.0);
+    smile = smile.clamp(0.0, 1.0);
+
+        let blink_prob = (1.0 - eye_open).clamp(0.0, 1.0);
+        return Ok((blink_prob, smile));
+    }
+
+    if let Some(e) = last_err {
+        return Err(e);
+    }
+    Ok((0.5, 0.5))
+}
+
+pub fn score_aesthetics_nima(
+    image: &DynamicImage,
+    aesthetic_mutex: &Mutex<Session>,
+) -> Result<f32> {
+    let size: u32 = env::var("QRAW_NIMA_INPUT_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(224);
+
+    let rgb = image.to_rgb8();
+    let resized = imageops::resize(&rgb, size, size, FilterType::Triangle);
+    let mean = [0.485f32, 0.456f32, 0.406f32];
+    let std = [0.229f32, 0.224f32, 0.225f32];
+
+    let mut arr = Array4::<f32>::zeros((1, 3, size as usize, size as usize));
+    for (x, y, p) in resized.enumerate_pixels() {
+        let xf = x as usize;
+        let yf = y as usize;
+        let r = (p[0] as f32 / 255.0 - mean[0]) / std[0];
+        let g = (p[1] as f32 / 255.0 - mean[1]) / std[1];
+        let b = (p[2] as f32 / 255.0 - mean[2]) / std[2];
+        arr[[0, 0, yf, xf]] = r;
+        arr[[0, 1, yf, xf]] = g;
+        arr[[0, 2, yf, xf]] = b;
+    }
+
+    let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
+    let out_dyn = {
+        let mut session = aesthetic_mutex.lock().unwrap();
+        let outputs = session.run(ort::inputs![input_val])?;
+        outputs[0].try_extract_array::<f32>()?.to_owned()
+    };
+    let flat = out_dyn.into_raw_vec();
+    if flat.len() < 10 {
+        return Ok(5.0);
+    }
+    let probs = if flat.iter().all(|v| (0.0..=1.0).contains(v)) {
+        flat[..10].to_vec()
+    } else {
+        softmax_1d(&flat[..10])
+    };
+    let mut mean_score = 0.0f32;
+    for (i, p) in probs.iter().enumerate() {
+        mean_score += (i as f32 + 1.0) * p;
+    }
+    Ok(mean_score.clamp(1.0, 10.0))
 }
 
 #[derive(Clone, Copy)]

@@ -3574,7 +3574,20 @@ function App() {
     };
   }, []);
 
-  const handleStartPanorama = (paths: string[]) => {
+  const handleStartCullingModal = useCallback(
+    (paths: string[]) => {
+      setCullingModalState({
+        isOpen: true,
+        progress: null,
+        suggestions: null,
+        error: null,
+        pathsToCull: paths,
+      });
+    },
+    []
+  );
+
+  const handleStartPanorama = async (paths: string[]) => {
     setPanoramaModalState((prev: PanoramaModalState) => ({
       ...prev,
       isProcessing: true,
@@ -5043,6 +5056,7 @@ function App() {
             onNavigateToCommunity={() => setActiveView('community')}
             listColumnWidths={listColumnWidths}
             setListColumnWidths={setListColumnWidths}
+            onStartCulling={() => handleStartCullingModal(sortedImageList.map((img) => img.path))}
           />
         )}
         {rootPath && (

@@ -146,12 +146,35 @@ fn main() {
             "cargo:warning=Downloading ONNX Runtime library for {}-{}...",
             target_os, target_arch
         );
-        let base_url =
-            "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes-v1.22.0/";
-        let download_url = format!("{}{}?download=true", base_url, download_filename);
-        println!("cargo:warning=URL: {}", download_url);
+        let base_urls: Vec<String> = [
+            env::var("QRAW_ORT_BASE_URL").ok(),
+            Some(
+                "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes-v1.22.0/"
+                    .to_string(),
+            ),
+            Some(
+                "https://hf-mirror.com/CyberTimon/RapidRAW-Models/resolve/main/onnxruntimes-v1.22.0/"
+                    .to_string(),
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
 
-        if let Err(e) = download_and_verify(&download_url, &dest_path, expected_hash) {
+        let mut last_err: Option<String> = None;
+        for base_url in base_urls {
+            let download_url = format!("{}{}?download=true", base_url, download_filename);
+            println!("cargo:warning=URL: {}", download_url);
+            match download_and_verify(&download_url, &dest_path, expected_hash) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+
+        if let Some(e) = last_err {
             panic!("Failed to download and verify ONNX Runtime library: {}", e);
         }
     }

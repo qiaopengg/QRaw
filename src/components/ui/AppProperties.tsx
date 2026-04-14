@@ -328,11 +328,14 @@ export interface WaveformData {
   width: number;
 }
 
+export type CullingProfile = 'default' | 'portrait' | 'landscape' | 'event';
+
 export interface CullingSettings {
   similarityThreshold: number;
   blurThreshold: number;
   groupSimilar: boolean;
   filterBlurry: boolean;
+  profile: CullingProfile;
 }
 
 export interface ImageAnalysisResult {
@@ -343,6 +346,8 @@ export interface ImageAnalysisResult {
   exposureMetric: number;
   width: number;
   height: number;
+  suggestedRating: number;
+  reasons: string[];
 }
 
 export interface CullGroup {
