@@ -265,9 +265,18 @@ fn softmax(xs: &[f32]) -> Vec<f32> {
     exps.into_iter().map(|e| e / sum).collect()
 }
 
-fn is_face_edge_cropped(bbox: (f32, f32, f32, f32), img_w: u32, img_h: u32, margin: f32) -> bool {
+fn is_face_edge_cropped(bbox: (f32, f32, f32, f32), img_w: u32, img_h: u32, _margin: f32) -> bool {
     let (x1, y1, x2, y2) = bbox;
     let w = img_w as f32;
     let h = img_h as f32;
-    x1 < w * margin || y1 < h * margin || x2 > w * (1.0 - margin) || y2 > h * (1.0 - margin)
+    let face_w = (x2 - x1).max(1.0);
+    let face_h = (y2 - y1).max(1.0);
+    // Only flag as cropped if a significant portion of the face is outside the frame
+    // (face box extends beyond image boundary by >15% of face size)
+    let crop_left = (-x1).max(0.0) / face_w;
+    let crop_top = (-y1).max(0.0) / face_h;
+    let crop_right = (x2 - w).max(0.0) / face_w;
+    let crop_bottom = (y2 - h).max(0.0) / face_h;
+    let max_crop = crop_left.max(crop_top).max(crop_right).max(crop_bottom);
+    max_crop > 0.15
 }

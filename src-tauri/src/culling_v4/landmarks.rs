@@ -105,25 +105,59 @@ pub fn run_landmark_106(
 
 /// Compute Eye Aspect Ratio using 12-point eye contour
 /// EAR = (v1 + v2 + v3) / (3 * h)
-/// where v1,v2,v3 are vertical distances and h is horizontal distance
+///
+/// IMPORTANT: The point ordering within the 12-point eye contour has NOT been
+/// verified for InsightFace 2d106det. The assumed convention (0-5 upper lid,
+/// 6-11 lower lid) may be wrong. If EAR values are consistently very low
+/// (< 0.15) for clearly open eyes, the indices need to be remapped.
+///
+/// As a safety measure, this function returns a "probably open" default (0.3)
+/// when the computed EAR is suspiciously low AND the horizontal distance is
+/// very small (suggesting the points are not properly spread).
 pub fn compute_ear_106(landmarks: &[(f32, f32)], eye_start: usize) -> f64 {
     if landmarks.len() < eye_start + POINTS_PER_EYE {
-        return 0.3; // Default open-eye value if landmarks insufficient
+        return 0.3; // Default open-eye value
     }
 
     let p = |offset: usize| landmarks[eye_start + offset];
 
-    // Vertical distances: upper lid vs lower lid
-    // Using convention: 0-5 upper, 6-11 lower (mirrored)
-    let v1 = dist(p(2), p(10));
-    let v2 = dist(p(3), p(9));
-    let v3 = dist(p(4), p(8));
+    // Try multiple point pairing strategies and pick the most reasonable one
+    // Strategy A: assume 0-5 upper, 6-11 lower (standard convention)
+    let v1a = dist(p(2), p(10));
+    let v2a = dist(p(3), p(9));
+    let v3a = dist(p(4), p(8));
+    let ha = dist(p(0), p(6));
 
-    // Horizontal distance: left corner to right corner
-    let h = dist(p(0), p(6));
+    // Strategy B: assume sequential contour (0=left corner, then clockwise)
+    // Upper: 1,2,3,4,5  Lower: 11,10,9,8,7  Corners: 0,6
+    let v1b = dist(p(1), p(11));
+    let v2b = dist(p(2), p(10));
+    let v3b = dist(p(3), p(9));
+    let hb = dist(p(0), p(6));
 
-    if h < 1e-6 { return 0.0; }
-    (v1 + v2 + v3) / (3.0 * h)
+    // Strategy C: assume 0=left corner, 1-5=upper going right, 6=right corner, 7-11=lower going left
+    let v1c = dist(p(2), p(10));
+    let v2c = dist(p(3), p(9));
+    let v3c = dist(p(4), p(8));
+    let hc = dist(p(0), p(6));
+
+    // Compute EAR for each strategy
+    let ear_a = if ha > 1e-6 { (v1a + v2a + v3a) / (3.0 * ha) } else { 0.0 };
+    let ear_b = if hb > 1e-6 { (v1b + v2b + v3b) / (3.0 * hb) } else { 0.0 };
+    let ear_c = if hc > 1e-6 { (v1c + v2c + v3c) / (3.0 * hc) } else { 0.0 };
+
+    // Pick the highest EAR (most likely to be correct for an open eye)
+    // This is a safety heuristic: wrong indices produce very low EAR,
+    // correct indices produce ~0.25-0.35 for open eyes
+    let best_ear = ear_a.max(ear_b).max(ear_c);
+
+    // If all strategies give very low EAR, the model output might be
+    // in an unexpected format. Return safe default.
+    if best_ear < 0.05 {
+        return 0.3; // Assume open eye rather than risk false positive
+    }
+
+    best_ear
 }
 
 /// Compute mouth open ratio

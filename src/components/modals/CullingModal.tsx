@@ -345,7 +345,7 @@ export default function CullingModal({
                 checked={settings.enableAutoScene}
                 onChange={(v) => setSettings((s) => ({ ...s, enableAutoScene: v }))}
               />
-              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 ml-12">
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
                 {'开启后系统会根据照片内容自动判断拍摄场景，关闭则使用上方手动选择的场景。'}
               </Text>
             </div>
@@ -355,7 +355,7 @@ export default function CullingModal({
                 checked={settings.enableNimaAesthetic}
                 onChange={(v) => setSettings((s) => ({ ...s, enableNimaAesthetic: v }))}
               />
-              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 ml-12">
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
                 {'开启后使用 AI 模型评估照片的美学质量（构图、色彩等）。需要 NIMA 模型支持。'}
               </Text>
             </div>

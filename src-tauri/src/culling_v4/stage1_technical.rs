@@ -70,11 +70,21 @@ pub fn extract_foreground_mask(depth: &GrayImage, ratio: f32) -> GrayImage {
 }
 
 /// Compute exposure health from auto analysis results
+/// Note: perform_auto_analysis returns "how much correction is needed", not "how bad the exposure is"
+/// A well-exposed photo has exposure ≈ 0, shadows ≈ 0, highlights ≈ 0
+/// A slightly dark photo might have exposure = 1.0 (needs +1 stop), which is still acceptable
 fn compute_exposure_health(auto: &crate::image_processing::AutoAdjustmentResults) -> f64 {
-    let exp = (-0.8 * auto.exposure.abs()).exp();
+    // Gentler decay: exposure=1.0 → 0.61, exposure=2.0 → 0.37, exposure=3.0 → 0.22
+    let exp = (-0.5 * auto.exposure.abs()).exp();
+    // shadows/highlights: only penalize when significant correction needed
+    // shadows=30 → 0.7, shadows=60 → 0.4, shadows=0 → 1.0
     let shadow = 1.0 - (auto.shadows / 100.0).min(1.0);
     let highlight = 1.0 - (auto.highlights.abs() / 100.0).min(1.0);
-    exp.min(shadow).min(highlight)
+    // Use weighted combination instead of strict min (min is too harsh)
+    // 50% worst dimension + 50% average
+    let min_val = exp.min(shadow).min(highlight);
+    let avg_val = (exp + shadow + highlight) / 3.0;
+    (min_val * 0.5 + avg_val * 0.5).clamp(0.0, 1.0)
 }
 
 /// Compute dynamic range from histogram

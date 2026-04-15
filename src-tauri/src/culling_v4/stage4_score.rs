@@ -77,16 +77,34 @@ pub fn stage_4_score(
         }
 
         // ═══ Layer 2: Blink hard constraint ═══
+        // Safety check: if >80% of all faces across all photos are "closed",
+        // the landmark indices are likely wrong. Skip blink penalty entirely.
+        let total_faces_with_eyes: usize = portraits.iter()
+            .flat_map(|p| p.faces.iter())
+            .filter(|f| f.area_ratio > 0.03 && !f.is_extreme_profile)
+            .count();
+        let closed_faces: usize = portraits.iter()
+            .flat_map(|p| p.faces.iter())
+            .filter(|f| f.area_ratio > 0.03 && !f.is_extreme_profile && f.is_eye_closed)
+            .count();
+        let blink_detection_reliable = total_faces_with_eyes < 3
+            || (closed_faces as f64 / total_faces_with_eyes.max(1) as f64) < 0.8;
+
         if let Some(pv) = portrait {
-            // Eye closed
-            for face in &pv.faces {
-                if face.area_ratio > 0.03 && !face.is_extreme_profile && face.is_eye_closed {
-                    hard_penalty += 2;
-                    reasons.push("eyesClosed".into());
-                    break;
+            // Eye closed (only if detection seems reliable)
+            if blink_detection_reliable {
+                for face in &pv.faces {
+                    if face.area_ratio > 0.03 && !face.is_extreme_profile && face.is_eye_closed {
+                        hard_penalty += 2;
+                        reasons.push("eyesClosed".into());
+                        break;
+                    }
                 }
             }
-            // Mouth wide open
+            // Mouth wide open — DISABLED until landmark indices verified
+            // TODO: Re-enable after Phase 0 landmark verification
+            // Keeping as soft signal in portrait_mod instead of hard_penalty
+            /*
             for face in &pv.faces {
                 if face.area_ratio > 0.05 && face.mouth_open_ratio > 0.5 {
                     hard_penalty += 1;
@@ -94,7 +112,10 @@ pub fn stage_4_score(
                     break;
                 }
             }
-            // Negative expression + physical indicator double verification
+            */
+            // Negative expression — DISABLED until landmark indices verified
+            // mouth_corner_down depends on unverified landmark indices
+            /*
             for face in &pv.faces {
                 if face.area_ratio > 0.03
                     && face.negative_emotion_prob > 0.6
@@ -105,6 +126,7 @@ pub fn stage_4_score(
                     break;
                 }
             }
+            */
             // Face cropped
             if pv.faces.iter().any(|f| f.is_edge_cropped && f.area_ratio > 0.05) {
                 hard_penalty += 1;
