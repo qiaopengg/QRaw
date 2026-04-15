@@ -6,6 +6,7 @@ mod ai_connector;
 mod ai_processing;
 mod color_matching;
 mod culling;
+mod culling_v4;
 mod denoising;
 mod exif_processing;
 mod expert_presets;
@@ -4825,6 +4826,7 @@ pub fn run() {
             llm_chat::chat_adjust,
             style_transfer::analyze_style_transfer,
             culling::cull_images,
+            culling_v4::cull_images_v4,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
             lens_correction::autodetect_lens,

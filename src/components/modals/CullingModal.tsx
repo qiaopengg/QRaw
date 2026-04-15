@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircle, XCircle, Loader2, Users, Trash2, Star, Tag, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CullingSettings, CullingSuggestions, Invokes, Progress } from '../ui/AppProperties';
+import { CullingSettingsV4, Invokes, Progress, SceneTypeV4, CullingSuggestions } from '../ui/AppProperties';
 import Button from '../ui/Button';
 import Switch from '../ui/Switch';
 import Slider from '../ui/Slider';
@@ -64,11 +64,11 @@ function ImageThumbnail({ path, thumbnails, isSelected, onToggle, children }: Im
           isSelected ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'
         }`}
       />
-      <div className="absolute top-2 right-2 z-10">{isSelected && <CheckCircle size={16} className="text-accent" />}</div>
+      <div className="absolute top-2 right-2 z-10">
+        {isSelected && <CheckCircle size={16} className="text-accent" />}
+      </div>
       {children && (
-        <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-black/60 flex flex-col gap-0.5 z-10">
-          {children}
-        </div>
+        <div className="absolute bottom-0 left-0 right-0 p-1.5 bg-black/60 flex flex-col gap-0.5 z-10">{children}</div>
       )}
     </div>
   );
@@ -93,14 +93,14 @@ export default function CullingModal({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [preset, setPreset] = useState<'balanced' | 'conservative' | 'aggressive'>('balanced');
 
-  const [settings, setSettings] = useState<CullingSettings>({
-    groupSimilar: true,
-    similarityThreshold: 28,
-    filterBlurry: true,
+  const [settings, setSettings] = useState<CullingSettingsV4>({
     blurThreshold: 100.0,
-    checkExpression: true,
-    expressionStrictness: 50,
-    profile: 'default',
+    similarityThreshold: 28,
+    earThreshold: 0.2,
+    enableNimaAesthetic: true,
+    enableAutoScene: true,
+    manualProfile: 'default',
+    strictness: 'balanced',
   });
 
   const [selectedRejects, setSelectedRejects] = useState<Set<string>>(new Set());
@@ -154,12 +154,30 @@ export default function CullingModal({
     if (!isOpen) return;
     setSettings((s) => {
       if (preset === 'balanced') {
-        return { ...s, groupSimilar: true, similarityThreshold: 28, filterBlurry: true, blurThreshold: 100.0, checkExpression: true, expressionStrictness: 50 };
+        return {
+          ...s,
+          blurThreshold: 100.0,
+          similarityThreshold: 28,
+          earThreshold: 0.2,
+          strictness: 'balanced' as const,
+        };
       }
       if (preset === 'conservative') {
-        return { ...s, groupSimilar: true, similarityThreshold: 22, filterBlurry: true, blurThreshold: 75.0, checkExpression: true, expressionStrictness: 20 };
+        return {
+          ...s,
+          blurThreshold: 75.0,
+          similarityThreshold: 22,
+          earThreshold: 0.25,
+          strictness: 'conservative' as const,
+        };
       }
-      return { ...s, groupSimilar: true, similarityThreshold: 36, filterBlurry: true, blurThreshold: 150.0, checkExpression: true, expressionStrictness: 80 };
+      return {
+        ...s,
+        blurThreshold: 150.0,
+        similarityThreshold: 36,
+        earThreshold: 0.18,
+        strictness: 'aggressive' as const,
+      };
     });
   }, [preset, isOpen]);
 
@@ -168,7 +186,7 @@ export default function CullingModal({
     try {
       setIsStarting(true);
       setStage('progress');
-      await invoke(Invokes.CullImages, { paths: imagePaths, settings });
+      await invoke(Invokes.CullImagesV4, { paths: imagePaths, settings });
     } catch (err) {
       console.error('Culling failed to start:', err);
       onError(String(err));
@@ -224,141 +242,135 @@ export default function CullingModal({
 
   const renderSettings = () => (
     <>
-      <div className="flex items-center justify-center mb-4">
+      <div className="flex items-center justify-center mb-4 shrink-0">
         <Users className="w-12 h-12 text-accent" />
       </div>
-      <Text variant={TextVariants.title} className="mb-6 text-center">
-        {t('culling.title')}
+      <Text variant={TextVariants.title} className="mb-4 text-center shrink-0">
+        {t('culling.title') || 'AI 智能选图'}
       </Text>
-      <div className="space-y-6 text-sm">
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-6 text-sm pr-1">
         <div>
           <div className="mb-1">
-            <Text variant={TextVariants.label}>{t('culling.profile') || 'Culling Profile'}</Text>
+            <Text variant={TextVariants.label}>{'拍摄场景'}</Text>
           </div>
           <Dropdown
-            value={settings.profile}
-            onChange={(v: string) => setSettings((s) => ({ ...s, profile: v as any }))}
+            value={settings.manualProfile}
+            onChange={(v: string) => setSettings((s) => ({ ...s, manualProfile: v as any }))}
             options={[
-              { value: 'default', label: t('culling.profileDefault') || 'Default' },
-              { value: 'portrait', label: t('culling.profilePortrait') || 'Portrait' },
-              { value: 'landscape', label: t('culling.profileLandscape') || 'Landscape' },
-              { value: 'event', label: t('culling.profileEvent') || 'Event' },
+              { value: 'default', label: '默认（自动识别）' },
+              { value: 'closeUpPortrait', label: '人像' },
+              { value: 'landscape', label: '风光' },
+              { value: 'groupPhoto', label: '合影 / 活动' },
+              { value: 'wedding', label: '婚礼' },
             ]}
           />
           <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 mb-4 block">
-            {t('culling.profileDescription') || 'Adjusts quality scoring weights based on photography type.'}
+            {'根据拍摄类型自动调整评分权重。选择"默认"时系统会自动识别场景。'}
           </Text>
         </div>
         <div>
           <div className="mb-1">
-            <Text variant={TextVariants.label}>{t('culling.preset')}</Text>
+            <Text variant={TextVariants.label}>{'筛选力度'}</Text>
           </div>
           <Dropdown
             value={preset}
             onChange={(v: string) => setPreset(v as any)}
             options={[
-              { value: 'balanced', label: t('culling.presetBalanced') },
-              { value: 'conservative', label: t('culling.presetConservative') },
-              { value: 'aggressive', label: t('culling.presetAggressive') },
+              { value: 'balanced', label: '均衡' },
+              { value: 'conservative', label: '保守（保留更多照片）' },
+              { value: 'aggressive', label: '激进（严格筛选）' },
             ]}
           />
           <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 block">
-            {t('culling.presetDescription')}
+            {'控制整体筛选的严格程度。保守模式会保留更多照片，激进模式会更严格地淘汰。'}
           </Text>
         </div>
         <div className="flex items-center justify-between">
-          <Text variant={TextVariants.label}>{t('culling.advancedOptions')}</Text>
+          <Text variant={TextVariants.label}>{'高级选项'}</Text>
           <button
             className="px-3 py-1 rounded-md text-text-secondary hover:bg-surface transition-colors"
             onClick={() => setShowAdvanced((v) => !v)}
             type="button"
           >
-            {showAdvanced ? t('culling.hideAdvanced') : t('culling.showAdvanced')}
+            {showAdvanced ? '收起' : '展开'}
           </button>
         </div>
         {showAdvanced && (
-          <>
+          <div className="space-y-5 pl-2 border-l-2 border-border-color ml-1">
             <div>
-              <Switch
-                label={t('culling.groupSimilar')}
-                checked={settings.groupSimilar}
-                onChange={(v) => setSettings((s) => ({ ...s, groupSimilar: v }))}
+              <Slider
+                label={'相似度阈值'}
+                min={1}
+                max={64}
+                step={1}
+                value={settings.similarityThreshold}
+                defaultValue={28}
+                onChange={(e) => setSettings((s) => ({ ...s, similarityThreshold: Number(e.target.value) }))}
               />
-              {settings.groupSimilar && (
-                <div className="mt-2 pl-4 border-l-2 border-border-color ml-1">
-                  <Slider
-                    label={t('culling.similarityThreshold')}
-                    min={1}
-                    max={64}
-                    step={1}
-                    value={settings.similarityThreshold}
-                    defaultValue={28}
-                    onChange={(e) => setSettings((s) => ({ ...s, similarityThreshold: Number(e.target.value) }))}
-                  />
-                  <Text variant={TextVariants.small} className="mt-1">
-                    {t('culling.similarityThresholdDescription')}
-                  </Text>
-                </div>
-              )}
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
+                {'值越低，连拍分组要求越严格（需要更相似才归为一组）。'}
+              </Text>
+            </div>
+            <div>
+              <Slider
+                label={'模糊阈值'}
+                min={25}
+                max={500}
+                step={25}
+                value={settings.blurThreshold}
+                defaultValue={100.0}
+                onChange={(e) => setSettings((s) => ({ ...s, blurThreshold: Number(e.target.value) }))}
+              />
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
+                {'值越高，对清晰度要求越严格。低于此阈值的照片会被标记为模糊。'}
+              </Text>
+            </div>
+            <div>
+              <Slider
+                label={'闭眼检测灵敏度'}
+                min={0.1}
+                max={0.35}
+                step={0.01}
+                value={settings.earThreshold}
+                defaultValue={0.2}
+                onChange={(e) => setSettings((s) => ({ ...s, earThreshold: Number(e.target.value) }))}
+              />
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
+                {'值越低，闭眼检测越严格（更容易判定为闭眼）。需要 2d106det 模型支持。'}
+              </Text>
             </div>
             <div>
               <Switch
-                label={t('culling.filterBlurry')}
-                checked={settings.filterBlurry}
-                onChange={(v) => setSettings((s) => ({ ...s, filterBlurry: v }))}
+                label={'自动场景识别'}
+                checked={settings.enableAutoScene}
+                onChange={(v) => setSettings((s) => ({ ...s, enableAutoScene: v }))}
               />
-              {settings.filterBlurry && (
-                <div className="mt-2  pl-4 border-l-2 border-border-color ml-1">
-                  <Slider
-                    label={t('culling.blurThreshold')}
-                    min={25}
-                    max={500}
-                    step={25}
-                    value={settings.blurThreshold}
-                    defaultValue={100.0}
-                    onChange={(e) => setSettings((s) => ({ ...s, blurThreshold: Number(e.target.value) }))}
-                  />
-                  <Text variant={TextVariants.small} className="mt-1">
-                    {t('culling.blurThresholdDescription')}
-                  </Text>
-                </div>
-              )}
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 ml-12">
+                {'开启后系统会根据照片内容自动判断拍摄场景，关闭则使用上方手动选择的场景。'}
+              </Text>
             </div>
             <div>
               <Switch
-                label={t('culling.checkExpression') || 'Check Facial Expressions'}
-                checked={settings.checkExpression}
-                onChange={(v) => setSettings((s) => ({ ...s, checkExpression: v }))}
+                label={'美学评分'}
+                checked={settings.enableNimaAesthetic}
+                onChange={(v) => setSettings((s) => ({ ...s, enableNimaAesthetic: v }))}
               />
-              {settings.checkExpression && (
-                <div className="mt-2 pl-4 border-l-2 border-border-color ml-1">
-                  <Slider
-                    label={t('culling.expressionStrictness') || 'Expression Strictness'}
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={settings.expressionStrictness}
-                    defaultValue={50}
-                    onChange={(e) => setSettings((s) => ({ ...s, expressionStrictness: Number(e.target.value) }))}
-                  />
-                  <Text variant={TextVariants.small} className="mt-1">
-                    {t('culling.expressionStrictnessDescription') || 'Higher values penalize unnatural expressions more strictly.'}
-                  </Text>
-                </div>
-              )}
+              <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1 ml-12">
+                {'开启后使用 AI 模型评估照片的美学质量（构图、色彩等）。需要 NIMA 模型支持。'}
+              </Text>
             </div>
-          </>
+          </div>
         )}
       </div>
-      <div className="flex justify-end gap-3 mt-8">
+      <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-surface shrink-0">
         <button
           className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
           onClick={onClose}
         >
-          {t('common.cancel')}
+          {t('common.cancel') || '取消'}
         </button>
         <Button onClick={handleStartCulling} disabled={isStarting || imagePaths.length === 0}>
-          {t('culling.startCulling')}
+          {t('culling.startCulling') || '开始智能选图'}
         </Button>
       </div>
     </>

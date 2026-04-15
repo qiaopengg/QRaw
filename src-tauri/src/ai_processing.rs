@@ -194,7 +194,7 @@ fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(models_dir)
 }
 
-fn get_qraw_models_dir() -> Result<PathBuf> {
+pub fn get_qraw_models_dir() -> Result<PathBuf> {
     if let Ok(dir) = env::var("QRAW_MODELS_DIR") {
         let path = PathBuf::from(dir);
         fs::create_dir_all(&path)?;
@@ -281,7 +281,7 @@ fn get_model_env(name: &str, key: &str) -> Option<String> {
     env::var(env_key).ok().filter(|v| !v.trim().is_empty())
 }
 
-async fn ensure_model(
+pub async fn ensure_model(
     app_handle: &tauri::AppHandle,
     models_dir: &Path,
     filename: &str,

@@ -56,6 +56,7 @@ export enum Invokes {
   CreateFolder = 'create_folder',
   CreateVirtualCopy = 'create_virtual_copy',
   CullImages = 'cull_images',
+  CullImagesV4 = 'cull_images_v4',
   DeleteFolder = 'delete_folder',
   DuplicateFile = 'duplicate_file',
   EstimateBatchExportSize = 'estimate_batch_export_size',
@@ -364,4 +365,76 @@ export interface CullingSuggestions {
   blurryImages: ImageAnalysisResult[];
   badExpressions: ImageAnalysisResult[];
   failedPaths: string[];
+}
+
+// ═══ V4 AI Culling Types ═══
+
+export type SceneTypeV4 =
+  | 'closeUpPortrait'
+  | 'halfBodyPortrait'
+  | 'groupPhoto'
+  | 'wedding'
+  | 'landscape'
+  | 'architecture'
+  | 'action'
+  | 'street'
+  | 'default';
+
+export interface CullingSettingsV4 {
+  blurThreshold: number;
+  similarityThreshold: number;
+  earThreshold: number;
+  enableNimaAesthetic: boolean;
+  enableAutoScene: boolean;
+  manualProfile: SceneTypeV4;
+  strictness: 'conservative' | 'balanced' | 'aggressive';
+}
+
+export interface ScoreBreakdownV4 {
+  sharpness: number;
+  subjectSharpness: number;
+  exposure: number;
+  dynamicRange: number;
+  nimaTechnical?: number;
+  nimaAesthetic?: number;
+  clipQuality?: number;
+  faceBlink?: boolean;
+  faceExpression?: number;
+  faceComposition?: number;
+  composition: number;
+  sceneType: string;
+  groupId?: string;
+  isCover: boolean;
+}
+
+export interface FinalRatingV4 {
+  path: string;
+  stars: number;
+  reasons: string[];
+  qualityScore: number;
+  breakdown: ScoreBreakdownV4;
+}
+
+export interface BurstGroupV4 {
+  groupId: string;
+  coverIndex: number;
+  members: { assetIndex: number; isCover: boolean }[];
+}
+
+export interface CullingStatisticsV4 {
+  totalAnalyzed: number;
+  totalPrimary: number;
+  ratingDistribution: number[];
+  burstGroupsCount: number;
+  duplicatesCount: number;
+  technicalFailures: number;
+  blinkDetected: number;
+  detectedScene: string;
+  elapsedMs: number;
+}
+
+export interface CullingResultV4 {
+  statistics: CullingStatisticsV4;
+  ratings: FinalRatingV4[];
+  burstGroups: BurstGroupV4[];
 }
