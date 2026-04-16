@@ -103,61 +103,82 @@ pub fn run_landmark_106(
     Ok(landmarks)
 }
 
-/// Compute Eye Aspect Ratio using 12-point eye contour
-/// EAR = (v1 + v2 + v3) / (3 * h)
+/// Compute eye openness ratio using 12-point eye contour.
 ///
-/// IMPORTANT: The point ordering within the 12-point eye contour has NOT been
-/// verified for InsightFace 2d106det. The assumed convention (0-5 upper lid,
-/// 6-11 lower lid) may be wrong. If EAR values are consistently very low
-/// (< 0.15) for clearly open eyes, the indices need to be remapped.
+/// We intentionally avoid relying on inner point ordering (upper/lower lid),
+/// because ordering can differ across 106-landmark exports.
 ///
-/// As a safety measure, this function returns a "probably open" default (0.3)
-/// when the computed EAR is suspiciously low AND the horizontal distance is
-/// very small (suggesting the points are not properly spread).
+/// Method:
+/// 1) Find the farthest landmark pair as eye corners (major axis).
+/// 2) Project all eye points onto the axis normal and measure span.
+/// 3) Use `vertical_span / horizontal_span` as openness ratio.
+///
+/// Typical values:
+/// - open eye: ~0.18 - 0.35
+/// - closed eye: near 0.0
+///
+/// Returns a conservative fallback (0.3) if geometry is invalid.
 pub fn compute_ear_106(landmarks: &[(f32, f32)], eye_start: usize) -> f64 {
     if landmarks.len() < eye_start + POINTS_PER_EYE {
-        return 0.3; // Default open-eye value
+        return 0.3;
     }
 
-    let p = |offset: usize| landmarks[eye_start + offset];
+    let eye_pts = &landmarks[eye_start..eye_start + POINTS_PER_EYE];
 
-    // Try multiple point pairing strategies and pick the most reasonable one
-    // Strategy A: assume 0-5 upper, 6-11 lower (standard convention)
-    let v1a = dist(p(2), p(10));
-    let v2a = dist(p(3), p(9));
-    let v3a = dist(p(4), p(8));
-    let ha = dist(p(0), p(6));
-
-    // Strategy B: assume sequential contour (0=left corner, then clockwise)
-    // Upper: 1,2,3,4,5  Lower: 11,10,9,8,7  Corners: 0,6
-    let v1b = dist(p(1), p(11));
-    let v2b = dist(p(2), p(10));
-    let v3b = dist(p(3), p(9));
-    let hb = dist(p(0), p(6));
-
-    // Strategy C: assume 0=left corner, 1-5=upper going right, 6=right corner, 7-11=lower going left
-    let v1c = dist(p(2), p(10));
-    let v2c = dist(p(3), p(9));
-    let v3c = dist(p(4), p(8));
-    let hc = dist(p(0), p(6));
-
-    // Compute EAR for each strategy
-    let ear_a = if ha > 1e-6 { (v1a + v2a + v3a) / (3.0 * ha) } else { 0.0 };
-    let ear_b = if hb > 1e-6 { (v1b + v2b + v3b) / (3.0 * hb) } else { 0.0 };
-    let ear_c = if hc > 1e-6 { (v1c + v2c + v3c) / (3.0 * hc) } else { 0.0 };
-
-    // Pick the highest EAR (most likely to be correct for an open eye)
-    // This is a safety heuristic: wrong indices produce very low EAR,
-    // correct indices produce ~0.25-0.35 for open eyes
-    let best_ear = ear_a.max(ear_b).max(ear_c);
-
-    // If all strategies give very low EAR, the model output might be
-    // in an unexpected format. Return safe default.
-    if best_ear < 0.05 {
-        return 0.3; // Assume open eye rather than risk false positive
+    // 1) Find farthest pair as robust eye corners.
+    let mut max_d2 = 0.0f64;
+    let mut i_corner = 0usize;
+    let mut j_corner = 1usize;
+    for i in 0..eye_pts.len() {
+        for j in (i + 1)..eye_pts.len() {
+            let dx = (eye_pts[i].0 - eye_pts[j].0) as f64;
+            let dy = (eye_pts[i].1 - eye_pts[j].1) as f64;
+            let d2 = dx * dx + dy * dy;
+            if d2 > max_d2 {
+                max_d2 = d2;
+                i_corner = i;
+                j_corner = j;
+            }
+        }
     }
 
-    best_ear
+    if max_d2 <= 1e-6 {
+        return 0.3;
+    }
+
+    let a = eye_pts[i_corner];
+    let b = eye_pts[j_corner];
+    let horiz = max_d2.sqrt();
+
+    // Unit normal of the major axis.
+    let ux = (b.0 - a.0) as f64 / horiz;
+    let uy = (b.1 - a.1) as f64 / horiz;
+    let nx = -uy;
+    let ny = ux;
+
+    // 2) Span on normal direction = eyelid opening.
+    let mut min_proj = f64::INFINITY;
+    let mut max_proj = f64::NEG_INFINITY;
+    for &(x, y) in eye_pts {
+        let rx = x as f64 - a.0 as f64;
+        let ry = y as f64 - a.1 as f64;
+        let proj = rx * nx + ry * ny;
+        min_proj = min_proj.min(proj);
+        max_proj = max_proj.max(proj);
+    }
+
+    let vertical_span = (max_proj - min_proj).abs();
+    if !vertical_span.is_finite() || vertical_span <= 1e-6 {
+        return 0.3;
+    }
+
+    // 3) Openness ratio.
+    let ratio = vertical_span / horiz;
+    if !ratio.is_finite() {
+        return 0.3;
+    }
+
+    ratio.clamp(0.0, 1.0)
 }
 
 /// Compute mouth open ratio

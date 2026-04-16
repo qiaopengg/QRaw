@@ -267,7 +267,14 @@ export default function CullingModal({
           </div>
           <Dropdown
             value={settings.manualProfile}
-            onChange={(v: string) => setSettings((s) => ({ ...s, manualProfile: v as any }))}
+            onChange={(v: string) =>
+              setSettings((s) => ({
+                ...s,
+                manualProfile: v as any,
+                // If user explicitly picks a concrete scene, prefer manual scene.
+                enableAutoScene: v === 'default' ? true : false,
+              }))
+            }
             options={[
               { value: 'default', label: '默认（自动识别）' },
               { value: 'closeUpPortrait', label: '人像' },

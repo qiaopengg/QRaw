@@ -28,6 +28,17 @@ fn compute_aesthetic_mod(
     (median * 0.10).clamp(-0.10, 0.10)
 }
 
+fn expression_thresholds(strictness: &str) -> (f64, f64, f64) {
+    match strictness {
+        // Keep more photos unless expression is clearly problematic.
+        "conservative" => (0.16, 0.72, 0.86),
+        // Flag more expression issues.
+        "aggressive" => (0.24, 0.45, 0.68),
+        // Default balanced profile.
+        _ => (0.20, 0.58, 0.78),
+    }
+}
+
 /// Stage 4: Final scoring with decision tree
 pub fn stage_4_score(
     registry: &AssetRegistry,
@@ -60,6 +71,8 @@ pub fn stage_4_score(
         let nima_aes = nima_aesthetic_scores.get(i).copied().flatten();
         let clip_q = clip_quality_scores.get(i).copied().flatten();
         let comp_score = portrait.map(|p| p.composition_score).unwrap_or(0.5);
+        let (smile_low_thresh, negative_expr_thresh, severe_expr_thresh) =
+            expression_thresholds(&settings.strictness);
 
         let mut reasons: Vec<String> = vec![];
         let mut hard_penalty = 0i32;
@@ -115,20 +128,43 @@ pub fn stage_4_score(
                 }
             }
             */
-            // Negative expression — DISABLED until landmark indices verified
-            // mouth_corner_down depends on unverified landmark indices
-            /*
+            // Expression penalties based on expression model outputs.
+            // We do not rely on mouth-corner landmarks here.
+            let mut has_negative_expr = false;
+            let mut has_unnatural_expr = false;
             for face in &pv.faces {
-                if face.area_ratio > 0.03
-                    && face.negative_emotion_prob > 0.6
-                    && face.mouth_corner_down > 0.3
+                if face.area_ratio <= 0.03 {
+                    continue;
+                }
+
+                let smile_low = face.smile_prob < smile_low_thresh;
+                let neg_prob = face.negative_emotion_prob;
+                let label = face.emotion_label.as_str();
+                let negative_label = matches!(
+                    label,
+                    "anger" | "disgust" | "fear" | "sadness" | "contempt"
+                );
+                let unnatural_label = matches!(label, "surprise");
+
+                if (neg_prob >= negative_expr_thresh && smile_low)
+                    || (negative_label && neg_prob >= negative_expr_thresh * 0.65 && smile_low)
                 {
-                    hard_penalty += 1;
-                    reasons.push("negativeExpression".into());
-                    break;
+                    has_negative_expr = true;
+                }
+                if (neg_prob >= severe_expr_thresh && smile_low)
+                    || (unnatural_label && smile_low)
+                {
+                    has_unnatural_expr = true;
                 }
             }
-            */
+            if has_negative_expr {
+                hard_penalty += 1;
+                reasons.push("negativeExpression".into());
+            }
+            if has_unnatural_expr {
+                hard_penalty += 1;
+                reasons.push("unnaturalExpression".into());
+            }
             // Face cropped
             if pv.faces.iter().any(|f| f.is_edge_cropped && f.area_ratio > 0.05) {
                 hard_penalty += 1;
@@ -166,17 +202,27 @@ pub fn stage_4_score(
             if !pv.has_faces {
                 0.0
             } else {
+                let neg_weight = match settings.strictness.as_str() {
+                    "conservative" => 0.06,
+                    "aggressive" => 0.12,
+                    _ => 0.09,
+                };
                 let smile = pv.faces.iter()
                     .filter(|f| f.area_ratio > 0.03)
                     .map(|f| f.smile_prob * 0.03)
                     .sum::<f64>()
                     .min(0.06);
+                let neg_penalty = pv.faces.iter()
+                    .filter(|f| f.area_ratio > 0.03)
+                    .map(|f| f.negative_emotion_prob * neg_weight)
+                    .sum::<f64>()
+                    .min(0.12);
                 let comp = (pv.composition_score - 0.5) * 0.12;
                 let all_open = pv.faces.iter()
                     .filter(|f| f.area_ratio > 0.03 && !f.is_extreme_profile)
                     .all(|f| !f.is_eye_closed);
                 let eye_bonus = if all_open && pv.faces.len() >= 2 { 0.04 } else { 0.0 };
-                (smile + comp + eye_bonus).clamp(-0.12, 0.12)
+                (smile + comp + eye_bonus - neg_penalty).clamp(-0.12, 0.12)
             }
         } else {
             0.0

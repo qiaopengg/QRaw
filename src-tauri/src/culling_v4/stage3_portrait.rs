@@ -72,14 +72,25 @@ pub fn stage_3_portrait(
         ));
 
         // Filter: area > 1%, take top 3
-        let mut primary_faces: Vec<((f32, f32, f32, f32), f64)> = face_boxes
+        let face_candidates: Vec<((f32, f32, f32, f32), f64)> = face_boxes
             .into_iter()
             .map(|(x1, y1, x2, y2)| {
                 let area = ((x2 - x1).max(0.0) as f64) * ((y2 - y1).max(0.0) as f64);
                 ((x1, y1, x2, y2), area / img_area)
             })
+            .collect();
+        let mut primary_faces: Vec<((f32, f32, f32, f32), f64)> = face_candidates
+            .iter()
+            .copied()
             .filter(|(_, ratio)| *ratio >= 0.01)
             .collect();
+        // Fallback for harder portrait samples (backlight / pose / slight occlusion).
+        if primary_faces.is_empty() {
+            primary_faces = face_candidates
+                .into_iter()
+                .filter(|(_, ratio)| *ratio >= 0.005)
+                .collect();
+        }
         primary_faces.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         primary_faces.truncate(3);
 
@@ -239,7 +250,7 @@ fn detect_faces_yunet_multi_output(
     // Parse multi-scale outputs
     let sx = img_w as f32 / input_size as f32;
     let sy = img_h as f32 / input_size as f32;
-    let conf_thresh = 0.5f32;
+    let conf_thresh = 0.35f32;
     let mut faces: Vec<(f32, f32, f32, f32, f32)> = vec![];
 
     let strides = [8u32, 16, 32];
@@ -418,9 +429,12 @@ fn run_expression_model_v4(
         .unwrap_or(5);
 
     let smile_prob = probs.get(4).copied().unwrap_or(0.0) as f64;
-    let negative = (probs.get(0).copied().unwrap_or(0.0)
-        + probs.get(2).copied().unwrap_or(0.0)
-        + probs.get(3).copied().unwrap_or(0.0)) as f64;
+    let negative = (probs.get(0).copied().unwrap_or(0.0)  // anger
+        + probs.get(1).copied().unwrap_or(0.0)            // contempt
+        + probs.get(2).copied().unwrap_or(0.0)            // disgust
+        + probs.get(3).copied().unwrap_or(0.0)            // fear
+        + probs.get(6).copied().unwrap_or(0.0)            // sadness
+        + probs.get(7).copied().unwrap_or(0.0) * 0.3) as f64; // surprise as weak unnatural cue
 
     Ok((smile_prob, negative, labels[max_idx].to_string()))
 }

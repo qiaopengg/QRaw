@@ -145,7 +145,10 @@ pub async fn cull_images_v4(
     };
 
     // ── Scene Detection ──
-    let scene = if settings.enable_auto_scene {
+    // If user explicitly chose a manual scene, honor it even when auto-scene is enabled.
+    let scene = if !matches!(settings.manual_profile, SceneType::Default) {
+        settings.manual_profile.clone()
+    } else if settings.enable_auto_scene {
         scene_detect::auto_detect_scene(&portraits)
     } else {
         settings.manual_profile.clone()
@@ -167,17 +170,21 @@ pub async fn cull_images_v4(
 
     // ── NIMA Aesthetic Scores (optional) ──
     // Our NIMA ONNX uses NHWC format (TensorFlow export), not NCHW
-    let nima_aesthetic_scores: Vec<Option<f64>> = if let Some(ref models) = culling_models {
-        if let Some(ref nima_model) = models.nima_aesthetic {
-            registry.assets.iter().enumerate().map(|(i, asset)| {
-                if verdicts[i].is_fail() { return None; }
-                score_nima_nhwc(&*asset.thumbnail, nima_model).ok()
-            }).collect()
+    let nima_aesthetic_scores: Vec<Option<f64>> = if !settings.enable_nima_aesthetic {
+        vec![None; registry.assets.len()]
+    } else {
+        if let Some(ref models) = culling_models {
+            if let Some(ref nima_model) = models.nima_aesthetic {
+                registry.assets.iter().enumerate().map(|(i, asset)| {
+                    if verdicts[i].is_fail() { return None; }
+                    score_nima_nhwc(&*asset.thumbnail, nima_model).ok()
+                }).collect()
+            } else {
+                vec![None; registry.assets.len()]
+            }
         } else {
             vec![None; registry.assets.len()]
         }
-    } else {
-        vec![None; registry.assets.len()]
     };
 
     // ── Stage 4: Final Scoring ──
