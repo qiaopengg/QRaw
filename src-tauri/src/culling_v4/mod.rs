@@ -110,8 +110,38 @@ pub async fn cull_images_v4(
     );
 
     // ── Stage 3: Portrait Assessment ──
-    let _ = app_handle.emit("culling-debug", format!("[Stage3] Starting with {} assets, models={}", registry.assets.len(), culling_models.is_some()));
-    let portraits = if let Some(ref models) = culling_models {
+    let skip_portrait_stage = !settings.enable_auto_scene
+        && matches!(
+            settings.manual_profile,
+            SceneType::Landscape | SceneType::Architecture
+        );
+
+    if skip_portrait_stage {
+        let _ = app_handle.emit(
+            "culling-debug",
+            format!(
+                "[Stage3] Skipped portrait analysis for manual scene={}",
+                settings.manual_profile
+            ),
+        );
+    } else {
+        let _ = app_handle.emit("culling-debug", format!("[Stage3] Starting with {} assets, models={}", registry.assets.len(), culling_models.is_some()));
+    }
+
+    let portraits = if skip_portrait_stage {
+        registry
+            .assets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| PortraitVerdict {
+                asset_index: i,
+                has_faces: false,
+                primary_face_area_ratio: 0.0,
+                faces: vec![],
+                composition_score: 0.5,
+            })
+            .collect()
+    } else if let Some(ref models) = culling_models {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             stage3_portrait::stage_3_portrait(
                 &registry, &verdicts, models, &settings, &app_handle,

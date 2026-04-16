@@ -1,3 +1,4 @@
+use super::composition::score_composition;
 use super::types::*;
 use tauri::Emitter;
 
@@ -5,6 +6,55 @@ use tauri::Emitter;
 fn normalize_sharpness(raw: f64, threshold: f64) -> f64 {
     let k = (2.0f64.ln()) / threshold.max(1.0);
     (1.0 - (-k * raw).exp()).clamp(0.0, 1.0)
+}
+
+/// Normalize histogram dynamic range (0~1) into a quality score.
+/// Landscape/architecture shots usually benefit from broader tone span.
+fn normalize_dynamic_range(raw: f64) -> f64 {
+    ((raw - 0.25) / 0.55).clamp(0.0, 1.0)
+}
+
+fn is_landscape_scene(scene: &SceneType) -> bool {
+    matches!(scene, SceneType::Landscape | SceneType::Architecture)
+}
+
+fn estimate_cover_quality(
+    tech: &TechnicalVerdict,
+    scene: &SceneType,
+    settings: &CullingSettingsV4,
+) -> f64 {
+    match tech {
+        TechnicalVerdict::Pass {
+            subject_sharpness,
+            exposure_health,
+            dynamic_range,
+            nima_technical,
+            ..
+        } => {
+            let blur = normalize_sharpness(*subject_sharpness, settings.blur_threshold);
+            let exp = *exposure_health;
+            let dr = normalize_dynamic_range(*dynamic_range);
+            let nima_bonus = nima_technical
+                .map(|n| ((n / 10.0) - 0.5) * 0.1)
+                .unwrap_or(0.0);
+
+            if is_landscape_scene(scene) {
+                let min_s = blur.min(exp);
+                let avg_s = (blur + exp + dr) / 3.0;
+                (min_s * 0.45 + avg_s * 0.45 + dr * 0.10 + nima_bonus).clamp(0.0, 1.0)
+            } else {
+                let min_s = blur.min(exp);
+                let avg_s = (blur + exp) / 2.0;
+                (min_s * 0.5 + avg_s * 0.5 + nima_bonus).clamp(0.0, 1.0)
+            }
+        }
+        TechnicalVerdict::Marginal {
+            sharpness,
+            exposure_health,
+            ..
+        } => (normalize_sharpness(*sharpness, settings.blur_threshold).min(*exposure_health)) * 0.5,
+        TechnicalVerdict::Fail { .. } => 0.0,
+    }
 }
 
 /// Compute aesthetic score from up to 3 signals (NIMA + CLIP + composition)
@@ -22,7 +72,9 @@ fn compute_aesthetic_mod(
     }
     signals.push((composition_score - 0.5) * 2.0); // Always available
 
-    if signals.is_empty() { return 0.0; }
+    if signals.is_empty() {
+        return 0.0;
+    }
     signals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = signals[signals.len() / 2];
     (median * 0.10).clamp(-0.10, 0.10)
@@ -60,9 +112,13 @@ pub fn stage_4_score(
         }
     }
 
-    // Compute cover quality for each group
+    // Compute cover quality for each group (0~1 space)
     let mut cover_qualities: std::collections::HashMap<String, f64> =
         std::collections::HashMap::new();
+    for group in groups {
+        let cover_q = estimate_cover_quality(&verdicts[group.cover_index], scene, settings);
+        cover_qualities.insert(group.group_id.clone(), cover_q);
+    }
 
     registry.assets.iter().enumerate().map(|(i, asset)| {
         let tech = &verdicts[i];
@@ -70,7 +126,14 @@ pub fn stage_4_score(
         let group_info = group_lookup.get(&i).copied();
         let nima_aes = nima_aesthetic_scores.get(i).copied().flatten();
         let clip_q = clip_quality_scores.get(i).copied().flatten();
-        let comp_score = portrait.map(|p| p.composition_score).unwrap_or(0.5);
+        // Recompute composition for landscape scenes so horizon/tilt rules are active.
+        // In landscape mode, ignore detected faces to avoid false positives hijacking
+        // composition into portrait-specific rules.
+        let comp_score = if is_landscape_scene(scene) {
+            score_composition(&registry.assets[i].gray_thumbnail, &[], scene)
+        } else {
+            portrait.map(|p| p.composition_score).unwrap_or(0.5)
+        };
         let (smile_low_thresh, negative_expr_thresh, severe_expr_thresh) =
             expression_thresholds(&settings.strictness);
 
@@ -105,7 +168,9 @@ pub fn stage_4_score(
         let blink_detection_reliable = total_faces_with_eyes < 3
             || (closed_faces as f64 / total_faces_with_eyes.max(1) as f64) < 0.8;
 
-        if let Some(pv) = portrait {
+        let apply_face_penalties = !is_landscape_scene(scene);
+        if apply_face_penalties {
+            if let Some(pv) = portrait {
             // Eye closed (only if detection seems reliable)
             if blink_detection_reliable {
                 for face in &pv.faces {
@@ -170,12 +235,13 @@ pub fn stage_4_score(
                 hard_penalty += 1;
                 reasons.push("faceCropped".into());
             }
+            }
         }
 
         // ═══ Layer 3: Technical quality (shortboard effect) ═══
         let tech_q = match tech {
             TechnicalVerdict::Pass {
-                sharpness,
+                sharpness: _,
                 subject_sharpness,
                 exposure_health,
                 dynamic_range,
@@ -183,12 +249,21 @@ pub fn stage_4_score(
             } => {
                 let blur = normalize_sharpness(*subject_sharpness, settings.blur_threshold);
                 let exp = *exposure_health;
-                // dynamic_range removed from shortboard — normal portraits have narrow DR
-                // nima_technical as bonus if available
+                let dr = normalize_dynamic_range(*dynamic_range);
+                // NIMA-technical contributes only as a light bonus
                 let nima_bonus = nima_technical.map(|n| ((n / 10.0) - 0.5) * 0.1).unwrap_or(0.0);
-                let min_s = blur.min(exp);
-                let avg_s = (blur + exp) / 2.0;
-                (min_s * 0.5 + avg_s * 0.5 + nima_bonus).clamp(0.0, 1.0)
+                if is_landscape_scene(scene) {
+                    // For landscape, DR is important but still not reliable enough
+                    // to be a hard shortboard by itself.
+                    let min_s = blur.min(exp);
+                    let avg_s = (blur + exp + dr) / 3.0;
+                    (min_s * 0.45 + avg_s * 0.45 + dr * 0.10 + nima_bonus).clamp(0.0, 1.0)
+                } else {
+                    // Portrait flow unchanged: dynamic range is not a shortboard term.
+                    let min_s = blur.min(exp);
+                    let avg_s = (blur + exp) / 2.0;
+                    (min_s * 0.5 + avg_s * 0.5 + nima_bonus).clamp(0.0, 1.0)
+                }
             }
             TechnicalVerdict::Marginal { sharpness, exposure_health, reason } => {
                 reasons.push(reason.to_tag());
@@ -198,7 +273,9 @@ pub fn stage_4_score(
         };
 
         // ═══ Layer 4: Portrait modifier ═══
-        let portrait_mod = if let Some(pv) = portrait {
+        let portrait_mod = if is_landscape_scene(scene) {
+            0.0
+        } else if let Some(pv) = portrait {
             if !pv.has_faces {
                 0.0
             } else {
@@ -238,8 +315,10 @@ pub fn stage_4_score(
             match scene {
                 SceneType::CloseUpPortrait | SceneType::HalfBodyPortrait =>
                     tech_q * 0.80 + portrait_mod * 2.0 + aesthetic_mod * 1.5,
-                SceneType::Landscape | SceneType::Architecture =>
-                    tech_q * 0.85 + aesthetic_mod * 2.5,
+                SceneType::Landscape | SceneType::Architecture => {
+                    let comp_landscape = (comp_score - 0.5) * 0.18;
+                    tech_q * 0.78 + aesthetic_mod * 2.8 + comp_landscape
+                }
                 SceneType::GroupPhoto | SceneType::Wedding =>
                     tech_q * 0.75 + portrait_mod * 2.5 + aesthetic_mod * 1.5,
                 SceneType::Action =>
@@ -250,7 +329,12 @@ pub fn stage_4_score(
         } else {
             let base = tech_q * 0.95;
             let comp_bonus = (comp_score - 0.5) * 0.05;
-            (base + portrait_mod + comp_bonus).clamp(0.0, 1.0)
+            if is_landscape_scene(scene) {
+                let comp_landscape = (comp_score - 0.5) * 0.10;
+                (tech_q * 0.98 + comp_landscape).clamp(0.0, 1.0)
+            } else {
+                (base + portrait_mod + comp_bonus).clamp(0.0, 1.0)
+            }
         }.clamp(0.0, 1.0);
 
         // ═══ Layer 7: Burst duplicate demotion ═══
@@ -258,20 +342,26 @@ pub fn stage_4_score(
         if let Some((group, is_cover)) = group_info {
             if !is_cover {
                 reasons.push("burstDuplicate".into());
-                // Get cover quality (compute or lookup)
-                let cover_q = cover_qualities.entry(group.group_id.clone()).or_insert_with(|| {
-                    let cover_tech = &verdicts[group.cover_index];
-                    cover_tech.subject_sharpness_or(0.5)
-                });
-                adjusted = adjusted.min(*cover_q - 0.15);
+                if let Some(cover_q) = cover_qualities.get(&group.group_id) {
+                    adjusted = adjusted.min((cover_q - 0.08).clamp(0.0, 1.0));
+                } else {
+                    adjusted = (adjusted - 0.08).clamp(0.0, 1.0);
+                }
             }
         }
 
         // ═══ Star mapping ═══
-        let base_stars = if adjusted > 0.80 { 5 }
-            else if adjusted > 0.62 { 4 }
-            else if adjusted > 0.42 { 3 }
-            else if adjusted > 0.22 { 2 }
+        let (th_5, th_4, th_3, th_2) = if is_landscape_scene(scene) {
+            // Landscape batches tend to cluster more tightly than portraits.
+            (0.83, 0.58, 0.38, 0.20)
+        } else {
+            (0.80, 0.62, 0.42, 0.22)
+        };
+
+        let base_stars = if adjusted > th_5 { 5 }
+            else if adjusted > th_4 { 4 }
+            else if adjusted > th_3 { 3 }
+            else if adjusted > th_2 { 2 }
             else { 1 };
 
         let stars = (base_stars as i32 - hard_penalty).clamp(1, 5) as u8;

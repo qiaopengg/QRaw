@@ -4595,12 +4595,70 @@ pub fn run() {
                     if let Ok(contents) = std::fs::read_to_string(&path) {
                         if let Ok(state) = serde_json::from_str::<WindowState>(&contents) {
                             if state.width >= 200 && state.height >= 150 {
-                                let _ = window.set_size(tauri::Size::Physical(
-                                    tauri::PhysicalSize::new(state.width, state.height),
-                                ));
-                                let _ = window.set_position(tauri::Position::Physical(
-                                    tauri::PhysicalPosition::new(state.x, state.y),
-                                ));
+                                let mut restored = false;
+
+                                if let Ok(monitors) = window.available_monitors() {
+                                    let monitor_rects: Vec<(i64, i64, i64, i64)> = monitors
+                                        .into_iter()
+                                        .map(|m| {
+                                            let pos = m.position();
+                                            let size = m.size();
+                                            (
+                                                pos.x as i64,
+                                                pos.y as i64,
+                                                size.width as i64,
+                                                size.height as i64,
+                                            )
+                                        })
+                                        .collect();
+
+                                    if !monitor_rects.is_empty() {
+                                        let saved_cx = state.x as i64 + (state.width as i64 / 2);
+                                        let saved_cy = state.y as i64 + (state.height as i64 / 2);
+
+                                        let mut target = monitor_rects[0];
+                                        for rect in &monitor_rects {
+                                            let (mx, my, mw, mh) = *rect;
+                                            if saved_cx >= mx
+                                                && saved_cx <= mx + mw
+                                                && saved_cy >= my
+                                                && saved_cy <= my + mh
+                                            {
+                                                target = *rect;
+                                                break;
+                                            }
+                                        }
+
+                                        let (mx, my, mw, mh) = target;
+                                        let width = (state.width as i64).clamp(200, mw.max(200));
+                                        let height = (state.height as i64).clamp(150, mh.max(150));
+
+                                        let min_x = mx;
+                                        let max_x = (mx + mw - width).max(min_x);
+                                        let min_y = my;
+                                        let max_y = (my + mh - height).max(min_y);
+
+                                        let x = (state.x as i64).clamp(min_x, max_x);
+                                        let y = (state.y as i64).clamp(min_y, max_y);
+
+                                        let _ = window.set_size(tauri::Size::Physical(
+                                            tauri::PhysicalSize::new(width as u32, height as u32),
+                                        ));
+                                        let _ = window.set_position(tauri::Position::Physical(
+                                            tauri::PhysicalPosition::new(x as i32, y as i32),
+                                        ));
+                                        restored = true;
+                                    }
+                                }
+
+                                if !restored {
+                                    let _ = window.set_size(tauri::Size::Physical(
+                                        tauri::PhysicalSize::new(state.width, state.height),
+                                    ));
+                                    let _ = window.set_position(tauri::Position::Physical(
+                                        tauri::PhysicalPosition::new(state.x, state.y),
+                                    ));
+                                }
                             } else {
                                 log::warn!(
                                     "Saved window state had unreasonable dimensions ({}x{}), centering instead.",

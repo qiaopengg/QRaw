@@ -3798,11 +3798,18 @@ function App() {
 
       await handleSelectSubfolder(pathToSelect, false, preloadedImages, false);
     };
-    restore().catch((err) => {
+    restore().catch(async (err) => {
       console.error('Failed to restore session, folder might be missing:', err);
-      setError('Failed to restore session. The last used folder may have been moved or deleted.');
-      if (appSettings) {
-        handleSettingsChange({ ...appSettings, lastRootPath: null, lastFolderState: undefined });
+      setError('Failed to restore session. Falling back to the root folder.');
+      if (appSettings?.lastRootPath) {
+        const root = appSettings.lastRootPath;
+        setRootPath(root);
+        try {
+          await handleSelectSubfolder(root, true);
+          return;
+        } catch (fallbackErr) {
+          console.error('Failed to restore root fallback:', fallbackErr);
+        }
       }
       handleGoHome();
       setIsTreeLoading(false);
@@ -3838,6 +3845,20 @@ function App() {
   ]);
 
   const handleGoHome = () => {
+    if (appSettings && rootPath) {
+      const currentExpanded = Array.from(expandedFolders);
+      const persistedFolderState = {
+        currentFolderPath: currentFolderPath || rootPath,
+        expandedFolders: currentExpanded.length > 0 ? currentExpanded : [rootPath],
+      };
+      // Persist session anchor before clearing the in-memory workspace state.
+      handleSettingsChange({
+        ...appSettings,
+        lastRootPath: rootPath,
+        lastFolderState: persistedFolderState as any,
+      });
+    }
+
     setRootPath(null);
     setCurrentFolderPath(null);
     setImageList([]);
