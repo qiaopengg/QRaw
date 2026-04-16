@@ -56,9 +56,26 @@ pub async fn cull_images_v4(
         .map_err(|e| format!("Stage 0 failed: {}", e))?;
 
     // ── Initialize models ──
-    let culling_models = models::get_or_init_culling_models_v4(
-        &app_handle,
-    ).await.ok();
+    let culling_models = match models::get_or_init_culling_models_v4(&app_handle).await {
+        Ok(m) => {
+            let _ = app_handle.emit("culling-debug", format!(
+                "[Models] OK: face={} yunet={} landmark={} expression={} nima_aes={} nima_tech={}",
+                true,
+                m.yunet_detector.is_some(),
+                m.landmark_106.is_some(),
+                m.expression_model.is_some(),
+                m.nima_aesthetic.is_some(),
+                m.nima_technical.is_some(),
+            ));
+            Some(m)
+        }
+        Err(e) => {
+            let msg = format!("[Models] FAILED: {}", e);
+            let _ = app_handle.emit("culling-debug", &msg);
+            eprintln!("{}", msg);
+            None
+        }
+    };
 
     // Try to get CLIP models (with timeout, don't block if unavailable)
     let clip_models: Option<Arc<ClipModels>> = match tokio::time::timeout(
@@ -93,10 +110,27 @@ pub async fn cull_images_v4(
     );
 
     // ── Stage 3: Portrait Assessment ──
+    let _ = app_handle.emit("culling-debug", format!("[Stage3] Starting with {} assets, models={}", registry.assets.len(), culling_models.is_some()));
     let portraits = if let Some(ref models) = culling_models {
-        stage3_portrait::stage_3_portrait(
-            &registry, &verdicts, models, &settings, &app_handle,
-        )
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stage3_portrait::stage_3_portrait(
+                &registry, &verdicts, models, &settings, &app_handle,
+            )
+        }));
+        match result {
+            Ok(p) => {
+                let _ = app_handle.emit("culling-debug", format!("[Stage3] Completed: {} portraits", p.len()));
+                p
+            }
+            Err(e) => {
+                let msg = format!("[Stage3] PANIC: {:?}", e);
+                let _ = app_handle.emit("culling-debug", &msg);
+                eprintln!("{}", msg);
+                registry.assets.iter().enumerate().map(|(i, _)| {
+                    PortraitVerdict { asset_index: i, has_faces: false, primary_face_area_ratio: 0.0, faces: vec![], composition_score: 0.5 }
+                }).collect()
+            }
+        }
     } else {
         // No models available: generate empty portrait verdicts
         registry.assets.iter().enumerate().map(|(i, _)| {
@@ -132,13 +166,12 @@ pub async fn cull_images_v4(
     };
 
     // ── NIMA Aesthetic Scores (optional) ──
+    // Our NIMA ONNX uses NHWC format (TensorFlow export), not NCHW
     let nima_aesthetic_scores: Vec<Option<f64>> = if let Some(ref models) = culling_models {
         if let Some(ref nima_model) = models.nima_aesthetic {
             registry.assets.iter().enumerate().map(|(i, asset)| {
                 if verdicts[i].is_fail() { return None; }
-                crate::ai_processing::score_aesthetics_nima(&*asset.thumbnail, nima_model)
-                    .ok()
-                    .map(|s| s as f64)
+                score_nima_nhwc(&*asset.thumbnail, nima_model).ok()
             }).collect()
         } else {
             vec![None; registry.assets.len()]
@@ -153,10 +186,13 @@ pub async fn cull_images_v4(
         CullingProgressV4 { current: 0, total: 0, stage: "Computing final ratings...".into() },
     );
 
+    let _ = app_handle.emit("culling-debug", format!("[Stage4] Starting scoring for {} assets, scene={}", registry.assets.len(), scene));
     let ratings = stage4_score::stage_4_score(
         &registry, &verdicts, &groups, &portraits,
         &scene, &nima_aesthetic_scores, &clip_quality_scores, &settings,
+        &app_handle,
     );
+    let _ = app_handle.emit("culling-debug", format!("[Stage4] Done: {} ratings", ratings.len()));
 
     // ── Persist results to .rrdata ──
     persist_ratings(&registry, &ratings, &app_handle).await;
@@ -182,6 +218,27 @@ pub async fn cull_images_v4(
 
     // ── Emit legacy-compatible CullingSuggestions for frontend ──
     let legacy_suggestions = build_legacy_suggestions(&registry, &ratings, &groups, &portraits);
+
+    // Emit statistics separately for the frontend overview
+    let _ = app_handle.emit("culling-statistics", json!({
+        "totalAnalyzed": registry.assets.len(),
+        "ratingDistribution": rating_dist,
+        "burstGroups": groups.len(),
+        "duplicates": duplicates_count,
+        "technicalFailures": technical_failures,
+        "blinkDetected": blink_detected,
+        "detectedScene": scene.to_string(),
+        "elapsedMs": elapsed,
+        "modelsLoaded": {
+            "faceDetection": true,
+            "landmark106": culling_models.as_ref().map(|m| m.landmark_106.is_some()).unwrap_or(false),
+            "hsemotion": culling_models.as_ref().map(|m| m.expression_model.is_some()).unwrap_or(false),
+            "nimaAesthetic": culling_models.as_ref().map(|m| m.nima_aesthetic.is_some()).unwrap_or(false),
+            "nimaTechnical": culling_models.as_ref().map(|m| m.nima_technical.is_some()).unwrap_or(false),
+            "clip": clip_models.is_some(),
+        }
+    }));
+
     let _ = app_handle.emit("culling-complete", &legacy_suggestions);
 
     Ok(CullingResultV4 {
@@ -199,6 +256,54 @@ pub async fn cull_images_v4(
         ratings,
         burst_groups: groups,
     })
+}
+
+/// Score image using NIMA model (NHWC format from TensorFlow export)
+fn score_nima_nhwc(
+    image: &image::DynamicImage,
+    model: &std::sync::Mutex<ort::session::Session>,
+) -> Result<f64, String> {
+    let size = 224u32;
+    let rgb = image.to_rgb8();
+    let resized = image::imageops::resize(&rgb, size, size, image::imageops::FilterType::Triangle);
+
+    // NHWC format: (1, 224, 224, 3) — TensorFlow convention
+    let mut arr = ndarray::Array4::<f32>::zeros((1, size as usize, size as usize, 3));
+    let mean = [0.485f32, 0.456, 0.406];
+    let std_dev = [0.229f32, 0.224, 0.225];
+    for (x, y, p) in resized.enumerate_pixels() {
+        arr[[0, y as usize, x as usize, 0]] = (p[0] as f32 / 255.0 - mean[0]) / std_dev[0];
+        arr[[0, y as usize, x as usize, 1]] = (p[1] as f32 / 255.0 - mean[1]) / std_dev[1];
+        arr[[0, y as usize, x as usize, 2]] = (p[2] as f32 / 255.0 - mean[2]) / std_dev[2];
+    }
+
+    let input = ort::value::Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())
+        .map_err(|e| e.to_string())?;
+    let output = {
+        let mut sess = model.lock().unwrap();
+        let outputs = sess.run(ort::inputs![input]).map_err(|e| e.to_string())?;
+        outputs[0].try_extract_array::<f32>().map_err(|e| e.to_string())?.to_owned()
+    };
+
+    let flat = output.into_raw_vec_and_offset().0;
+    if flat.len() < 10 { return Ok(5.0); }
+
+    // Compute weighted mean score (1-10)
+    let probs = if flat.iter().all(|v| (0.0..=1.0).contains(v)) {
+        flat[..10].to_vec()
+    } else {
+        // Apply softmax if not already probabilities
+        let max_v = flat[..10].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exps: Vec<f32> = flat[..10].iter().map(|&x| (x - max_v).exp()).collect();
+        let sum: f32 = exps.iter().sum();
+        exps.into_iter().map(|e| e / sum.max(1e-8)).collect()
+    };
+
+    let mean_score: f64 = probs.iter().enumerate()
+        .map(|(i, &p)| (i as f64 + 1.0) * p as f64)
+        .sum();
+
+    Ok(mean_score.clamp(1.0, 10.0))
 }
 
 /// Persist ratings to .rrdata sidecar files

@@ -70,21 +70,32 @@ pub fn extract_foreground_mask(depth: &GrayImage, ratio: f32) -> GrayImage {
 }
 
 /// Compute exposure health from auto analysis results
-/// Note: perform_auto_analysis returns "how much correction is needed", not "how bad the exposure is"
-/// A well-exposed photo has exposure ≈ 0, shadows ≈ 0, highlights ≈ 0
-/// A slightly dark photo might have exposure = 1.0 (needs +1 stop), which is still acceptable
+/// perform_auto_analysis returns "how much correction is needed":
+///   exposure: how many stops to adjust (negative = photo is bright, needs darkening)
+///   shadows: how much shadow recovery needed (0-100, 0 = no recovery needed)
+///   highlights: how much highlight recovery needed (-100 to 0, 0 = no recovery needed)
+///
+/// Key insight: highlights = -80 means "high contrast photo with bright highlights"
+/// This is NORMAL for portraits with studio lighting or outdoor sun.
+/// Only penalize when BOTH exposure AND highlights are extreme.
 fn compute_exposure_health(auto: &crate::image_processing::AutoAdjustmentResults) -> f64 {
-    // Gentler decay: exposure=1.0 → 0.61, exposure=2.0 → 0.37, exposure=3.0 → 0.22
-    let exp = (-0.5 * auto.exposure.abs()).exp();
-    // shadows/highlights: only penalize when significant correction needed
-    // shadows=30 → 0.7, shadows=60 → 0.4, shadows=0 → 1.0
-    let shadow = 1.0 - (auto.shadows / 100.0).min(1.0);
-    let highlight = 1.0 - (auto.highlights.abs() / 100.0).min(1.0);
-    // Use weighted combination instead of strict min (min is too harsh)
-    // 50% worst dimension + 50% average
-    let min_val = exp.min(shadow).min(highlight);
-    let avg_val = (exp + shadow + highlight) / 3.0;
-    (min_val * 0.5 + avg_val * 0.5).clamp(0.0, 1.0)
+    // Exposure: how far from "perfect" (0 = perfect)
+    // Use gentler decay: exp=1.0 → 0.61, exp=2.0 → 0.37
+    let exp_score = (-0.5 * auto.exposure.abs()).exp();
+
+    // Shadows: 0 = no recovery needed = perfect
+    let shadow_score = 1.0 - (auto.shadows / 100.0).clamp(0.0, 1.0);
+
+    // Highlights: 0 = no recovery needed = perfect
+    // BUT: many normal photos have highlights = -60 to -80 (bright areas)
+    // Only penalize severely when highlights are extreme AND exposure is also off
+    let highlight_raw = 1.0 - (auto.highlights.abs() / 100.0).clamp(0.0, 1.0);
+    // Soften highlight penalty: only count 40% of it
+    let highlight_score = 1.0 - (1.0 - highlight_raw) * 0.4;
+
+    // Weighted combination: exposure matters most, highlights least
+    let score = exp_score * 0.5 + shadow_score * 0.2 + highlight_score * 0.3;
+    score.clamp(0.0, 1.0)
 }
 
 /// Compute dynamic range from histogram
@@ -193,6 +204,15 @@ pub fn stage_1_technical(
                     };
                 }
             }
+
+            // Debug logging - emit to frontend
+            let auto_debug = format!(
+                "[Stage1] {} → sharpness={:.1} subject={:.1} exp_health={:.3} dr={:.3} bt={:.1} auto.exp={:.3} auto.shadows={:.1} auto.highlights={:.1} verdict=Pass",
+                asset.path.split('/').last().unwrap_or(&asset.path),
+                sharpness, subject_sharpness, exposure_health, dynamic_range, bt,
+                auto.exposure, auto.shadows, auto.highlights
+            );
+            let _ = app_handle.emit("culling-debug", &auto_debug);
 
             TechnicalVerdict::Pass {
                 sharpness,

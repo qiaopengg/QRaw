@@ -1,4 +1,5 @@
 use super::types::*;
+use tauri::Emitter;
 
 /// Normalize sharpness to 0.0~1.0 using exponential mapping
 fn normalize_sharpness(raw: f64, threshold: f64) -> f64 {
@@ -37,6 +38,7 @@ pub fn stage_4_score(
     nima_aesthetic_scores: &[Option<f64>],
     clip_quality_scores: &[Option<f64>],
     settings: &CullingSettingsV4,
+    app_handle: &tauri::AppHandle,
 ) -> Vec<FinalRating> {
     // Build group lookup: asset_index → (group, is_cover)
     let mut group_lookup: std::collections::HashMap<usize, (&BurstGroup, bool)> =
@@ -145,12 +147,12 @@ pub fn stage_4_score(
             } => {
                 let blur = normalize_sharpness(*subject_sharpness, settings.blur_threshold);
                 let exp = *exposure_health;
-                let dr = *dynamic_range;
-                let nima_t = nima_technical.map(|n| (n / 10.0).clamp(0.0, 1.0)).unwrap_or(blur);
-                let scores = [blur, exp, dr, nima_t];
-                let min_s = scores.iter().cloned().fold(f64::MAX, f64::min);
-                let avg_s = scores.iter().sum::<f64>() / scores.len() as f64;
-                min_s * 0.6 + avg_s * 0.4
+                // dynamic_range removed from shortboard — normal portraits have narrow DR
+                // nima_technical as bonus if available
+                let nima_bonus = nima_technical.map(|n| ((n / 10.0) - 0.5) * 0.1).unwrap_or(0.0);
+                let min_s = blur.min(exp);
+                let avg_s = (blur + exp) / 2.0;
+                (min_s * 0.5 + avg_s * 0.5 + nima_bonus).clamp(0.0, 1.0)
             }
             TechnicalVerdict::Marginal { sharpness, exposure_health, reason } => {
                 reasons.push(reason.to_tag());
@@ -187,25 +189,22 @@ pub fn stage_4_score(
         // When NIMA/CLIP are unavailable, boost tech_q weight to compensate
         let has_aesthetic = nima_aes.is_some() || clip_q.is_some();
         let final_q = if has_aesthetic {
-            // Full model: tech + portrait + aesthetic
             match scene {
                 SceneType::CloseUpPortrait | SceneType::HalfBodyPortrait =>
-                    tech_q * 0.65 + portrait_mod * 1.5 + aesthetic_mod,
+                    tech_q * 0.80 + portrait_mod * 2.0 + aesthetic_mod * 1.5,
                 SceneType::Landscape | SceneType::Architecture =>
-                    tech_q * 0.75 + aesthetic_mod * 2.0,
+                    tech_q * 0.85 + aesthetic_mod * 2.5,
                 SceneType::GroupPhoto | SceneType::Wedding =>
-                    tech_q * 0.55 + portrait_mod * 2.0 + aesthetic_mod,
+                    tech_q * 0.75 + portrait_mod * 2.5 + aesthetic_mod * 1.5,
                 SceneType::Action =>
-                    tech_q * 0.70 + portrait_mod + aesthetic_mod,
+                    tech_q * 0.85 + portrait_mod * 1.5 + aesthetic_mod,
                 _ =>
-                    tech_q * 0.65 + portrait_mod * 1.5 + aesthetic_mod,
+                    tech_q * 0.80 + portrait_mod * 2.0 + aesthetic_mod * 1.5,
             }
         } else {
-            // Degraded mode: no NIMA/CLIP, tech_q must carry the score
-            let base = tech_q * 0.90 + portrait_mod * 1.0;
-            // Composition bonus (from rule engine, always available)
-            let comp_bonus = (comp_score - 0.5) * 0.10;
-            (base + comp_bonus).clamp(0.0, 1.0)
+            let base = tech_q * 0.95;
+            let comp_bonus = (comp_score - 0.5) * 0.05;
+            (base + portrait_mod + comp_bonus).clamp(0.0, 1.0)
         }.clamp(0.0, 1.0);
 
         // ═══ Layer 7: Burst duplicate demotion ═══
@@ -230,6 +229,14 @@ pub fn stage_4_score(
             else { 1 };
 
         let stars = (base_stars as i32 - hard_penalty).clamp(1, 5) as u8;
+
+        // Debug logging
+        let debug_msg = format!(
+            "[Score] {} → tech_q={:.3} portrait={:.3} aesthetic={:.3} final={:.3} penalty={} → {}★ reasons={:?}",
+            asset.path.split('/').last().unwrap_or(&asset.path),
+            tech_q, portrait_mod, aesthetic_mod, adjusted, hard_penalty, stars, reasons
+        );
+        let _ = app_handle.emit("culling-debug", &debug_msg);
 
         // Add positive reasons
         if let Some(pv) = portrait {

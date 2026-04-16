@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { CheckCircle, XCircle, Loader2, Users, Trash2, Star, Tag, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CullingSettingsV4, Invokes, Progress, SceneTypeV4, CullingSuggestions } from '../ui/AppProperties';
@@ -91,6 +92,8 @@ export default function CullingModal({
   const { t } = useTranslation();
   const [isStarting, setIsStarting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [preset, setPreset] = useState<'balanced' | 'conservative' | 'aggressive'>('balanced');
 
   const [settings, setSettings] = useState<CullingSettingsV4>({
@@ -186,7 +189,16 @@ export default function CullingModal({
     try {
       setIsStarting(true);
       setStage('progress');
-      await invoke(Invokes.CullImagesV4, { paths: imagePaths, settings });
+      setDebugLogs([]); // Clear debug logs on new run
+      // Listen for debug events
+      const unlistenDebug = await listen<string>('culling-debug', (event) => {
+        setDebugLogs((prev) => [...prev, event.payload]);
+      });
+      try {
+        await invoke(Invokes.CullImagesV4, { paths: imagePaths, settings });
+      } finally {
+        unlistenDebug();
+      }
     } catch (err) {
       console.error('Culling failed to start:', err);
       onError(String(err));
@@ -662,6 +674,23 @@ export default function CullingModal({
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {/* Debug Panel */}
+        {debugLogs.length > 0 && (
+          <div className="mt-4 shrink-0">
+            <button
+              className="text-xs text-text-secondary hover:text-text-primary"
+              onClick={() => setShowDebug((v) => !v)}
+            >
+              {showDebug ? '▼ 隐藏调试信息' : '▶ 显示调试信息'} ({debugLogs.length} 条)
+            </button>
+            {showDebug && (
+              <pre className="mt-2 p-3 bg-bg-primary rounded text-[10px] text-text-secondary font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all select-all">
+                {debugLogs.join('\n')}
+              </pre>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-between items-center gap-3 mt-6 pt-4 border-t border-surface shrink-0">
           <div className="flex-1">

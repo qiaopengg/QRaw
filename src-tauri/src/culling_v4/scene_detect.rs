@@ -14,6 +14,9 @@ pub fn auto_detect_scene(portraits: &[PortraitVerdict]) -> SceneType {
     let no_face = portraits.iter()
         .filter(|p| !p.has_faces)
         .count() as f64;
+    let any_face = portraits.iter()
+        .filter(|p| p.has_faces)
+        .count();
 
     // 80%+ photos have large face → portrait
     if large_face / total > 0.8 {
@@ -23,11 +26,11 @@ pub fn auto_detect_scene(portraits: &[PortraitVerdict]) -> SceneType {
     if multi_face / total > 0.6 {
         return SceneType::GroupPhoto;
     }
-    // 70%+ photos have no face → landscape
-    if no_face / total > 0.7 {
+    // 70%+ photos have no face AND at least some faces were detected
+    // (if zero faces detected in entire set, face detection likely failed — use Default)
+    if no_face / total > 0.7 && any_face > 0 {
         return SceneType::Landscape;
     }
 
-    // Mixed content
     SceneType::Default
 }
