@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown } from 'lucide-react';
 import Input from './Input';
 import Text from './Text';
-import { TextColors, TextVariants, TextWeights } from '../../types/typography';
+import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../types/typography';
 import clsx from 'clsx';
 
 export interface OptionItem<T extends React.Key> {
@@ -105,7 +105,7 @@ const Dropdown = <T extends React.Key>({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         disabled={disabled}
-        className="w-full bg-bg-primary border border-border-color rounded-md px-3 py-2 focus:ring-accent focus:border-accent focus:outline-hidden focus:ring-2 flex justify-between items-center text-left disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full bg-bg-primary border border-border-color rounded-md px-3 mr-4 py-2 focus:ring-accent focus:border-accent focus:outline-hidden focus:ring-2 flex justify-between items-center text-left disabled:opacity-50 disabled:cursor-not-allowed"
         onClick={() => setIsOpen(!isOpen)}
         type="button"
       >
@@ -113,7 +113,7 @@ const Dropdown = <T extends React.Key>({
           {selectedOption ? selectedOption.label : placeholder}
         </Text>
         <ChevronDown
-          className={`text-text-secondary transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          className={`${TEXT_COLOR_KEYS[TextColors.secondary]} transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
           size={20}
         />
       </button>
@@ -162,7 +162,7 @@ const Dropdown = <T extends React.Key>({
                     <Text color={TextColors.primary} weight={isSelected ? TextWeights.semibold : TextWeights.normal}>
                       {option.label}
                     </Text>
-                    {isSelected && <Check size={16} />}
+                    {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
                   </button>
                 );
               })}

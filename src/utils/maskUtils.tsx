@@ -5,22 +5,15 @@ import { ImageDimensions } from '../hooks/useImageRenderSize';
 export const createSubMask = (
   type: Mask,
   imageDimensions: ImageDimensions,
-): {
-  id: string;
-  visible: boolean;
-  invert: boolean;
-  opacity: number;
-  mode: SubMaskMode;
-  type: Mask;
-  parameters: Record<string, number | boolean | string | null | Array<unknown>>;
-} => {
+  mode: SubMaskMode = SubMaskMode.Additive,
+) => {
   const { width, height } = imageDimensions || { width: 1000, height: 1000 };
   const common = {
     id: uuidv4(),
     visible: true,
     invert: false,
     opacity: 100,
-    mode: SubMaskMode.Additive,
+    mode,
     name: formatMaskTypeName(type),
     type,
   };
@@ -45,6 +38,8 @@ export const createSubMask = (
       };
     case Mask.Brush:
       return { ...common, parameters: { lines: [] } };
+    case Mask.Flow:
+      return { ...common, parameters: { lines: [], flow: 10 } };
     case Mask.AiSubject:
       return { ...common, parameters: { maskDataBase64: null, grow: 0, feather: 0 } };
     case Mask.AiForeground:

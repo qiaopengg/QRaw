@@ -29,6 +29,8 @@ import {
   SortAsc,
   Trash2,
   Users,
+  Layers,
+  Scaling,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AddPresetModal from '../../modals/AddPresetModal';
@@ -36,8 +38,10 @@ import RenamePresetModal from '../../modals/RenamePresetModal';
 import CreateFolderModal from '../../modals/CreateFolderModal';
 import RenameFolderModal from '../../modals/RenameFolderModal';
 import Button from '../../ui/Button';
-import { Adjustments, INITIAL_ADJUSTMENTS } from '../../../utils/adjustments';
-import { Folder, Invokes, OPTION_SEPARATOR, Panel, Preset, SelectedImage } from '../../ui/AppProperties';
+import Text from '../../ui/Text';
+import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
+import { Adjustments, INITIAL_ADJUSTMENTS, ADJUSTMENT_GROUPS } from '../../../utils/adjustments';
+import { Invokes, OPTION_SEPARATOR, Panel, Preset, SelectedImage } from '../../ui/AppProperties';
 
 interface DroppableFolderItemProps {
   children: React.ReactNode;
@@ -107,19 +111,52 @@ const itemVariants = {
 };
 
 function PresetItemDisplay({ preset, previewUrl, isGeneratingPreviews }: PresetItemDisplayProps) {
+  const geometryKeys = ADJUSTMENT_GROUPS.geometry.flatMap((g) => g.keys);
+
+  const supportsMasks = preset.includeMasks ?? (preset.adjustments?.masks && preset.adjustments.masks.length > 0);
+  const supportsGeometry =
+    preset.includeCropTransform ??
+    geometryKeys.some((key) => geometryKeys.some((key) => preset.adjustments?.[key] !== undefined));
+
+  const tooltipContent = useMemo(() => {
+    const features = [];
+    if (supportsMasks) features.push('Masks');
+    if (supportsGeometry) features.push('Crop & Transform');
+
+    if (features.length === 0) return undefined;
+    return `Supports ${features.join(' + ')}`;
+  }, [supportsMasks, supportsGeometry]);
+
   return (
     <div className="flex items-center gap-2 p-2 rounded-lg bg-surface cursor-grabbing">
-      <div className="w-20 h-14 bg-bg-tertiary rounded-md flex items-center justify-center flex-shrink-0">
+      <div
+        className="w-20 h-14 bg-bg-tertiary rounded-md flex items-center justify-center shrink-0 relative overflow-hidden"
+        data-tooltip={tooltipContent}
+      >
         {isGeneratingPreviews && !previewUrl ? (
           <Loader2 size={20} className="animate-spin text-text-secondary" />
         ) : previewUrl ? (
-          <img src={previewUrl} alt={`${preset.name} preview`} className="w-full h-full object-cover rounded-md" />
+          <img
+            src={previewUrl}
+            alt={`${preset.name} preview`}
+            className="w-full h-full object-cover rounded-md pointer-events-none"
+          />
         ) : (
           <Loader2 size={20} className="animate-spin text-text-secondary" />
         )}
+
+        {(supportsMasks || supportsGeometry) && (
+          <div className="absolute top-1 right-1 bg-primary rounded-full px-1.5 py-0.5 flex items-center gap-1.5 backdrop-blur-xs shadow-xs z-10 pointer-events-none">
+            {supportsMasks && <Layers size={11} className="text-white" />}
+            {supportsGeometry && <Scaling size={11} className="text-white" />}
+          </div>
+        )}
       </div>
-      <div className="flex-grow min-w-0">
-        <p className="font-medium truncate">{preset.name}</p>
+
+      <div className="grow min-w-0">
+        <Text color={TextColors.primary} weight={TextWeights.medium} className="truncate">
+          {preset.name}
+        </Text>
       </div>
     </div>
   );
@@ -131,8 +168,12 @@ function FolderItemDisplay({ folder }: FolderProps) {
       <div className="p-1">
         <FolderIcon size={18} />
       </div>
-      <p className="font-normal flex-grow truncate select-none">{folder.name}</p>
-      <span className="text-text-secondary text-sm ml-auto pr-1">{folder.children?.length || 0}</span>
+      <Text color={TextColors.primary} weight={TextWeights.medium} className="grow truncate select-none">
+        {folder.name}
+      </Text>
+      <Text as="span" weight={TextWeights.medium} className="ml-auto pr-1">
+        {folder.children?.length || 0}
+      </Text>
     </div>
   );
 }
@@ -243,10 +284,17 @@ function DroppableFolderItem({ folder, onContextMenu, children, onToggle, isExpa
             />
           )}
         </div>
-        <p className="font-normal flex-grow truncate select-none" onClick={() => onToggle(folder.id!)}>
+        <Text
+          color={TextColors.primary}
+          weight={TextWeights.medium}
+          className="grow truncate select-none"
+          onClick={() => onToggle(folder.id)}
+        >
           {folder.name}
-        </p>
-        <span className="text-text-secondary text-sm ml-auto pr-1">{folder.children?.length || 0}</span>
+        </Text>
+        <Text as="span" variant={TextVariants.small} color={TextColors.secondary} className="ml-auto pr-1">
+          {folder.children?.length || 0}
+        </Text>
       </div>
       <AnimatePresence>
         {isExpanded && hasChildren && (
@@ -556,8 +604,13 @@ export default function PresetsPanel({
     } as Partial<Adjustments>);
   };
 
-  const handleSaveCurrentSettingsAsPreset = async (name: string) => {
-    const newPreset = addPreset(name);
+  const handleSaveCurrentSettingsAsPreset = async (
+    name: string,
+    includeMasks: boolean,
+    includeCropTransform: boolean,
+    isAdditive: boolean,
+  ) => {
+    const newPreset = addPreset(name, null, includeMasks, includeCropTransform, isAdditive);
     setIsAddModalOpen(false);
     if (newPreset) {
       await generateSinglePreview(newPreset);
@@ -761,14 +814,27 @@ export default function PresetsPanel({
       options = [
         {
           icon: RefreshCw,
-          label: t('presets.overwritePreset'),
-
-          onClick: async () => {
-            const updated = updatePreset(data?.id ?? null);
-            if (updated) {
-              await generateSinglePreview(updated);
-            }
-          },
+          label: 'Update from Current',
+          submenu: [
+            {
+              label: 'Merge',
+              onClick: async () => {
+                const updated = updatePreset(data?.id ?? null, 'merge');
+                if (updated) {
+                  await generateSinglePreview(updated);
+                }
+              },
+            },
+            {
+              label: 'Replace',
+              onClick: async () => {
+                const updated = updatePreset(data?.id ?? null, 'replace');
+                if (updated) {
+                  await generateSinglePreview(updated);
+                }
+              },
+            },
+          ],
         },
         { type: OPTION_SEPARATOR },
         {
@@ -837,8 +903,8 @@ export default function PresetsPanel({
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex flex-col h-full">
-        <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-          <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('presets.title')}</h2>
+        <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+          <Text variant={TextVariants.title}>Presets</Text>
           <div className="flex items-center gap-1">
             <button
               className="p-2 rounded-full hover:bg-surface transition-colors"
@@ -882,13 +948,21 @@ export default function PresetsPanel({
           ref={setRootNodeRef}
         >
           {isLoading && presets.length === 0 && (
-            <div className="text-center text-text-secondary py-2">
-              <Loader2 size={16} className="animate-spin inline-block mr-2" /> {t('presets.loadingPresets')}
-            </div>
+            <Text
+              as="div"
+              variant={TextVariants.heading}
+              color={TextColors.secondary}
+              weight={TextWeights.normal}
+              className="text-center mt-4"
+            >
+              <Loader2 size={14} className="animate-spin inline-block mr-2" /> Loading Presets...
+            </Text>
           )}
           {!isLoading && presets.length === 0 ? (
-            <div className="text-center text-text-secondary py-8 flex flex-col items-center gap-4">
-              <p className="max-w-xs">{t('presets.noPresetsYet')}</p>
+            <div className="text-center text-text-secondary flex flex-col items-center gap-4 pt-4">
+              <Text className="max-w-xs">
+                No presets saved yet. Create your own, import from a file, or explore community presets.
+              </Text>
               <Button variant="secondary" onClick={onNavigateToCommunity}>
                 <Users size={16} className="mr-2" />
                 {t('presets.getCommunityPresets')}

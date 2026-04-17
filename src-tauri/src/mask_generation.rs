@@ -9,14 +9,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::f32::consts::PI;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(crate = "serde")]
 #[serde(rename_all = "camelCase")]
 pub enum SubMaskMode {
     Additive,
     Subtractive,
+    Intersect,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(rename_all = "camelCase")]
 pub struct SubMask {
     pub id: String,
@@ -35,7 +38,8 @@ fn default_opacity() -> f32 {
     100.0
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(rename_all = "camelCase")]
 pub struct MaskDefinition {
     pub id: String,
@@ -56,14 +60,16 @@ impl MaskDefinition {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(rename_all = "camelCase")]
 pub struct PatchData {
     pub color: String,
     pub mask: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(rename_all = "camelCase")]
 pub struct AiPatchDefinition {
     pub id: String,
@@ -150,6 +156,29 @@ fn default_brush_feather() -> f32 {
 struct BrushMaskParameters {
     #[serde(default)]
     lines: Vec<BrushLine>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FlowLine {
+    tool: String,
+    brush_size: f32,
+    points: Vec<Point>,
+    #[serde(default = "default_brush_feather")]
+    feather: f32,
+    #[serde(default = "default_line_flow")]
+    flow: f32,
+}
+
+fn default_line_flow() -> f32 {
+    10.0
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct FlowMaskParameters {
+    #[serde(default)]
+    lines: Vec<FlowLine>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -478,6 +507,128 @@ fn generate_brush_bitmap(
             );
         }
     }
+    mask
+}
+
+fn generate_flow_stroke_coverage(
+    line: &FlowLine,
+    width: u32,
+    height: u32,
+    scale: f32,
+    crop_offset: (f32, f32),
+) -> GrayImage {
+    let mut stroke_mask = GrayImage::new(width, height);
+
+    if line.points.is_empty() {
+        return stroke_mask;
+    }
+
+    let radius = (line.brush_size * scale / 2.0).max(0.0);
+    let feather = line.feather.clamp(0.0, 1.0);
+    let color_value = 255u8;
+
+    if line.points.len() > 1 {
+        for points_pair in line.points.windows(2) {
+            let p1 = &points_pair[0];
+            let p2 = &points_pair[1];
+
+            let x1_f = p1.x as f32 * scale - crop_offset.0;
+            let y1_f = p1.y as f32 * scale - crop_offset.1;
+            let x2_f = p2.x as f32 * scale - crop_offset.0;
+            let y2_f = p2.y as f32 * scale - crop_offset.1;
+
+            let dist = ((x2_f - x1_f).powi(2) + (y2_f - y1_f).powi(2)).sqrt();
+            let step_size = (radius * (1.0 - feather) / 2.0).max(1.0);
+            let steps = (dist / step_size).ceil() as i32;
+
+            if steps > 1 {
+                for i in 0..=steps {
+                    let t = i as f32 / steps as f32;
+                    let interp_x = (x1_f + t * (x2_f - x1_f)) as i32;
+                    let interp_y = (y1_f + t * (y2_f - y1_f)) as i32;
+                    draw_feathered_ellipse_mut(
+                        &mut stroke_mask,
+                        (interp_x, interp_y),
+                        radius,
+                        feather,
+                        color_value,
+                        false,
+                    );
+                }
+            } else {
+                draw_feathered_ellipse_mut(
+                    &mut stroke_mask,
+                    (x1_f as i32, y1_f as i32),
+                    radius,
+                    feather,
+                    color_value,
+                    false,
+                );
+                draw_feathered_ellipse_mut(
+                    &mut stroke_mask,
+                    (x2_f as i32, y2_f as i32),
+                    radius,
+                    feather,
+                    color_value,
+                    false,
+                );
+            }
+        }
+    } else {
+        let p1 = &line.points[0];
+        let x1 = (p1.x as f32 * scale - crop_offset.0) as i32;
+        let y1 = (p1.y as f32 * scale - crop_offset.1) as i32;
+        draw_feathered_ellipse_mut(
+            &mut stroke_mask,
+            (x1, y1),
+            radius,
+            feather,
+            color_value,
+            false,
+        );
+    }
+
+    stroke_mask
+}
+
+fn generate_flow_bitmap(
+    params_value: &Value,
+    width: u32,
+    height: u32,
+    scale: f32,
+    crop_offset: (f32, f32),
+) -> GrayImage {
+    let params: FlowMaskParameters =
+        serde_json::from_value(params_value.clone()).unwrap_or_default();
+    let mut mask = GrayImage::new(width, height);
+
+    for line in &params.lines {
+        if line.points.is_empty() {
+            continue;
+        }
+
+        let flow_per_stroke = (line.flow.clamp(0.0, 100.0) / 100.0) * 255.0;
+        let is_eraser = line.tool == "eraser";
+        let stroke_coverage =
+            generate_flow_stroke_coverage(line, width, height, scale, crop_offset);
+
+        for (x, y, pixel) in mask.enumerate_pixels_mut() {
+            let stroke_pixel = stroke_coverage.get_pixel(x, y)[0] as f32;
+            if stroke_pixel <= 0.0 {
+                continue;
+            }
+
+            let delta = ((stroke_pixel / 255.0) * flow_per_stroke).round();
+            let current = pixel[0] as f32;
+            let next = if is_eraser {
+                (current - delta).max(0.0)
+            } else {
+                (current + delta).min(255.0)
+            };
+            pixel[0] = next as u8;
+        }
+    }
+
     mask
 }
 
@@ -985,6 +1136,13 @@ fn generate_sub_mask_bitmap(
             scale,
             crop_offset,
         )),
+        "flow" => Some(generate_flow_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+        )),
         "color" => generate_color_bitmap(
             &sub_mask.parameters,
             width,
@@ -1061,6 +1219,12 @@ pub fn generate_mask_bitmap(
                     for (x, y, pixel) in final_mask.enumerate_pixels_mut() {
                         let sub_pixel = sub_bitmap.get_pixel(x, y);
                         pixel[0] = pixel[0].saturating_sub(sub_pixel[0]);
+                    }
+                }
+                SubMaskMode::Intersect => {
+                    for (x, y, pixel) in final_mask.enumerate_pixels_mut() {
+                        let sub_pixel = sub_bitmap.get_pixel(x, y);
+                        pixel[0] = pixel[0].min(sub_pixel[0]);
                     }
                 }
             }

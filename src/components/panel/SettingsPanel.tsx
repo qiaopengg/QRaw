@@ -1519,6 +1519,7 @@ export default function SettingsPanel({
                         onChange={(e: any) =>
                           handleProcessingSettingChange('rawHighlightCompression', parseFloat(e.target.value))
                         }
+                        fillOrigin="min"
                       />
                     </SettingItem>
 

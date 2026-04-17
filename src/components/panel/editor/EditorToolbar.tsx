@@ -462,9 +462,9 @@ const EditorToolbar = memo(
               >
                 {exifData.shutter && (
                   <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.shutterSpeed')}>
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconShutter />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {exifData.shutter}
                     </Text>
@@ -472,9 +472,9 @@ const EditorToolbar = memo(
                 )}
                 {exifData.fNumber && (
                   <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.aperture')}>
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconAperture />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {exifData.fNumber}
                     </Text>
@@ -482,9 +482,9 @@ const EditorToolbar = memo(
                 )}
                 {exifData.iso && (
                   <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.iso')}>
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconIso />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {exifData.iso}
                     </Text>
@@ -492,9 +492,9 @@ const EditorToolbar = memo(
                 )}
                 {exifData.focal && (
                   <div className="flex items-center gap-1.5" data-tooltip={t('editorToolbar.focalLength')}>
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconFocalLength />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {String(exifData.focal).endsWith('mm') ? exifData.focal : `${exifData.focal}mm`}
                     </Text>
@@ -510,9 +510,9 @@ const EditorToolbar = memo(
               >
                 {exifData.captureDate && (
                   <div className="flex items-center gap-2">
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconCalendar />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {exifData.captureDate}
                     </Text>
@@ -520,9 +520,9 @@ const EditorToolbar = memo(
                 )}
                 {exifData.captureTime && (
                   <div className="flex items-center gap-2">
-                    <span className="text-text-secondary">
+                    <Text as="span">
                       <IconClock />
-                    </span>
+                    </Text>
                     <Text as="span" variant={TextVariants.small} color={TextColors.primary} weight={TextWeights.medium}>
                       {exifData.captureTime}
                     </Text>

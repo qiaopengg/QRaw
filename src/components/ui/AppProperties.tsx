@@ -269,6 +269,8 @@ export interface Preset {
   folder?: Folder;
   id: string;
   name: string;
+  includeMasks?: boolean;
+  includeCropTransform?: boolean;
 }
 
 export interface Progress {

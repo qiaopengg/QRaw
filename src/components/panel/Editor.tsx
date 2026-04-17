@@ -15,6 +15,8 @@ import Waveform from './editor/Waveform';
 import { Mask, SubMask } from './right/Masks';
 import { BrushSettings, Invokes, Panel, SelectedImage, TransformState, WaveformData } from '../ui/AppProperties';
 import type { OverlayMode } from './right/CropPanel';
+import Text from '../ui/Text';
+import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 
 interface EditorProps {
   activeAiPatchContainerId: string | null;
@@ -160,6 +162,7 @@ export default function Editor({
   const clickAnimationTime = 200;
   const isAnimating = useRef(false);
   const animationTimeoutRef = useRef<number | null>(null);
+  const zoomDebounceTimeoutRef = useRef<number | null>(null);
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
   const savedZoomState = useRef<{ scale: number; positionX: number; positionY: number } | null>(null);
   const focalPointRef = useRef({ x: 0.5, y: 0.5 });
@@ -257,7 +260,12 @@ export default function Editor({
         return;
       }
 
-      onZoomed(state);
+      if (zoomDebounceTimeoutRef.current) {
+        clearTimeout(zoomDebounceTimeoutRef.current);
+      }
+      zoomDebounceTimeoutRef.current = window.setTimeout(() => {
+        onZoomed(state);
+      }, 100);
     },
     [onZoomed],
   );
@@ -368,18 +376,21 @@ export default function Editor({
   }, [selectedImage, imageRenderSize.scale, originalSize]);
 
   useEffect(() => {
-    if (onDisplaySizeChange && imageRenderSize.width > 0) {
-      const currentDisplaySize = {
-        width: imageRenderSize.width * transformState.scale,
-        height: imageRenderSize.height * transformState.scale,
-        scale: transformState.scale,
-        offsetX: imageRenderSize.offsetX,
-        offsetY: imageRenderSize.offsetY,
-        containerWidth: imageContainerRef.current?.clientWidth || 0,
-        containerHeight: imageContainerRef.current?.clientHeight || 0,
-      };
-      onDisplaySizeChange(currentDisplaySize);
-    }
+    const timer = setTimeout(() => {
+      if (onDisplaySizeChange && imageRenderSize.width > 0) {
+        const currentDisplaySize = {
+          width: imageRenderSize.width * transformState.scale,
+          height: imageRenderSize.height * transformState.scale,
+          scale: transformState.scale,
+          offsetX: imageRenderSize.offsetX,
+          offsetY: imageRenderSize.offsetY,
+          containerWidth: imageContainerRef.current?.clientWidth || 0,
+          containerHeight: imageContainerRef.current?.clientHeight || 0,
+        };
+        onDisplaySizeChange(currentDisplaySize);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [imageRenderSize, transformState.scale, onDisplaySizeChange]);
 
   useEffect(() => {
@@ -423,6 +434,14 @@ export default function Editor({
       }
     }
   }, [adjustments.crop]);
+
+  const requestMaskOverlay = useCallback(
+    (maskDef: any, renderSize: any, currentAdjustments: any) => {
+      pendingOverlayRequestRef.current = { maskDef, renderSize, jsAdjustments: currentAdjustments };
+      processOverlayQueue();
+    },
+    [processOverlayQueue],
+  );
 
   const handleLiveMaskPreview = useCallback(
     (maskDef: AiPatch | MaskContainer | Record<string, unknown>) => {
@@ -472,13 +491,84 @@ export default function Editor({
     [adjustments.crop],
   );
 
+  const overlayTriggerHash = useMemo(() => {
+    let activeMaskDef = null;
+    if (activeRightPanel === Panel.Masks && activeMaskContainerId) {
+      activeMaskDef = adjustments.masks?.find((c: MaskContainer) => c.id === activeMaskContainerId);
+    } else if (activeRightPanel === Panel.Ai && activeAiPatchContainerId) {
+      activeMaskDef = adjustments.aiPatches?.find((p: AiPatch) => p.id === activeAiPatchContainerId);
+    }
+
+    if (!activeMaskDef) return null;
+
+    const geometryKeys = [
+      'crop',
+      'rotation',
+      'flipHorizontal',
+      'flipVertical',
+      'orientationSteps',
+      'transformDistortion',
+      'transformVertical',
+      'transformHorizontal',
+      'transformRotate',
+      'transformAspect',
+      'transformScale',
+      'transformXOffset',
+      'transformYOffset',
+      'lensDistortionAmount',
+      'lensVignetteAmount',
+      'lensTcaAmount',
+      'lensDistortionParams',
+      'lensMaker',
+      'lensModel',
+      'lensDistortionEnabled',
+      'lensTcaEnabled',
+      'lensVignetteEnabled',
+    ];
+
+    const geometry: any = {};
+    geometryKeys.forEach((k) => {
+      geometry[k] = (adjustments as any)[k];
+    });
+
+    const subMasks = activeMaskDef.subMasks?.map((sm: any) => {
+      const { parameters, ...rest } = sm;
+      const cleanParams = { ...parameters };
+      delete cleanParams.mask_data_base64;
+      delete cleanParams.maskDataBase64;
+      return { ...rest, parameters: cleanParams };
+    });
+
+    return JSON.stringify({
+      id: activeMaskDef.id,
+      invert: activeMaskDef.invert,
+      opacity: activeMaskDef.opacity,
+      subMasks,
+      geometry,
+      renderSize: { w: imageRenderSize.width, h: imageRenderSize.height },
+    });
+  }, [
+    activeRightPanel,
+    activeMaskContainerId,
+    activeAiPatchContainerId,
+    adjustments,
+    imageRenderSize.width,
+    imageRenderSize.height,
+  ]);
+
   useEffect(() => {
     let maskDefForOverlay = null;
 
     if (activeRightPanel === Panel.Masks && activeMaskContainerId) {
-      maskDefForOverlay = adjustments.masks.find((c: MaskContainer) => c.id === activeMaskContainerId);
+      const activeMask = adjustments.masks?.find((c: MaskContainer) => c.id === activeMaskContainerId);
+      if (activeMask) {
+        maskDefForOverlay = {
+          ...activeMask,
+          adjustments: {},
+        };
+      }
     } else if (activeRightPanel === Panel.Ai && activeAiPatchContainerId) {
-      const activePatch = adjustments.aiPatches.find((p: AiPatch) => p.id === activeAiPatchContainerId);
+      const activePatch = adjustments.aiPatches?.find((p: AiPatch) => p.id === activeAiPatchContainerId);
       if (activePatch) {
         maskDefForOverlay = {
           ...activePatch,
@@ -488,18 +578,10 @@ export default function Editor({
       }
     }
 
-    debouncedGenerateMaskOverlay(maskDefForOverlay, imageRenderSize);
+    requestMaskOverlay(maskDefForOverlay, imageRenderSize, adjustments);
 
-    return () => debouncedGenerateMaskOverlay.cancel();
-  }, [
-    activeRightPanel,
-    activeMaskContainerId,
-    activeAiPatchContainerId,
-    adjustments.masks,
-    adjustments.aiPatches,
-    imageRenderSize,
-    debouncedGenerateMaskOverlay,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayTriggerHash, requestMaskOverlay]);
 
   useEffect(() => {
     let timer: number;
@@ -734,8 +816,10 @@ export default function Editor({
 
   if (!selectedImage) {
     return (
-      <div className="flex-1 bg-bg-secondary rounded-lg flex items-center justify-center text-text-secondary">
-        <p>{t('editor.selectImageToEdit')}</p>
+      <div className="flex-1 bg-bg-secondary rounded-lg flex items-center justify-center">
+        <Text variant={TextVariants.heading} color={TextColors.secondary} weight={TextWeights.normal}>
+          {t('editor.selectImageToEdit')}
+        </Text>
       </div>
     );
   }
@@ -761,10 +845,12 @@ export default function Editor({
     isCropping ||
     (isMasking &&
       (activeSubMask?.type === Mask.Brush ||
+        activeSubMask?.type === Mask.Flow ||
         activeSubMask?.type === Mask.AiSubject ||
         activeSubMask?.parameters?.isInitialDraw)) ||
     (isAiEditing &&
       (activeSubMask?.type === Mask.Brush ||
+        activeSubMask?.type === Mask.Flow ||
         activeSubMask?.type === Mask.AiSubject ||
         activeSubMask?.type === Mask.QuickEraser ||
         activeSubMask?.parameters?.isInitialDraw));

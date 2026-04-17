@@ -325,6 +325,7 @@ export default function CullingModal({
                 value={settings.similarityThreshold}
                 defaultValue={28}
                 onChange={(e) => setSettings((s) => ({ ...s, similarityThreshold: Number(e.target.value) }))}
+                fillOrigin="min"
               />
               <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
                 {'值越低，连拍分组要求越严格（需要更相似才归为一组）。'}
@@ -339,6 +340,7 @@ export default function CullingModal({
                 value={settings.blurThreshold}
                 defaultValue={100.0}
                 onChange={(e) => setSettings((s) => ({ ...s, blurThreshold: Number(e.target.value) }))}
+                fillOrigin="min"
               />
               <Text variant={TextVariants.small} color={TextColors.secondary} className="mt-1">
                 {'值越高，对清晰度要求越严格。低于此阈值的照片会被标记为模糊。'}

@@ -2,16 +2,20 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import Text from '../ui/Text';
 import { TextVariants } from '../../types/typography';
+import Switch from '../ui/Switch';
 
 interface PresetModalProps {
   isOpen: boolean;
   onClose(): void;
-  onSave(name: string): void;
+  onSave(name: string, includeMasks: boolean, includeCropTransform: boolean, isAdditive: boolean): void;
 }
 
 export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalProps) {
   const { t } = useTranslation();
   const [name, setName] = useState('');
+  const [includeMasks, setIncludeMasks] = useState(false);
+  const [includeCropTransform, setIncludeCropTransform] = useState(false);
+  const [isAdditive, setIsAdditive] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [show, setShow] = useState(false);
 
@@ -25,6 +29,9 @@ export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalP
       const timer = setTimeout(() => {
         setIsMounted(false);
         setName('');
+        setIncludeMasks(false);
+        setIncludeCropTransform(false);
+        setIsAdditive(false);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -32,10 +39,10 @@ export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalP
 
   const handleSave = useCallback(() => {
     if (name.trim()) {
-      onSave(name.trim());
+      onSave(name.trim(), includeMasks, includeCropTransform, isAdditive);
       onClose();
     }
-  }, [name, onSave, onClose]);
+  }, [name, includeMasks, includeCropTransform, isAdditive, onSave, onClose]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -55,8 +62,8 @@ export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalP
   return (
     <div
       className={`
-        fixed inset-0 flex items-center justify-center z-50 
-        bg-black/30 backdrop-blur-xs 
+        fixed inset-0 flex items-center justify-center z-50
+        bg-black/30 backdrop-blur-xs
         transition-opacity duration-300 ease-in-out
         ${show ? 'opacity-100' : 'opacity-0'}
       `}
@@ -66,7 +73,7 @@ export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalP
     >
       <div
         className={`
-          bg-surface rounded-lg shadow-xl p-6 w-full max-w-sm 
+          bg-surface rounded-lg shadow-xl p-6 w-full max-w-sm
           transform transition-all duration-300 ease-out
           ${show ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 -translate-y-4'}
         `}
@@ -84,7 +91,19 @@ export default function AddPresetModal({ isOpen, onClose, onSave }: PresetModalP
           type="text"
           value={name}
         />
-        <div className="flex justify-end gap-3 mt-5">
+
+        <div className="mt-5 space-y-4 p-1">
+          <Switch label="Include Masks" checked={includeMasks} onChange={setIncludeMasks} />
+          <Switch label="Include Crop & Transform" checked={includeCropTransform} onChange={setIncludeCropTransform} />
+          <Switch
+            label="Merge Changes"
+            data-tooltip="Only save changed adjustments"
+            checked={isAdditive}
+            onChange={setIsAdditive}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
           <button
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-surface transition-colors"
             onClick={onClose}

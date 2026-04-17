@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { SelectedImage, AppSettings, Invokes } from '../../ui/AppProperties';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
+import Text from '../../ui/Text';
+import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 
 interface CameraSetting {
   format?(value: string | number): string | number;
@@ -67,11 +69,18 @@ function parseDms(dmsString: string) {
 
 function MetadataItem({ label, value }: MetaDataItemProps) {
   return (
-    <div className="grid grid-cols-3 gap-2 text-xs py-1.5 px-2 rounded odd:bg-bg-primary">
-      <p className="font-semibold text-text-primary col-span-1 break-words">{label}</p>
-      <p className="text-text-secondary col-span-2 break-words truncate" data-tooltip={String(value)}>
+    <div className="grid grid-cols-3 gap-2 py-1.5 px-2 rounded-sm odd:bg-bg-primary">
+      <Text
+        variant={TextVariants.small}
+        color={TextColors.primary}
+        weight={TextWeights.semibold}
+        className="col-span-1 wrap-break-word"
+      >
+        {label}
+      </Text>
+      <Text variant={TextVariants.small} className="col-span-2 wrap-break-word truncate" data-tooltip={String(value)}>
         {String(value)}
-      </p>
+      </Text>
     </div>
   );
 }
@@ -211,34 +220,38 @@ export default function MetadataPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 flex justify-between items-center flex-shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">{t('metadata.title')}</h2>
+      <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
+        <Text variant={TextVariants.title}>Metadata</Text>
       </div>
-      <div className="flex-grow overflow-y-auto p-4 text-text-secondary custom-scrollbar">
+      <div className="grow overflow-y-auto p-4 custom-scrollbar">
         {selectedImage ? (
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-8">
             <div>
-              <h3 className="text-base font-bold text-text-primary mb-2 border-b border-surface pb-1">
-                {t('metadata.imageProperties')}
-              </h3>
-              <div className="flex flex-col gap-1">
-                <MetadataItem label={t('metadata.filename')} value={selectedImage.path.split(/[\\/]/).pop()} />
-                <MetadataItem
-                  label={t('metadata.dimensions')}
-                  value={`${selectedImage.width} x ${selectedImage.height}`}
-                />
-                <MetadataItem label={t('metadata.captureDate')} value={selectedImage.exif?.DateTimeOriginal || '-'} />
+              <Text variant={TextVariants.heading} className="border-b border-surface pb-1 mb-2">
+                Image Properties
+              </Text>
+              <div className="flex flex-col gap-2">
+                <MetadataItem label="Filename" value={selectedImage.path.split(/[\\/]/).pop()} />
+                <MetadataItem label="Dimensions" value={`${selectedImage.width} x ${selectedImage.height}`} />
+                <MetadataItem label="Capture Date" value={selectedImage.exif?.DateTimeOriginal || '-'} />
               </div>
 
-              <div className="mt-3 bg-surface rounded-md border border-bg-primary overflow-hidden">
+              <div className="mt-4 bg-surface rounded-md border border-bg-primary overflow-hidden">
                 <button
                   onClick={() => setIsOrganizationExpanded(!isOrganizationExpanded)}
-                  className="w-full flex items-center justify-between p-3 text-xs font-semibold text-text-primary hover:bg-surface/50 transition-colors"
+                  className="w-full flex items-center justify-between p-4 hover:bg-surface/50 transition-colors"
                 >
-                  <span className="flex items-center gap-2">
-                    <Tag size={14} /> {t('metadata.organization')}
-                  </span>
-                  {isOrganizationExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <Text
+                    as="span"
+                    variant={TextVariants.label}
+                    color={TextColors.primary}
+                    className="flex items-center gap-2"
+                  >
+                    <Tag size={16} /> Organization
+                  </Text>
+                  <Text color={TextColors.secondary}>
+                    {isOrganizationExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </Text>
                 </button>
 
                 <AnimatePresence initial={false}>
@@ -250,17 +263,22 @@ export default function MetadataPanel({
                       transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
                       className="overflow-hidden"
                     >
-                      <div className="p-3 pt-0 border-t border-surface/50 flex flex-col gap-3">
-                        <div className="mt-3">
-                          <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-1 block">
-                            {t('metadata.rating')}
-                          </span>
-                          <div className="flex items-center gap-1">
+                      <div className="px-4 pb-4 pt-2 border-t border-surface/50 flex flex-col gap-4">
+                        <div>
+                          <Text
+                            variant={TextVariants.small}
+                            color={TextColors.primary}
+                            weight={TextWeights.semibold}
+                            className="uppercase tracking-wider mb-2 block"
+                          >
+                            Rating
+                          </Text>
+                          <div className="flex items-center gap-2">
                             {[1, 2, 3, 4, 5].map((star) => (
                               <button
                                 key={star}
                                 onClick={() => onRate(star, [selectedImage.path])}
-                                className="focus:outline-none transition-transform active:scale-95 hover:scale-110"
+                                className="focus:outline-hidden transition-transform active:scale-95 hover:scale-110"
                               >
                                 <Star
                                   size={20}
@@ -268,7 +286,7 @@ export default function MetadataPanel({
                                     'transition-colors duration-200',
                                     star <= rating
                                       ? 'fill-accent text-accent'
-                                      : 'fill-transparent text-text-tertiary hover:text-text-secondary',
+                                      : 'fill-transparent text-text-secondary hover:text-text-primary',
                                   )}
                                 />
                               </button>
@@ -276,9 +294,14 @@ export default function MetadataPanel({
                           </div>
                         </div>
                         <div>
-                          <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-2 mt-1 block">
-                            {t('metadata.colorLabel')}
-                          </span>
+                          <Text
+                            variant={TextVariants.small}
+                            color={TextColors.primary}
+                            weight={TextWeights.semibold}
+                            className="uppercase tracking-wider mb-2 block"
+                          >
+                            Color Label
+                          </Text>
                           <div className="flex flex-wrap gap-2">
                             <button
                               onClick={() => onSetColorLabel(null, [selectedImage.path])}
@@ -288,7 +311,7 @@ export default function MetadataPanel({
                                   ? 'ring-2 ring-text-secondary ring-offset-1 ring-offset-bg-primary'
                                   : 'opacity-50 hover:opacity-100',
                               )}
-                              data-tooltip={t('metadata.none')}
+                              data-tooltip="None"
                             >
                               <X size={12} className="text-text-tertiary" />
                             </button>
@@ -311,10 +334,15 @@ export default function MetadataPanel({
                           </div>
                         </div>
                         <div>
-                          <span className="text-xs text-text-tertiary uppercase tracking-wider font-bold mb-2 mt-1  block">
-                            {t('metadata.tags')}
-                          </span>
-                          <div className="flex flex-wrap gap-1.5 mb-2">
+                          <Text
+                            variant={TextVariants.small}
+                            color={TextColors.primary}
+                            weight={TextWeights.semibold}
+                            className="uppercase tracking-wider mb-2 block"
+                          >
+                            Tags
+                          </Text>
+                          <div className="flex flex-wrap gap-1 mb-2">
                             <AnimatePresence>
                               {currentTags.length > 0 ? (
                                 currentTags.map((tagItem) => (
@@ -324,15 +352,24 @@ export default function MetadataPanel({
                                     initial={{ opacity: 0, scale: 0.8 }}
                                     animate={{ opacity: 1, scale: 1 }}
                                     exit={{ opacity: 0, scale: 0.8 }}
-                                    className="flex items-center gap-1 bg-bg-primary text-text-primary text-xs font-medium px-2 py-1 rounded-md group cursor-pointer border border-surface hover:border-text-tertiary/50 transition-colors"
+                                    className="flex items-center gap-1 bg-bg-primary px-2 py-1 rounded-md group cursor-pointer border border-surface hover:border-text-tertiary/50 transition-colors"
                                     onClick={() => handleRemoveTag(tagItem)}
                                   >
-                                    <span>{tagItem.tag}</span>
+                                    <Text
+                                      as="span"
+                                      variant={TextVariants.small}
+                                      color={TextColors.primary}
+                                      weight={TextWeights.medium}
+                                    >
+                                      {tagItem.tag}
+                                    </Text>
                                     <X size={10} className="opacity-50 group-hover:opacity-100" />
                                   </motion.div>
                                 ))
                               ) : (
-                                <span className="text-xs text-text-tertiary italic">{t('metadata.noTags')}</span>
+                                <Text variant={TextVariants.small} className="italic">
+                                  No tags
+                                </Text>
                               )}
                             </AnimatePresence>
                           </div>
@@ -350,8 +387,8 @@ export default function MetadataPanel({
                               onKeyDown={handleTagInputKeyDown}
                               onFocus={() => setIsTagInputFocused(true)}
                               onBlur={() => setIsTagInputFocused(false)}
-                              placeholder={t('metadata.addTag')}
-                              className="bg-transparent border-none outline-none text-xs w-full text-text-primary placeholder-text-tertiary"
+                              placeholder="Add tag..."
+                              className="bg-transparent border-none outline-hidden text-xs w-full text-text-primary placeholder-text-tertiary"
                             />
                             <button
                               onClick={() => handleAddTag(tagInputValue)}
@@ -367,7 +404,7 @@ export default function MetadataPanel({
                                 <button
                                   key={shortcut}
                                   onClick={() => handleAddTag(shortcut)}
-                                  className="text-xs font-medium bg-bg-secondary hover:bg-card-active text-text-secondary px-1.5 py-0.5 rounded border border-transparent hover:border-border-color transition-all"
+                                  className="text-xs font-medium bg-bg-secondary hover:bg-card-active text-text-secondary px-1.5 py-0.5 rounded-sm border border-transparent hover:border-border-color transition-all"
                                 >
                                   {shortcut}
                                 </button>
@@ -384,12 +421,12 @@ export default function MetadataPanel({
 
             {keyCameraSettings.length > 0 && (
               <div>
-                <h3 className="text-base font-bold text-text-primary mb-2 border-b border-surface pb-1">
-                  {t('metadata.keyCameraSettings')}
-                </h3>
-                <div className="flex flex-col gap-1">
-                  {keyCameraSettings.map((item) => (
-                    <MetadataItem key={item!.key} label={item!.label} value={item!.value ?? ''} />
+                <Text variant={TextVariants.heading} className="border-b border-surface pb-1 mb-2">
+                  Key Camera Settings
+                </Text>
+                <div className="flex flex-col gap-2">
+                  {keyCameraSettings.map((item: any) => (
+                    <MetadataItem key={item.key} label={item.label} value={item.value} />
                   ))}
                 </div>
               </div>
@@ -397,9 +434,9 @@ export default function MetadataPanel({
 
             {hasGps && gpsData?.lat && gpsData?.lon && (
               <div>
-                <h3 className="text-base font-bold text-text-primary mb-2 border-b border-surface pb-1">
-                  {t('metadata.gpsLocation')}
-                </h3>
+                <Text variant={TextVariants.heading} className="border-b border-surface pb-1 mb-2">
+                  GPS Location
+                </Text>
                 <div className="flex flex-col gap-2">
                   <div className="relative rounded-md overflow-hidden border border-surface">
                     <iframe
@@ -436,10 +473,10 @@ export default function MetadataPanel({
 
             {otherExifEntries.length > 0 && (
               <div>
-                <h3 className="text-base font-bold text-text-primary mb-2 border-b border-surface pb-1">
-                  {t('metadata.allExifData')}
-                </h3>
-                <div className="flex flex-col gap-1">
+                <Text variant={TextVariants.heading} className="border-b border-surface pb-1 mb-2">
+                  All EXIF Data
+                </Text>
+                <div className="flex flex-col gap-2">
                   {otherExifEntries.map(([tag, value]) => (
                     <MetadataItem key={tag} label={formatExifTag(tag)} value={value} />
                   ))}
@@ -448,11 +485,20 @@ export default function MetadataPanel({
             )}
 
             {Object.keys(selectedImage.exif || {}).length === 0 && (
-              <p className="text-xs text-center text-text-secondary mt-4">{t('metadata.noExifData')}</p>
+              <Text variant={TextVariants.small} className="text-center mt-4">
+                No EXIF data found in this file.
+              </Text>
             )}
           </div>
         ) : (
-          <p className="text-center">{t('common.noImageSelected')}</p>
+          <Text
+            variant={TextVariants.heading}
+            color={TextColors.secondary}
+            weight={TextWeights.normal}
+            className="text-center mt-4"
+          >
+            No image selected.
+          </Text>
         )}
       </div>
     </div>

@@ -24,6 +24,8 @@ import { Invokes, SelectedImage, AppSettings } from '../../ui/AppProperties';
 import ExportPresetsList from '../../ui/ExportPresetsList';
 import { useExportSettings } from '../../../hooks/useExportSettings';
 import { useOsPlatform } from '../../../hooks/useOsPlatform';
+import Text from '../../ui/Text';
+import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
 
 interface ExportPanelProps {
   adjustments: Adjustments;
@@ -33,6 +35,7 @@ interface ExportPanelProps {
   setExportState(state: any): void;
   appSettings: AppSettings | null;
   onSettingsChange: (settings: AppSettings) => void;
+  rootPath: string | null;
 }
 
 interface SectionProps {
@@ -43,8 +46,10 @@ interface SectionProps {
 function Section({ title, children }: SectionProps) {
   return (
     <div>
-      <h3 className="text-sm font-semibold text-text-primary mb-3 border-surface pb-2">{title}</h3>
-      <div className="space-y-4">{children}</div>
+      <Text variant={TextVariants.heading} className="mb-2">
+        {title}
+      </Text>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
@@ -131,7 +136,7 @@ function WatermarkPreview({
       style={{ aspectRatio: imageAspectRatio }}
     >
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-text-tertiary text-sm">Preview</span>
+        <Text variant={TextVariants.label}>Preview</Text>
       </div>
       {watermarkPath && (
         <div style={getPositionStyles()}>
@@ -171,6 +176,7 @@ export default function ExportPanel({
   setExportState,
   appSettings,
   onSettingsChange,
+  rootPath,
 }: ExportPanelProps) {
   const {
     fileFormat,
@@ -187,6 +193,8 @@ export default function ExportPanel({
     setDontEnlarge,
     keepMetadata,
     setKeepMetadata,
+    preserveTimestamps,
+    setPreserveTimestamps,
     stripGps,
     setStripGps,
     exportMasks,
@@ -205,6 +213,8 @@ export default function ExportPanel({
     setWatermarkSpacing,
     watermarkOpacity,
     setWatermarkOpacity,
+    preserveFolders,
+    setPreserveFolders,
     handleApplyPreset,
     currentSettingsObject,
   } = useExportSettings();
@@ -330,6 +340,7 @@ export default function ExportPanel({
       filenameTemplate,
       jpegQuality,
       keepMetadata,
+      preserveTimestamps,
       resize: enableResize ? { mode: resizeMode, value: resizeValue, dontEnlarge } : null,
       stripGps,
       watermark:
@@ -357,6 +368,7 @@ export default function ExportPanel({
     resizeValue,
     dontEnlarge,
     keepMetadata,
+    preserveTimestamps,
     stripGps,
     filenameTemplate,
     enableWatermark,
@@ -404,6 +416,7 @@ export default function ExportPanel({
       filenameTemplate: finalFilenameTemplate,
       jpegQuality: jpegQuality,
       keepMetadata,
+      preserveTimestamps,
       resize: enableResize ? { mode: resizeMode, value: resizeValue, dontEnlarge } : null,
       stripGps,
       exportMasks: isEditorContext ? exportMasks : undefined,
@@ -417,6 +430,7 @@ export default function ExportPanel({
               opacity: watermarkOpacity,
             }
           : null,
+      preserveFolders,
     };
 
     const lastExportPath = appSettings?.exportPresets?.find((p) => p.id === '__last_used__')?.lastExportPath;
@@ -441,6 +455,7 @@ export default function ExportPanel({
             outputFolder: outputFolder as string,
             outputFormat: FILE_FORMATS.find((f: FileFormat) => f.id === fileFormat)?.extensions[0],
             paths: pathsToExport,
+            baseOriginFolder: rootPath,
           });
         }
       } else {
@@ -502,9 +517,9 @@ export default function ExportPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
-        <h2 className="text-xl font-bold text-primary text-shadow-shiny">Export</h2>
+        <Text variant={TextVariants.title}>Export</Text>
       </div>
-      <div className="grow overflow-y-auto p-4 text-text-secondary space-y-6">
+      <div className="grow overflow-y-auto p-4 space-y-8">
         {canExport ? (
           <>
             <ExportPresetsList
@@ -518,14 +533,16 @@ export default function ExportPanel({
               <div className="grid grid-cols-3 gap-2">
                 {FILE_FORMATS.map((format: FileFormat) => (
                   <button
-                    className={`px-2 py-1.5 text-sm rounded-md transition-colors ${
-                      fileFormat === format.id ? 'bg-accent text-button-text' : 'bg-surface hover:bg-card-active'
+                    className={`px-2 py-1.5 rounded-md transition-colors ${
+                      fileFormat === format.id ? 'bg-accent' : 'bg-surface hover:bg-card-active'
                     } disabled:opacity-50`}
                     disabled={isExporting}
                     key={format.id}
                     onClick={() => setFileFormat(format.id)}
                   >
-                    {format.name}
+                    <Text color={fileFormat === format.id ? TextColors.button : TextColors.secondary}>
+                      {format.name}
+                    </Text>
                   </button>
                 ))}
               </div>
@@ -539,35 +556,47 @@ export default function ExportPanel({
                     onChange={(e) => setJpegQuality(Number(e.target.value))}
                     step={1}
                     value={jpegQuality}
+                    fillOrigin="min"
                   />
                 </div>
               )}
             </Section>
 
-            {isBatchMode && (
-              <Section title="File Naming">
-                <input
-                  className="w-full bg-bg-primary border border-surface rounded-md p-2 text-sm text-text-primary focus:ring-accent focus:border-accent"
+            <Section title="File Naming">
+              {isBatchMode && (
+                <>
+                  <input
+                    className="w-full bg-bg-primary border border-surface rounded-md p-2 text-sm text-text-primary focus:ring-accent focus:border-accent"
+                    disabled={isExporting}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilenameTemplate(e.target.value)}
+                    ref={filenameInputRef}
+                    type="text"
+                    value={filenameTemplate}
+                  />
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {FILENAME_VARIABLES.map((variable: string) => (
+                      <button
+                        className="px-2 py-1 bg-surface text-text-secondary text-xs rounded-md hover:bg-card-active transition-colors disabled:opacity-50"
+                        disabled={isExporting}
+                        key={variable}
+                        onClick={() => handleVariableClick(variable)}
+                      >
+                        {variable}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className={isBatchMode ? 'mt-4' : ''}>
+                <Switch
+                  label="Preserve Folder Structure"
+                  checked={preserveFolders}
+                  onChange={setPreserveFolders}
                   disabled={isExporting}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilenameTemplate(e.target.value)}
-                  ref={filenameInputRef}
-                  type="text"
-                  value={filenameTemplate}
                 />
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {FILENAME_VARIABLES.map((variable: string) => (
-                    <button
-                      className="px-2 py-1 bg-surface text-text-secondary text-xs rounded-md hover:bg-card-active transition-colors disabled:opacity-50"
-                      disabled={isExporting}
-                      key={variable}
-                      onClick={() => handleVariableClick(variable)}
-                    >
-                      {variable}
-                    </button>
-                  ))}
-                </div>
-              </Section>
-            )}
+              </div>
+            </Section>
 
             {fileFormat !== FileFormats.Cube && (
               <>
@@ -589,7 +618,7 @@ export default function ExportPanel({
                           className="w-full"
                         />
                         <input
-                          className="w-24 bg-bg-primary text-center rounded-md p-2 border border-surface focus:border-accent focus:ring-accent"
+                          className="w-24 bg-bg-primary text-center rounded-md p-2 border border-surface focus:border-accent focus:ring-accent text-text-secondary focus:text-text-primary"
                           disabled={isExporting}
                           min="1"
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -598,7 +627,7 @@ export default function ExportPanel({
                           type="number"
                           value={resizeValue}
                         />
-                        <span className="text-sm">pixels</span>
+                        <Text variant={TextVariants.label}>pixels</Text>
                       </div>
                       <Switch
                         checked={dontEnlarge}
@@ -632,6 +661,15 @@ export default function ExportPanel({
                     </Section>
                   </>
                 )}
+
+                <Section title="File Timestamps">
+                  <Switch
+                    checked={preserveTimestamps}
+                    disabled={isExporting}
+                    label="Set File Timestamps from EXIF Capture Date"
+                    onChange={setPreserveTimestamps}
+                  />
+                </Section>
 
                 {isEditorContext && (
                   <Section title="Masks">
@@ -668,36 +706,38 @@ export default function ExportPanel({
                             disabled={isExporting}
                             className="w-full"
                           />
-                          <Slider
-                            label="Scale"
-                            min={1}
-                            max={50}
-                            step={1}
-                            value={watermarkScale}
-                            onChange={(e) => setWatermarkScale(Number(e.target.value))}
-                            disabled={isExporting}
-                            defaultValue={10}
-                          />
-                          <Slider
-                            label="Spacing"
-                            min={0}
-                            max={25}
-                            step={1}
-                            value={watermarkSpacing}
-                            onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
-                            disabled={isExporting}
-                            defaultValue={5}
-                          />
-                          <Slider
-                            label="Opacity"
-                            min={0}
-                            max={100}
-                            step={1}
-                            value={watermarkOpacity}
-                            onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
-                            disabled={isExporting}
-                            defaultValue={75}
-                          />
+                          <div>
+                            <Slider
+                              label="Scale"
+                              min={1}
+                              max={50}
+                              step={1}
+                              value={watermarkScale}
+                              onChange={(e) => setWatermarkScale(parseInt(e.target.value))}
+                              disabled={isExporting}
+                              defaultValue={10}
+                            />
+                            <Slider
+                              label="Spacing"
+                              min={0}
+                              max={25}
+                              step={1}
+                              value={watermarkSpacing}
+                              onChange={(e) => setWatermarkSpacing(parseInt(e.target.value))}
+                              disabled={isExporting}
+                              defaultValue={5}
+                            />
+                            <Slider
+                              label="Opacity"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={watermarkOpacity}
+                              onChange={(e) => setWatermarkOpacity(parseInt(e.target.value))}
+                              disabled={isExporting}
+                              defaultValue={75}
+                            />
+                          </div>
                           <WatermarkPreview
                             imageAspectRatio={imageAspectRatio}
                             watermarkImageAspectRatio={watermarkImageAspectRatio}
@@ -716,18 +756,25 @@ export default function ExportPanel({
             )}
           </>
         ) : (
-          <p className="text-center text-text-tertiary mt-4">No image selected for export.</p>
+          <Text
+            variant={TextVariants.heading}
+            color={TextColors.secondary}
+            weight={TextWeights.normal}
+            className="text-center mt-4"
+          >
+            No image selected for export.
+          </Text>
         )}
       </div>
 
-      <div className="p-4 border-t border-surface shrink-0 space-y-3">
-        <div className="text-center text-xs text-text-tertiary h-4">
+      <div className="p-4 border-t border-surface shrink-0 space-y-2">
+        <Text as="div" variant={TextVariants.small} color={TextColors.primary} className="text-center">
           {isEstimating ? (
             <span className="italic">Estimating size...</span>
           ) : estimatedSize !== null ? (
             <span>Estimated file size: ~{formatBytes(estimatedSize)}</span>
           ) : null}
-        </div>
+        </Text>
         <Button
           className={`group rounded-md h-11 w-full flex items-center text-md font-bold! justify-center ${
             status === Status.Exporting

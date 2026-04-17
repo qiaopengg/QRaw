@@ -44,7 +44,7 @@ import {
 import { Color, COLOR_LABELS } from '../../utils/adjustments';
 import { ImportState, Status } from '../ui/ExportImportProperties';
 import Text from '../ui/Text';
-import { TextColors, TextVariants, TextWeights } from '../../types/typography';
+import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../types/typography';
 
 export interface ColumnWidths {
   thumbnail: number;
@@ -339,7 +339,7 @@ function ListHeader({
           {title}
         </Text>
         {isSorted && (
-          <span className="ml-1 flex items-center text-accent">
+          <span className={`ml-1 flex items-center ${TEXT_COLOR_KEYS[TextColors.primary]}`}>
             {isAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </span>
         )}
@@ -636,7 +636,7 @@ function ColorFilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionP
                 <div className="w-full h-full rounded-full" style={{ backgroundColor: color.color }}></div>
                 {isSelected && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-full">
-                    <Check size={14} className="text-white" />
+                    <Check size={14} className={TEXT_COLOR_KEYS[TextColors.white]} />
                   </div>
                 )}
               </div>
@@ -720,7 +720,7 @@ function ThumbnailSizeOptions({ selectedSize, onSelectSize }: ThumbnailSizeProps
             >
               {option.label}
             </Text>
-            {isSelected && <Check size={16} />}
+            {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
           </button>
         );
       })}
@@ -752,7 +752,7 @@ function ThumbnailAspectRatioOptions({ selectedAspectRatio, onSelectAspectRatio 
             >
               {option.label}
             </Text>
-            {isSelected && <Check size={16} />}
+            {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
           </button>
         );
       })}
@@ -797,7 +797,7 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
                     {option.label}
                   </Text>
                 </span>
-                {isSelected && <Check size={16} />}
+                {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
               </button>
             );
           })}
@@ -825,7 +825,7 @@ function FilterOptions({ filterCriteria, setFilterCriteria }: FilterOptionProps)
                 >
                   {option.label}
                 </Text>
-                {isSelected && <Check size={16} />}
+                {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
               </button>
             );
           })}
@@ -860,35 +860,7 @@ function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptions
           data-tooltip={`Sort ${sortCriteria.order === SortDirection.Ascending ? 'Descending' : 'Ascending'}`}
           className="absolute top-1/2 right-3 -translate-y-1/2 p-1 bg-transparent border-none text-text-secondary hover:text-text-primary focus:outline-hidden focus:ring-1 focus:ring-accent rounded-sm"
         >
-          {sortCriteria.order === SortDirection.Ascending ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m18 15-6-6-6 6" />
-            </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          )}
+          {sortCriteria.order === SortDirection.Ascending ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
       </div>
       {sortOptions.map((option) => {
@@ -911,7 +883,7 @@ function SortOptions({ sortCriteria, setSortCriteria, sortOptions }: SortOptions
             >
               {option.label}
             </Text>
-            {isSelected && <Check size={16} />}
+            {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
           </button>
         );
       })}
@@ -939,7 +911,7 @@ function ViewModeOptions({ mode, setMode }: { mode: LibraryViewMode; setMode: (m
         >
           Current Folder
         </Text>
-        {mode === LibraryViewMode.Flat && <Check size={16} />}
+        {mode === LibraryViewMode.Flat && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
       </button>
       <button
         className={`w-full text-left px-3 py-2 rounded-md flex items-center justify-between transition-colors duration-150 ${
@@ -955,7 +927,7 @@ function ViewModeOptions({ mode, setMode }: { mode: LibraryViewMode; setMode: (m
         >
           Recursive
         </Text>
-        {mode === LibraryViewMode.Recursive && <Check size={16} />}
+        {mode === LibraryViewMode.Recursive && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
       </button>
     </>
   );
@@ -1454,7 +1426,7 @@ const Row = ({
         className="flex items-end pb-2 pt-2"
       >
         <div className="flex items-center gap-2 w-full border-b border-border-color/50 pb-1">
-          <FolderOpen size={16} className="text-text-secondary" />
+          <FolderOpen size={16} className={TEXT_COLOR_KEYS[TextColors.secondary]} />
           <Text variant={TextVariants.label} weight={TextWeights.semibold} className="truncate" data-tooltip={row.path}>
             {displayPath}
           </Text>

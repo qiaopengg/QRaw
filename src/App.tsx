@@ -176,7 +176,7 @@ interface DenoiseModalState {
   previewBase64: string | null;
   originalBase64?: string | null;
   error: string | null;
-  targetPath: string | null;
+  targetPaths: string[];
   progressMessage: string | null;
   isRaw: boolean;
 }
@@ -429,7 +429,7 @@ function App() {
     isProcessing: false,
     previewBase64: null,
     error: null,
-    targetPath: null,
+    targetPaths: [],
     progressMessage: null,
     isRaw: false,
   });
@@ -1479,6 +1479,28 @@ function App() {
 
       const payload = JSON.parse(JSON.stringify(currentAdjustments));
 
+      const processSubMasks = (subMasks: any[]) => {
+        if (!Array.isArray(subMasks)) return;
+        subMasks.forEach((sm: any) => {
+          if (sm.id && sm.parameters) {
+            const keys = ['mask_data_base64', 'maskDataBase64'];
+            let foundMaskData = false;
+
+            for (const key of keys) {
+              if (sm.parameters[key] !== undefined && sm.parameters[key] !== null) {
+                foundMaskData = true;
+                if (patchesSentToBackend.current.has(sm.id)) {
+                  sm.parameters[key] = null;
+                }
+              }
+            }
+            if (foundMaskData && !patchesSentToBackend.current.has(sm.id)) {
+              patchesSentToBackend.current.add(sm.id);
+            }
+          }
+        });
+      };
+
       if (payload.aiPatches && Array.isArray(payload.aiPatches)) {
         payload.aiPatches.forEach((p: any) => {
           if (p.id && p.patchData && !p.isLoading) {
@@ -1488,21 +1510,16 @@ function App() {
               patchesSentToBackend.current.add(p.id);
             }
           }
+          if (p.subMasks) {
+            processSubMasks(p.subMasks);
+          }
         });
       }
 
       if (payload.masks && Array.isArray(payload.masks)) {
         payload.masks.forEach((container: any) => {
-          if (container.subMasks && Array.isArray(container.subMasks)) {
-            container.subMasks.forEach((sm: any) => {
-              if (sm.id && sm.parameters && sm.parameters.mask_data_base64) {
-                if (patchesSentToBackend.current.has(sm.id)) {
-                  sm.parameters.mask_data_base64 = null;
-                } else {
-                  patchesSentToBackend.current.add(sm.id);
-                }
-              }
-            });
+          if (container.subMasks) {
+            processSubMasks(container.subMasks);
           }
         });
       }
@@ -1552,11 +1569,6 @@ function App() {
             const blob = new Blob([buffer], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
 
-            try {
-              const img = new Image();
-              img.src = url;
-              await img.decode();
-            } catch (_) {}
             if (currentPath !== selectedImagePathRef.current || jobId < latestRenderedJobIdRef.current) {
               URL.revokeObjectURL(url);
               return;
@@ -1564,7 +1576,11 @@ function App() {
 
             setFinalPreviewUrl((prevUrl) => {
               if (prevUrl && prevUrl.startsWith('blob:') && !imageCacheRef.current.isProtected(prevUrl)) {
-                setTimeout(() => URL.revokeObjectURL(prevUrl), 250);
+                setTimeout(() => {
+                  if (!imageCacheRef.current.isProtected(prevUrl)) {
+                    URL.revokeObjectURL(prevUrl);
+                  }
+                }, 250);
               }
               return url;
             });
@@ -2377,6 +2393,7 @@ function App() {
 
       setMultiSelectedPaths([path]);
       setLibraryActivePath(null);
+      setSelectionAnchorPath(path);
       setError(null);
       setShowOriginal(false);
       setActiveMaskId(null);
@@ -2468,7 +2485,11 @@ function App() {
 
       setFinalPreviewUrl((prev) => {
         if (prev?.startsWith('blob:') && !imageCacheRef.current.isProtected(prev)) {
-          setTimeout(() => URL.revokeObjectURL(prev), 250);
+          setTimeout(() => {
+            if (!imageCacheRef.current.isProtected(prev)) {
+              URL.revokeObjectURL(prev);
+            }
+          }, 250);
         }
         return null;
       });
@@ -2612,11 +2633,13 @@ function App() {
   const handleCopyAdjustments = useCallback(() => {
     const sourceAdjustments = selectedImage ? adjustments : libraryActiveAdjustments;
     const adjustmentsToCopy: any = {};
+
     for (const key of COPYABLE_ADJUSTMENT_KEYS) {
       if (Object.prototype.hasOwnProperty.call(sourceAdjustments, key)) {
-        adjustmentsToCopy[key] = sourceAdjustments[key];
+        adjustmentsToCopy[key] = structuredClone(sourceAdjustments[key]);
       }
     }
+
     setCopiedAdjustments(adjustmentsToCopy);
     setIsCopied(true);
   }, [selectedImage, adjustments, libraryActiveAdjustments]);
@@ -2907,14 +2930,13 @@ function App() {
         baseRes = Math.max(originalSize.width, originalSize.height);
       }
 
-      let zoomedRes = baseRes * zoom;
       if (originalSize.width > 0 && originalSize.height > 0) {
         const maxRes = Math.max(originalSize.width, originalSize.height);
-        if (zoomedRes > maxRes) {
-          zoomedRes = maxRes;
+        if (baseRes > maxRes) {
+          baseRes = maxRes;
         }
       }
-      const finalRes = Math.round(zoomedRes);
+      const finalRes = Math.round(baseRes);
 
       if (finalRes > currentResRef.current) {
         requestHiFiZoom(adjustments, finalRes);
@@ -2934,7 +2956,6 @@ function App() {
     requestHiFiZoom,
     isFullScreen,
     originalSize,
-    zoom,
     applyAdjustments,
   ]);
 
@@ -3663,7 +3684,7 @@ function App() {
 
   const handleApplyDenoise = useCallback(
     async (intensity: number, method: 'ai' | 'bm3d') => {
-      if (!denoiseModalState.targetPath) return;
+      if (denoiseModalState.targetPaths.length === 0) return;
 
       setDenoiseModalState((prev) => ({
         ...prev,
@@ -3674,7 +3695,7 @@ function App() {
 
       try {
         await invoke(Invokes.ApplyDenoising, {
-          path: denoiseModalState.targetPath,
+          path: denoiseModalState.targetPaths[0],
           intensity: intensity,
           method: method,
         });
@@ -3686,13 +3707,34 @@ function App() {
         }));
       }
     },
-    [denoiseModalState.targetPath],
+    [denoiseModalState.targetPaths],
+  );
+
+  const handleBatchDenoise = useCallback(
+    async (intensity: number, method: 'ai' | 'bm3d', paths: string[]) => {
+      try {
+        const savedPaths: string[] = await invoke('batch_denoise_images', {
+          paths,
+          intensity,
+          method,
+        });
+        await refreshImageList();
+        return savedPaths;
+      } catch (err) {
+        setDenoiseModalState((prev) => ({
+          ...prev,
+          error: String(err),
+        }));
+        throw err;
+      }
+    },
+    [refreshImageList],
   );
 
   const handleSaveDenoisedImage = async (): Promise<string> => {
-    if (!denoiseModalState.targetPath) throw new Error('No target path');
+    if (denoiseModalState.targetPaths.length === 0) throw new Error('No target path');
     const savedPath = await invoke<string>(Invokes.SaveDenoisedImage, {
-      originalPathStr: denoiseModalState.targetPath,
+      originalPathStr: denoiseModalState.targetPaths[0],
     });
     await refreshImageList();
     return savedPath;
@@ -4263,7 +4305,7 @@ function App() {
                 isProcessing: false,
                 previewBase64: null,
                 error: null,
-                targetPath: selectedImage.path,
+                targetPaths: [selectedImage.path],
                 progressMessage: null,
                 isRaw: selectedImage?.isRaw,
               });
@@ -4458,7 +4500,8 @@ function App() {
     const cullLabel = isSingleSelection ? 'Cull Image' : `Cull Images`;
     const collageLabel = isSingleSelection ? 'Frame Image' : 'Create Collage';
     const stitchLabel = 'Stitch Panorama';
-    const conversionLabel = 'Convert Negative';
+    const conversionLabel = isSingleSelection ? 'Convert Negative' : 'Convert Negatives';
+    const denoiseLabel = isSingleSelection ? 'Denoise Image' : 'Denoise Images';
     const mergeLabel = `Merge to HDR`;
 
     const handleCreateVirtualCopy = async (sourcePath: string) => {
@@ -4582,16 +4625,16 @@ function App() {
             onClick: handleApplyAutoAdjustmentsToSelection,
           },
           {
-            label: 'Denoise Image',
+            label: denoiseLabel,
             icon: Grip,
-            disabled: !isSingleSelection,
+            disabled: finalSelection.length === 0,
             onClick: () => {
               setDenoiseModalState({
                 isOpen: true,
                 isProcessing: false,
                 previewBase64: null,
                 error: null,
-                targetPath: finalSelection[0],
+                targetPaths: finalSelection,
                 progressMessage: null,
                 isRaw: selectedImage?.isRaw || false,
               });
@@ -5367,6 +5410,7 @@ function App() {
                             setExportState={setExportState}
                             appSettings={appSettings}
                             onSettingsChange={handleSettingsChange}
+                            rootPath={rootPath}
                           />
                         )}
                         {renderedRightPanel === Panel.Ai && (
@@ -5486,6 +5530,7 @@ function App() {
               setExportState={setExportState}
               appSettings={appSettings}
               onSettingsChange={handleSettingsChange}
+              rootPath={rootPath}
             />
           </div>
         </div>
@@ -5572,6 +5617,7 @@ function App() {
         isOpen={denoiseModalState.isOpen}
         onClose={() => setDenoiseModalState((prev) => ({ ...prev, isOpen: false }))}
         onDenoise={handleApplyDenoise}
+        onBatchDenoise={handleBatchDenoise}
         onSave={handleSaveDenoisedImage}
         onOpenFile={handleImageSelect}
         previewBase64={denoiseModalState.previewBase64}
@@ -5581,10 +5627,11 @@ function App() {
         progressMessage={denoiseModalState.progressMessage}
         aiModelDownloadStatus={aiModelDownloadStatus}
         isRaw={denoiseModalState.isRaw}
+        targetPaths={denoiseModalState.targetPaths}
         loadingImageUrl={
-          denoiseModalState.targetPath
-            ? thumbnails[denoiseModalState.targetPath] ||
-              (selectedImage?.path === denoiseModalState.targetPath ? finalPreviewUrl : null)
+          denoiseModalState.targetPaths.length > 0
+            ? thumbnails[denoiseModalState.targetPaths[0]] ||
+              (selectedImage?.path === denoiseModalState.targetPaths[0] ? finalPreviewUrl : null)
             : null
         }
       />

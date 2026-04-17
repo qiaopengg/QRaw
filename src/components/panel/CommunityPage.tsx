@@ -1,20 +1,30 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, CheckCircle2, ChevronDown, Loader2, Search, Users, Github } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronDown, Loader2, Search, Users, Layers, Scaling, Github } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import { Invokes, SupportedTypes, ImageFile } from '../ui/AppProperties';
 import { INITIAL_ADJUSTMENTS } from '../../utils/adjustments';
+import Text from '../ui/Text';
+import { TextColors, TextVariants, TextWeights } from '../../types/typography';
+import Dropdown from '../ui/Dropdown';
 
 const DEFAULT_PREVIEW_IMAGE_URL = 'https://raw.githubusercontent.com/CyberTimon/RapidRAW-Presets/main/sample-image.jpg';
 
 interface CommunityPreset {
   name: string;
   creator: string;
-  adjustments: Record<string, unknown>;
+  adjustments: Record<string, any>;
+  includeMasks?: boolean;
+  includeCropTransform?: boolean;
 }
+
+const SORT_METHODS: {
+  value: string;
+  label: string;
+}[] = [{ value: 'name', label: 'Name (A-Z)' }];
 
 const containerVariants = {
   hidden: { opacity: 1 },
@@ -175,6 +185,8 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
       await invoke(Invokes.SaveCommunityPreset, {
         name: preset.name,
         adjustments: preset.adjustments,
+        includeMasks: preset.includeMasks,
+        includeCropTransform: preset.includeCropTransform,
       });
       setDownloadStatus((prev) => ({ ...prev, [preset.name]: 'success' }));
     } catch (error) {
@@ -207,10 +219,10 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
             <ArrowLeft />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+            <Text variant={TextVariants.headline} className="flex items-center gap-2">
               <Users /> {t('library.communityPresets')}
-            </h1>
-            <p className="text-sm text-text-secondary">{t('presets.exploreCommunity')}</p>
+            </Text>
+            <Text>{t('presets.exploreCommunity')}</Text>
           </div>
         </div>
       </header>
@@ -226,26 +238,26 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
         </div>
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-text-secondary">{t('library.sortBy')}:</span>
-          <div className="relative">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-surface border border-border-color rounded-md py-1.5 pl-3 pr-8 text-sm appearance-none focus:ring-accent focus:border-accent"
-            >
-              <option value="name">{t('library.fileName')} (A-Z)</option>
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary pointer-events-none" />
-          </div>
+          <Text variant={TextVariants.label}>{t('library.sortBy')}:</Text>
+          <Dropdown
+            options={SORT_METHODS.map(({ value, label }) => ({ value, label: value === 'name' ? `${t('library.fileName')} (A-Z)` : label }))}
+            value={sortBy}
+            onChange={(value) => setSortBy(value)}
+          />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 -mr-2">
         {isLoading ? (
-          <div className="flex items-center justify-center h-full text-text-secondary">
+          <Text
+            variant={TextVariants.heading}
+            color={TextColors.secondary}
+            weight={TextWeights.normal}
+            className="flex items-center justify-center h-full "
+          >
             <Loader2 className="h-8 w-8 animate-spin mr-2" />
             {t('common.loading')}
-          </div>
+          </Text>
         ) : (
           <motion.div
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
@@ -266,15 +278,15 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
                     exit={{ opacity: 0, scale: 0.9 }}
                     className="bg-surface rounded-lg overflow-hidden group border border-border-color flex flex-col"
                   >
-                    <div className="relative w-full aspect-square bg-bg-primary flex items-center justify-center text-text-secondary">
+                    <div className="relative w-full aspect-square bg-bg-primary flex items-center justify-center">
                       {previewUrl ? (
-                        <img 
-                          src={previewUrl} 
-                          alt={preset.name} 
-                          className="w-full h-full object-cover transition-all duration-300 group-hover:blur-xs group-hover:brightness-75" 
+                        <img
+                          src={previewUrl}
+                          alt={preset.name}
+                          className="w-full h-full object-cover transition-all duration-300 group-hover:blur-xs group-hover:brightness-75"
                         />
                       ) : (
-                        <Loader2 className="h-6 w-6 animate-spin" />
+                        <Loader2 className="h-8 w-8 animate-spin text-text-secondary" />
                       )}
 
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
@@ -299,11 +311,28 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
                         </Button>
                       </div>
                     </div>
-                    <div className="p-3 text-center">
-                      <h4 className="font-semibold truncate text-text-primary">{preset.name}</h4>
-                      <p className="text-xs text-text-secondary font-['cursive'] italic mt-1">
+                    <div className="p-4 text-center relative">
+                      {/* Existing Name and Creator text */}
+                      <Text variant={TextVariants.heading} className="truncate mb-1">
+                        {preset.name}
+                      </Text>
+                      <Text variant={TextVariants.body} color={TextColors.secondary} className="italic text-xs">
                         {t('community.by')} {preset.creator}
-                      </p>
+                      </Text>
+
+                      {/* Icon Container */}
+                      <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-50">
+                        {preset.includeMasks && (
+                          <div title="Includes Masks" className="bg-surface p-1 rounded-sm">
+                            <Layers size={12} className="text-accent" />
+                          </div>
+                        )}
+                        {preset.includeCropTransform && (
+                          <div title="Includes Crop/Transform" className="bg-surface p-1 rounded-sm">
+                            <Scaling size={12} className="text-accent" />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 );
@@ -316,9 +345,9 @@ const CommunityPage = ({ onBackToLibrary, imageList, currentFolderPath }: Commun
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.3 }}
-            className="text-center mt-8 py-4 text-sm text-text-secondary"
+            className="text-center mt-8 py-4"
           >
-            <p>{t('community.wantFeatured')}</p>
+            <Text>{t('community.wantFeatured')}</Text>
             <a
               href="https://github.com/CyberTimon/RapidRAW-Presets/issues/new?assignees=&labels=preset-submission&template=preset_submission.md&title=Preset+Submission%3A+%5BYour+Preset+Name%5D"
               target="_blank"

@@ -1,4 +1,5 @@
 use memmap2::{Mmap, MmapOptions};
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -28,7 +29,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -72,6 +72,13 @@ pub struct Preset {
     pub id: String,
     pub name: String,
     pub adjustments: Value,
+    #[serde(rename = "includeMasks", skip_serializing_if = "Option::is_none")]
+    pub include_masks: Option<bool>,
+    #[serde(
+        rename = "includeCropTransform",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub include_crop_transform: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -167,53 +174,95 @@ pub enum PasteMode {
     Replace,
 }
 
-fn default_included_adjustments() -> HashSet<String> {
+fn all_available_adjustments() -> HashSet<String> {
     [
-        "blacks",
+        "exposure",
         "brightness",
-        "clarity",
-        "centré",
-        "chromaticAberrationBlueYellow",
-        "chromaticAberrationRedCyan",
-        "colorCalibration",
-        "colorGrading",
-        "colorNoiseReduction",
         "contrast",
         "curves",
+        "highlights",
+        "shadows",
+        "whites",
+        "blacks",
+        "toneMapper",
+        "temperature",
+        "tint",
+        "saturation",
+        "vibrance",
+        "hsl",
+        "colorGrading",
+        "colorCalibration",
+        "clarity",
+        "structure",
         "dehaze",
-        "exposure",
+        "sharpness",
+        "centré",
+        "lumaNoiseReduction",
+        "colorNoiseReduction",
+        "chromaticAberrationRedCyan",
+        "chromaticAberrationBlueYellow",
+        "vignetteAmount",
+        "vignetteFeather",
+        "vignetteMidpoint",
+        "vignetteRoundness",
         "grainAmount",
         "grainRoughness",
         "grainSize",
-        "highlights",
-        "hsl",
         "lutIntensity",
         "lutName",
         "lutPath",
         "lutSize",
-        "lumaNoiseReduction",
-        "saturation",
-        "sectionVisibility",
-        "shadows",
-        "sharpness",
-        "showClipping",
-        "structure",
-        "temperature",
-        "tint",
-        "toneMapper",
-        "vibrance",
-        "vignetteAmount",
-        "vignetteFeather",
-        "vignetteMidpoint",
-        "flareAmount",
+        "lutData",
         "glowAmount",
         "halationAmount",
-        "vignetteRoundness",
-        "whites",
+        "flareAmount",
+        "crop",
+        "aspectRatio",
+        "rotation",
+        "flipHorizontal",
+        "flipVertical",
+        "orientationSteps",
+        "transformDistortion",
+        "transformVertical",
+        "transformHorizontal",
+        "transformRotate",
+        "transformAspect",
+        "transformScale",
+        "transformXOffset",
+        "transformYOffset",
+        "masks",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect()
+}
+
+fn default_included_adjustments() -> HashSet<String> {
+    let mut defaults = all_available_adjustments();
+
+    let off_by_default = [
+        "crop",
+        "aspectRatio",
+        "rotation",
+        "flipHorizontal",
+        "flipVertical",
+        "orientationSteps",
+        "transformDistortion",
+        "transformVertical",
+        "transformHorizontal",
+        "transformRotate",
+        "transformAspect",
+        "transformScale",
+        "transformXOffset",
+        "transformYOffset",
+        "masks",
+    ];
+
+    for item in off_by_default.iter() {
+        defaults.remove(*item);
+    }
+
+    defaults
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -231,7 +280,7 @@ impl Default for CopyPasteSettings {
         Self {
             mode: PasteMode::Merge,
             included_adjustments: default_included_adjustments(),
-            known_adjustments: default_included_adjustments(),
+            known_adjustments: all_available_adjustments(),
         }
     }
 }
@@ -258,6 +307,8 @@ pub struct ExportPreset {
     pub watermark_opacity: u32,
     #[serde(default)]
     pub export_masks: Option<bool>,
+    #[serde(default)]
+    pub preserve_folders: Option<bool>,
     /// Last export destination path, stored on the __last_used__ preset only.
     #[serde(default)]
     pub last_export_path: Option<String>,
@@ -284,6 +335,7 @@ fn default_export_presets() -> Vec<ExportPreset> {
             watermark_spacing: 5,
             watermark_opacity: 75,
             export_masks: Some(false),
+            preserve_folders: Some(false),
             last_export_path: None,
         },
         ExportPreset {
@@ -305,6 +357,7 @@ fn default_export_presets() -> Vec<ExportPreset> {
             watermark_spacing: 5,
             watermark_opacity: 75,
             export_masks: Some(false),
+            preserve_folders: Some(false),
             last_export_path: None,
         },
     ]
@@ -432,6 +485,9 @@ impl Default for AppSettings {
             filter_criteria: None,
             theme: Some("dark".to_string()),
             font_family: None,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            transparent: Some(false),
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
             transparent: Some(true),
             #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
             decorations: Some(true),
@@ -781,15 +837,25 @@ pub async fn read_exif_for_paths(
         .par_iter()
         .filter_map(|virtual_path| {
             let (source_path, _) = parse_virtual_path(virtual_path);
+            let source_path_str = source_path.to_string_lossy().to_string();
 
-            let exif_map = if let Ok(mmap) = read_file_mapped(&source_path) {
-                exif_processing::extract_metadata(&mmap)
+            let map = if let Some(sidecar_exif) =
+                crate::exif_processing::read_rrexif_sidecar(&source_path)
+            {
+                sidecar_exif
+            } else if let Ok(mmap) = read_file_mapped(&source_path) {
+                crate::exif_processing::read_exif_data(&source_path_str, &mmap)
+            } else if let Ok(bytes) = fs::read(&source_path) {
+                crate::exif_processing::read_exif_data(&source_path_str, &bytes)
             } else {
-                let bytes = fs::read(&source_path).ok()?;
-                exif_processing::extract_metadata(&bytes)
+                HashMap::new()
             };
 
-            exif_map.map(|map| (virtual_path.clone(), map))
+            if map.is_empty() {
+                None
+            } else {
+                Some((virtual_path.clone(), map))
+            }
         })
         .collect();
 
@@ -1395,7 +1461,8 @@ pub fn generate_thumbnail_data(
                 img
             };
 
-            let warped_image = apply_geometry_warp(&composite_image, &meta.adjustments);
+            let warped_image =
+                apply_geometry_warp(Cow::Borrowed(&composite_image), &meta.adjustments);
             let orientation_steps =
                 meta.adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
             let coarse_rotated_image = apply_coarse_rotation(warped_image, orientation_steps);
@@ -1429,7 +1496,7 @@ pub fn generate_thumbnail_data(
                 };
                 (base, scale)
             } else {
-                (coarse_rotated_image.clone(), 1.0)
+                (coarse_rotated_image.into_owned(), 1.0)
             };
 
             let total_scale = gpu_scale * raw_scale_factor;
@@ -1452,8 +1519,8 @@ pub fn generate_thumbnail_data(
             .unwrap_or(false);
         let flip_vertical = meta.adjustments["flipVertical"].as_bool().unwrap_or(false);
 
-        let flipped_image = apply_flip(processing_base, flip_horizontal, flip_vertical);
-        let rotated_image = apply_rotation(&flipped_image, rotation_degrees);
+        let flipped_image = apply_flip(Cow::Owned(processing_base), flip_horizontal, flip_vertical);
+        let rotated_image = apply_rotation(flipped_image, rotation_degrees);
 
         let scaled_crop_json = if let Some(c) = &crop_data {
             serde_json::to_value(Crop {
@@ -1518,7 +1585,7 @@ pub fn generate_thumbnail_data(
         if let Ok(processed_image) = gpu_processing::process_and_get_dynamic_image(
             context,
             &state,
-            &cropped_preview,
+            cropped_preview.as_ref(),
             unique_hash,
             gpu_processing::RenderRequest {
                 adjustments: gpu_adjustments,
@@ -1530,7 +1597,7 @@ pub fn generate_thumbnail_data(
         ) {
             return Ok(processed_image);
         } else {
-            return Ok(cropped_preview);
+            return Ok(cropped_preview.into_owned());
         }
     }
 
@@ -1572,10 +1639,7 @@ pub fn generate_thumbnail_data(
     }
 
     let fallback_orientation_steps = adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
-    Ok(apply_coarse_rotation(
-        final_image,
-        fallback_orientation_steps,
-    ))
+    Ok(apply_coarse_rotation(Cow::Owned(final_image), fallback_orientation_steps).into_owned())
 }
 
 fn encode_thumbnail(image: &DynamicImage, target_width: u32) -> Result<Vec<u8>> {
@@ -1904,11 +1968,33 @@ pub fn duplicate_file(path: String) -> Result<(), String> {
         fs::copy(&source_sidecar_path, &dest_sidecar_path).map_err(|e| e.to_string())?;
     }
 
+    let mut source_rrexif_name = source_path.file_name().unwrap().to_os_string();
+    source_rrexif_name.push(".rrexif");
+    let source_rrexif = source_path.with_file_name(source_rrexif_name);
+
+    if source_rrexif.exists() {
+        let mut dest_rrexif_name = dest_path.file_name().unwrap().to_os_string();
+        dest_rrexif_name.push(".rrexif");
+        let dest_rrexif = dest_path.with_file_name(dest_rrexif_name);
+        let _ = fs::copy(&source_rrexif, &dest_rrexif);
+    }
+
     Ok(())
 }
 
 fn find_all_associated_files(source_image_path: &Path) -> Result<Vec<PathBuf>, String> {
     let mut associated_files = vec![source_image_path.to_path_buf()];
+
+    let mut rrexif_name = source_image_path
+        .file_name()
+        .unwrap_or_default()
+        .to_os_string();
+    rrexif_name.push(".rrexif");
+    let rrexif_path = source_image_path.with_file_name(rrexif_name);
+
+    if rrexif_path.exists() {
+        associated_files.push(rrexif_path);
+    }
 
     let parent_dir = source_image_path
         .parent()
@@ -2838,14 +2924,15 @@ pub fn load_settings(app_handle: AppHandle) -> Result<AppSettings, String> {
         AppSettings::default()
     };
 
-    let all_current_keys = default_included_adjustments();
+    let all_current_keys = all_available_adjustments();
+    let default_included = default_included_adjustments();
     let mut settings_modified = false;
 
     let is_first_migration = settings.copy_paste_settings.known_adjustments.is_empty();
 
     if is_first_migration {
-        settings.copy_paste_settings.included_adjustments = all_current_keys.clone();
-        settings.copy_paste_settings.known_adjustments = all_current_keys;
+        settings.copy_paste_settings.included_adjustments = default_included;
+        settings.copy_paste_settings.known_adjustments = all_current_keys.clone();
         settings_modified = true;
     } else {
         let new_features: Vec<String> = all_current_keys
@@ -2854,11 +2941,18 @@ pub fn load_settings(app_handle: AppHandle) -> Result<AppSettings, String> {
             .collect();
 
         if !new_features.is_empty() {
-            settings
-                .copy_paste_settings
-                .included_adjustments
-                .extend(new_features);
-            settings.copy_paste_settings.known_adjustments = all_current_keys;
+            for feature in new_features {
+                if default_included.contains(&feature) {
+                    settings
+                        .copy_paste_settings
+                        .included_adjustments
+                        .insert(feature.clone());
+                }
+                settings
+                    .copy_paste_settings
+                    .known_adjustments
+                    .insert(feature);
+            }
             settings_modified = true;
         }
     }
@@ -3011,6 +3105,8 @@ pub fn save_community_preset(
     name: String,
     adjustments: Value,
     app_handle: AppHandle,
+    include_masks: Option<bool>,
+    include_crop_transform: Option<bool>,
 ) -> Result<(), String> {
     let mut current_presets = load_presets(app_handle.clone())?;
 
@@ -3039,6 +3135,8 @@ pub fn save_community_preset(
         id: Uuid::new_v4().to_string(),
         name,
         adjustments,
+        include_masks,
+        include_crop_transform,
     };
 
     if let Some(PresetItem::Folder(folder)) = current_presets.iter_mut().find(|item| {
@@ -3068,7 +3166,7 @@ pub fn clear_all_sidecars(root_path: String) -> Result<usize, String> {
         let path = entry.path();
         if path.is_file()
             && let Some(extension) = path.extension()
-            && extension == "rrdata"
+            && (extension == "rrdata" || extension == "rrexif")
         {
             if fs::remove_file(path).is_ok() {
                 deleted_count += 1;
@@ -3255,7 +3353,8 @@ pub fn delete_files_with_associated(paths: Vec<String>) -> Result<(), String> {
                 if let Some(base_stem) = entry_filename_str.split('.').next()
                     && stems_to_delete.contains(base_stem)
                     && (is_supported_image_file(entry_filename_str.as_ref())
-                        || entry_filename_str.ends_with(".rrdata"))
+                        || entry_filename_str.ends_with(".rrdata")
+                        || entry_filename_str.ends_with(".rrexif"))
                 {
                     files_to_trash.insert(entry_path);
                 }
@@ -3492,6 +3591,17 @@ pub async fn import_files(
                     fs::copy(&source_sidecar, &dest_sidecar).map_err(|e| e.to_string())?;
                 }
 
+                let mut source_rrexif_name = source_path.file_name().unwrap().to_os_string();
+                source_rrexif_name.push(".rrexif");
+                let source_rrexif = source_path.with_file_name(source_rrexif_name);
+
+                if source_rrexif.exists() {
+                    let mut dest_rrexif_name = dest_file_path.file_name().unwrap().to_os_string();
+                    dest_rrexif_name.push(".rrexif");
+                    let dest_rrexif = dest_file_path.with_file_name(dest_rrexif_name);
+                    let _ = fs::copy(&source_rrexif, &dest_rrexif);
+                }
+
                 if settings.delete_after_import {
                     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                     {
@@ -3524,6 +3634,9 @@ pub async fn import_files(
                         fs::remove_file(&source_path).map_err(|e| e.to_string())?;
                         if source_sidecar.exists() {
                             fs::remove_file(&source_sidecar).map_err(|e| e.to_string())?;
+                        }
+                        if source_rrexif.exists() {
+                            let _ = fs::remove_file(&source_rrexif);
                         }
                     }
                 }
@@ -3649,6 +3762,17 @@ pub fn rename_files(paths: Vec<String>, name_template: String) -> Result<Vec<Str
                     sidecar_operations.insert(entry_path, new_sidecar_path);
                 }
             }
+        }
+
+        let mut old_rrexif_name = original_path.file_name().unwrap().to_os_string();
+        old_rrexif_name.push(".rrexif");
+        let old_rrexif = original_path.with_file_name(old_rrexif_name);
+
+        if old_rrexif.exists() {
+            let mut new_rrexif_name = new_path.file_name().unwrap().to_os_string();
+            new_rrexif_name.push(".rrexif");
+            let new_rrexif = new_path.with_file_name(new_rrexif_name);
+            sidecar_operations.insert(old_rrexif, new_rrexif);
         }
     }
     operations.extend(sidecar_operations);

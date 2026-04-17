@@ -248,6 +248,24 @@
   }
 }
 
+  /*
+    Color grading sliders
+  */
+
+.cg-hue-gradient {
+  background: linear-gradient(to right, hsl(0, 100%, 50%) 0%, hsl(30, 100%, 50%) 8.33%, hsl(60, 100%, 50%) 16.66%, hsl(90, 100%, 50%) 25%, hsl(120, 100%, 50%) 33.33%, hsl(150, 100%, 50%) 41.66%, hsl(180, 100%, 50%) 50%, hsl(210, 100%, 50%) 58.33%, hsl(240, 100%, 50%) 66.66%, hsl(270, 100%, 50%) 75%, hsl(300, 100%, 50%) 83.33%, hsl(330, 100%, 50%) 91.66%, hsl(360, 100%, 50%) 100%) !important;
+}
+
+.cg-sat-gradient {
+  background: linear-gradient(to right, 
+    hsl(var(--cg-hue), 0%, 50%) 0%, hsl(var(--cg-hue), 100%, 50%) 100%) !important;
+}
+
+.cg-lum-gradient {
+  background: linear-gradient(to right, 
+    hsl(var(--cg-hue), var(--cg-sat), 0%) 0%, hsl(var(--cg-hue), var(--cg-sat), 50%) 50%, hsl(var(--cg-hue), var(--cg-sat), 100%) 100%) !important;
+}
+
 @layer utilities {
   .text-shadow-shiny {
     text-shadow: 0 0 18px rgba(255, 255, 255, 0.35);

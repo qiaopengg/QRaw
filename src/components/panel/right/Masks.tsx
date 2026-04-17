@@ -4,6 +4,7 @@ import {
   Circle,
   Cloud,
   Droplet,
+  Droplets,
   Eraser,
   Layers,
   RectangleHorizontal,
@@ -20,6 +21,7 @@ export enum Mask {
   AiSubject = 'ai-subject',
   All = 'all',
   Brush = 'brush',
+  Flow = 'flow',
   Color = 'color',
   Linear = 'linear',
   Luminance = 'luminance',
@@ -30,6 +32,7 @@ export enum Mask {
 export enum SubMaskMode {
   Additive = 'additive',
   Subtractive = 'subtractive',
+  Intersect = 'intersect',
 }
 
 export enum ToolType {
@@ -80,6 +83,7 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.AiSubject]: Sparkles,
   [Mask.All]: RectangleHorizontal,
   [Mask.Brush]: Brush,
+  [Mask.Flow]: Droplets,
   [Mask.Color]: Droplet,
   [Mask.Linear]: TriangleRight,
   [Mask.Luminance]: Sparkles,
@@ -230,6 +234,12 @@ export const OTHERS_MASK_TYPES: Array<MaskType> = [
     icon: Brush,
     name: 'Brush',
     type: Mask.Brush,
+  },
+  {
+    disabled: false,
+    icon: Droplets,
+    name: 'Flow',
+    type: Mask.Flow,
   },
   {
     disabled: false,

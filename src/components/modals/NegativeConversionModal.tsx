@@ -230,6 +230,7 @@ export default function NegativeConversionModal({
               step={0.01}
               defaultValue={1}
               onChange={(e) => handleParamChange('red_weight', Number(e.target.value))}
+              fillOrigin="min"
             />
             <Slider
               label={t('negativeConversion.greenMagenta')}
@@ -239,6 +240,7 @@ export default function NegativeConversionModal({
               step={0.01}
               defaultValue={1}
               onChange={(e) => handleParamChange('green_weight', Number(e.target.value))}
+              fillOrigin="min"
             />
             <Slider
               label={t('negativeConversion.blueYellow')}
@@ -248,6 +250,7 @@ export default function NegativeConversionModal({
               step={0.01}
               defaultValue={1}
               onChange={(e) => handleParamChange('blue_weight', Number(e.target.value))}
+              fillOrigin="min"
             />
           </div>
         </div>
@@ -276,6 +279,7 @@ export default function NegativeConversionModal({
               step={0.05}
               defaultValue={1}
               onChange={(e) => handleParamChange('contrast', Number(e.target.value))}
+              fillOrigin="min"
             />
           </div>
         </div>
