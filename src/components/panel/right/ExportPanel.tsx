@@ -713,7 +713,7 @@ export default function ExportPanel({
                               max={50}
                               step={1}
                               value={watermarkScale}
-                              onChange={(e) => setWatermarkScale(parseInt(e.target.value))}
+                              onChange={(e) => setWatermarkScale(Number(e.target.value))}
                               disabled={isExporting}
                               defaultValue={10}
                             />
@@ -723,7 +723,7 @@ export default function ExportPanel({
                               max={25}
                               step={1}
                               value={watermarkSpacing}
-                              onChange={(e) => setWatermarkSpacing(parseInt(e.target.value))}
+                              onChange={(e) => setWatermarkSpacing(Number(e.target.value))}
                               disabled={isExporting}
                               defaultValue={5}
                             />
@@ -733,7 +733,7 @@ export default function ExportPanel({
                               max={100}
                               step={1}
                               value={watermarkOpacity}
-                              onChange={(e) => setWatermarkOpacity(parseInt(e.target.value))}
+                              onChange={(e) => setWatermarkOpacity(Number(e.target.value))}
                               disabled={isExporting}
                               defaultValue={75}
                             />
