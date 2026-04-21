@@ -429,15 +429,29 @@ def _load_pipelines() -> None:
         _ip_adapter_loaded = False
         if DEFAULT_IP_ADAPTER_MODEL and hasattr(pipe, "load_ip_adapter"):
             try:
+                # 🔧 使用国内镜像加速下载
+                import os
+                os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+                
                 _debug_log(f"Loading IP-Adapter: {DEFAULT_IP_ADAPTER_MODEL}")
+                _debug_log(f"Using mirror: https://hf-mirror.com")
+                
+                # 设置 IP-Adapter scale（风格强度）
+                pipe.set_ip_adapter_scale(1.0)
+                
                 if DEFAULT_IP_ADAPTER_WEIGHT:
-                    pipe.load_ip_adapter(DEFAULT_IP_ADAPTER_MODEL, weight_name=DEFAULT_IP_ADAPTER_WEIGHT)
+                    pipe.load_ip_adapter(
+                        DEFAULT_IP_ADAPTER_MODEL,
+                        subfolder="sdxl_models",
+                        weight_name=DEFAULT_IP_ADAPTER_WEIGHT
+                    )
                 else:
-                    pipe.load_ip_adapter(DEFAULT_IP_ADAPTER_MODEL)
+                    pipe.load_ip_adapter(DEFAULT_IP_ADAPTER_MODEL, subfolder="sdxl_models")
                 _ip_adapter_loaded = True
                 _debug_log("IP-Adapter loaded successfully")
             except Exception as e:
                 print(f"[WARNING] Failed to load IP-Adapter: {e}")
+                print(f"[INFO] Service will continue without IP-Adapter (slightly lower quality)")
                 _ip_adapter_loaded = False
 
         refiner = None
@@ -809,6 +823,11 @@ def startup_event() -> None:
 @app.post("/v1/style-transfer", response_model=StyleTransferResponse)
 def style_transfer(req: StyleTransferRequest) -> StyleTransferResponse:
     task_id = req.task_id or str(uuid.uuid4())  # 🆕 生成或使用提供的任务ID
+    
+    # 🔧 修复：立即创建进度队列，避免竞态条件
+    if task_id and not _get_progress_queue(task_id):
+        _create_progress_queue(task_id)
+    
     _print_progress(0, "开始风格迁移...", task_id)
     _debug_log("--- [DEBUG] STARTING STYLE TRANSFER ---")
     _debug_log(f"Task ID: {task_id}")
@@ -820,20 +839,29 @@ def style_transfer(req: StyleTransferRequest) -> StyleTransferResponse:
     if not content_path.exists():
         raise HTTPException(status_code=400, detail="content_image_not_found")
 
-    key = _hash_request(req)
-    out_dir = DEFAULT_OUTPUT_DIR / key
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    out_tiff = out_dir / "output.tiff"
-    out_preview = out_dir / "preview.png"
-    if out_tiff.exists() and out_preview.exists():
-        _debug_log(f"Using cached result: {key}")
-        _print_progress(100, "使用缓存结果", task_id)
-        return StyleTransferResponse(
-            status="ok",
-            output_image_path=str(out_tiff),
-            preview_image_path=str(out_preview),
-        )
+    # 🔧 禁用缓存：每次都重新生成
+    # 输出文件将保存在内容图像同目录，文件名基于内容图像
+    content_path_obj = Path(req.content_image_path)
+    output_base = content_path_obj.stem + "_style_transfer"
+    out_dir = content_path_obj.parent
+    
+    out_tiff = out_dir / f"{output_base}.tiff"
+    out_preview = out_dir / f"{output_base}_preview.png"
+    
+    # # 旧的缓存逻辑（已禁用）
+    # key = _hash_request(req)
+    # out_dir = DEFAULT_OUTPUT_DIR / key
+    # out_dir.mkdir(parents=True, exist_ok=True)
+    # out_tiff = out_dir / "output.tiff"
+    # out_preview = out_dir / "preview.png"
+    # if out_tiff.exists() and out_preview.exists():
+    #     _debug_log(f"Using cached result: {key}")
+    #     _print_progress(100, "使用缓存结果", task_id)
+    #     return StyleTransferResponse(
+    #         status="ok",
+    #         output_image_path=str(out_tiff),
+    #         preview_image_path=str(out_preview),
+    #     )
 
     _print_progress(5, "加载图像...", task_id)
     try:
@@ -857,56 +885,74 @@ def style_transfer(req: StyleTransferRequest) -> StyleTransferResponse:
             raise HTTPException(status_code=503, detail="warming_up")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # 🆕 后处理步骤 1: 色彩对齐（文档第 7.2 节）
-    if req.enable_color_alignment and HAS_COLOR_ALIGNMENT:
-        _print_progress(92, "应用色彩对齐...", task_id)
-        _debug_log(f"Applying color alignment (mode={req.color_alignment_mode})")
-        try:
-            result = apply_color_alignment(
-                ai_result=result,
-                original_img=content_arr,
-                mode=req.color_alignment_mode,
-                luminance_strength=req.luminance_strength,
-                tone_curve_strength=req.tone_curve_strength,
-                dynamic_range_preserve=req.dynamic_range_preserve,
-            )
-            _debug_log("Color alignment completed")
-        except Exception as e:
-            print(f"[WARNING] Color alignment failed: {e}")
+    # 🔧 紧急修复：跳过所有后处理，直接保存 Pipeline 输出
+    _print_progress(92, "跳过后处理（紧急修复模式）...", task_id)
+    print("[EMERGENCY_FIX] ========================================")
+    print("[EMERGENCY_FIX] Skipping all post-processing to diagnose issue")
+    print(f"[EMERGENCY_FIX] Result shape: {result.shape}, dtype: {result.dtype}")
+    print(f"[EMERGENCY_FIX] Result range: [{result.min():.2f}, {result.max():.2f}]")
+    print(f"[EMERGENCY_FIX] Result mean: {result.mean():.2f}")
+    if result.shape[2] == 3:
+        print(f"[EMERGENCY_FIX] RGB channels mean: R={result[:,:,0].mean():.2f}, G={result[:,:,1].mean():.2f}, B={result[:,:,2].mean():.2f}")
+        # 检查是否是灰度图
+        channel_diff = np.abs(result[:,:,0] - result[:,:,1]).mean() + np.abs(result[:,:,1] - result[:,:,2]).mean()
+        print(f"[EMERGENCY_FIX] Channel difference: {channel_diff:.2f}")
+        if channel_diff < 1.0:
+            print("[EMERGENCY_FIX] ⚠️  WARNING: Image appears to be grayscale (channels are identical)!")
+        else:
+            print("[EMERGENCY_FIX] ✓ Image has color information")
+    print("[EMERGENCY_FIX] ========================================")
+    
+    # # 🆕 后处理步骤 1: 色彩对齐（文档第 7.2 节）
+    # if req.enable_color_alignment and HAS_COLOR_ALIGNMENT:
+    #     _print_progress(92, "应用色彩对齐...", task_id)
+    #     _debug_log(f"Applying color alignment (mode={req.color_alignment_mode})")
+    #     try:
+    #         result = apply_color_alignment(
+    #             ai_result=result,
+    #             original_img=content_arr,
+    #             mode=req.color_alignment_mode,
+    #             luminance_strength=req.luminance_strength,
+    #             tone_curve_strength=req.tone_curve_strength,
+    #             dynamic_range_preserve=req.dynamic_range_preserve,
+    #         )
+    #         _debug_log("Color alignment completed")
+    #     except Exception as e:
+    #         print(f"[WARNING] Color alignment failed: {e}")
 
-    # 🆕 后处理步骤 2: RAW 融合（文档第 7.3 节）
-    if req.enable_raw_fusion and req.preserve_raw_tone_curve and HAS_RAW_FUSION:
-        _print_progress(94, "应用 RAW 融合...", task_id)
-        _debug_log(f"Applying RAW fusion (mode={req.raw_blend_mode}, strength={req.raw_blend_strength})")
-        try:
-            # 检查是否是 RAW 文件
-            is_raw = str(content_path).lower().endswith(('.raw', '.cr2', '.nef', '.arw', '.dng', '.raf', '.orf', '.rw2'))
-            
-            if is_raw:
-                # 从 RAW 文件加载
-                result = apply_raw_fusion(
-                    ai_result=result,
-                    raw_path=str(content_path),
-                    current_adjustments=req.current_adjustments,
-                    blend_strength=req.raw_blend_strength,
-                    blend_mode=req.raw_blend_mode,
-                    preserve_highlights=req.preserve_highlights,
-                    preserve_shadows=req.preserve_shadows,
-                )
-            else:
-                # 使用已处理的图像
-                result = apply_raw_fusion(
-                    ai_result=result,
-                    raw_processed=content_arr,
-                    current_adjustments=req.current_adjustments,
-                    blend_strength=req.raw_blend_strength,
-                    blend_mode=req.raw_blend_mode,
-                    preserve_highlights=req.preserve_highlights,
-                    preserve_shadows=req.preserve_shadows,
-                )
-            _debug_log("RAW fusion completed")
-        except Exception as e:
-            print(f"[WARNING] RAW fusion failed: {e}")
+    # # 🆕 后处理步骤 2: RAW 融合（文档第 7.3 节）
+    # if req.enable_raw_fusion and req.preserve_raw_tone_curve and HAS_RAW_FUSION:
+    #     _print_progress(94, "应用 RAW 融合...", task_id)
+    #     _debug_log(f"Applying RAW fusion (mode={req.raw_blend_mode}, strength={req.raw_blend_strength})")
+    #     try:
+    #         # 检查是否是 RAW 文件
+    #         is_raw = str(content_path).lower().endswith(('.raw', '.cr2', '.nef', '.arw', '.dng', '.raf', '.orf', '.rw2'))
+    #         
+    #         if is_raw:
+    #             # 从 RAW 文件加载
+    #             result = apply_raw_fusion(
+    #                 ai_result=result,
+    #                 raw_path=str(content_path),
+    #                 current_adjustments=req.current_adjustments,
+    #                 blend_strength=req.raw_blend_strength,
+    #                 blend_mode=req.raw_blend_mode,
+    #                 preserve_highlights=req.preserve_highlights,
+    #                 preserve_shadows=req.preserve_shadows,
+    #             )
+    #         else:
+    #             # 使用已处理的图像
+    #             result = apply_raw_fusion(
+    #                 ai_result=result,
+    #                 raw_processed=content_arr,
+    #                 current_adjustments=req.current_adjustments,
+    #                 blend_strength=req.raw_blend_strength,
+    #                 blend_mode=req.raw_blend_mode,
+    #                 preserve_highlights=req.preserve_highlights,
+    #                 preserve_shadows=req.preserve_shadows,
+    #             )
+    #         _debug_log("RAW fusion completed")
+    #     except Exception as e:
+    #         print(f"[WARNING] RAW fusion failed: {e}")
 
     _print_progress(96, "保存输出文件...", task_id)
     _save_rgb16_tiff(result, out_tiff)
@@ -938,8 +984,10 @@ async def style_transfer_progress(task_id: str):
     """
     from sse_progress import progress_stream
     
-    # 创建进度队列
-    queue = _create_progress_queue(task_id)
+    # 🔧 修复：如果队列不存在，创建它；否则使用现有队列
+    queue = _get_progress_queue(task_id)
+    if not queue:
+        queue = _create_progress_queue(task_id)
     
     def event_generator():
         try:

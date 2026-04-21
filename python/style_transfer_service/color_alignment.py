@@ -82,40 +82,44 @@ def luminance_aware_mapping(
     Returns:
         [H, W, 3] float32 数组，范围 [0, 255]
     """
-    if not HAS_CV2:
-        # 如果没有 OpenCV，使用简化版本
-        return _luminance_aware_mapping_simple(ai_result, original_img, strength)
+    # 🔧 临时禁用 LAB 转换，直接使用简化版本
+    # 因为 LAB 转换可能导致色彩丢失问题
+    return _luminance_aware_mapping_simple(ai_result, original_img, strength)
     
-    # 转换到 LAB 色彩空间
-    ai_lab = cv2.cvtColor(ai_result.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
-    orig_lab = cv2.cvtColor(original_img.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
-    
-    # 提取亮度通道（L）
-    ai_l = ai_lab[:, :, 0]
-    orig_l = orig_lab[:, :, 0]
-    
-    # 基础混合
-    blended_l = ai_l * (1.0 - strength) + orig_l * strength
-    
-    # 高光保护（保留原图的高光细节）
-    if preserve_highlights:
-        highlight_mask = (orig_l > 200).astype(np.float32)
-        highlight_strength = highlight_mask * 0.5  # 高光区域增强保护
-        blended_l = blended_l * (1.0 - highlight_strength) + orig_l * highlight_strength
-    
-    # 阴影保护（保留原图的阴影层次）
-    if preserve_shadows:
-        shadow_mask = (orig_l < 50).astype(np.float32)
-        shadow_strength = shadow_mask * 0.4  # 阴影区域增强保护
-        blended_l = blended_l * (1.0 - shadow_strength) + orig_l * shadow_strength
-    
-    # 更新亮度通道
-    ai_lab[:, :, 0] = np.clip(blended_l, 0.0, 255.0)
-    
-    # 转换回 RGB
-    result = cv2.cvtColor(ai_lab.astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32)
-    
-    return result
+    # if not HAS_CV2:
+    #     # 如果没有 OpenCV，使用简化版本
+    #     return _luminance_aware_mapping_simple(ai_result, original_img, strength)
+    # 
+    # # 转换到 LAB 色彩空间
+    # ai_lab = cv2.cvtColor(ai_result.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+    # orig_lab = cv2.cvtColor(original_img.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+    # 
+    # # 提取亮度通道（L）
+    # ai_l = ai_lab[:, :, 0]
+    # orig_l = orig_lab[:, :, 0]
+    # 
+    # # 基础混合
+    # blended_l = ai_l * (1.0 - strength) + orig_l * strength
+    # 
+    # # 高光保护（保留原图的高光细节）
+    # if preserve_highlights:
+    #     highlight_mask = (orig_l > 200).astype(np.float32)
+    #     highlight_strength = highlight_mask * 0.5  # 高光区域增强保护
+    #     blended_l = blended_l * (1.0 - highlight_strength) + orig_l * highlight_strength
+    # 
+    # # 阴影保护（保留原图的阴影层次）
+    # if preserve_shadows:
+    #     shadow_mask = (orig_l < 50).astype(np.float32)
+    #     shadow_strength = shadow_mask * 0.4  # 阴影区域增强保护
+    #     blended_l = blended_l * (1.0 - shadow_strength) + orig_l * shadow_strength
+    # 
+    # # 更新亮度通道
+    # ai_lab[:, :, 0] = np.clip(blended_l, 0.0, 255.0)
+    # 
+    # # 转换回 RGB
+    # result = cv2.cvtColor(ai_lab.astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32)
+    # 
+    # return result
 
 
 def _luminance_aware_mapping_simple(
