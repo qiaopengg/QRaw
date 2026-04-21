@@ -113,11 +113,13 @@ export enum Invokes {
   TestAIConnectorConnection = 'test_ai_connector_connection',
   ChatAdjust = 'chat_adjust',
   AnalyzeStyleTransfer = 'analyze_style_transfer',
+  CheckStyleTransferService = 'check_style_transfer_service',
   UpdateWindowEffect = 'update_window_effect',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
   SaveCommunityPreset = 'save_community_preset',
   SaveTempFile = 'save_temp_file',
+  RunStyleTransfer = 'run_style_transfer',
 }
 
 export enum Panel {
@@ -208,6 +210,11 @@ export interface AppSettings {
   styleTransferStrength?: number;
   styleTransferHighlightGuard?: number;
   styleTransferSkinProtect?: number;
+  styleTransferMode?: 'analysis' | 'generative';
+  styleTransferServiceUrl?: string;
+  styleTransferPreset?: 'realistic' | 'artistic' | 'creative';
+  styleTransferEnableRefiner?: boolean;
+  styleTransferAllowFallback?: boolean;
 }
 
 export interface BrushSettings {

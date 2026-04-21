@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+pydantic
+pillow
+numpy
+tifffile
+torch
+diffusers
+transformers
+accelerate
+safetensors
+opencv-python
+rawpy
+protobuf>=3.20.0
+# 可选：用于 IP-Adapter
+# huggingface-hub

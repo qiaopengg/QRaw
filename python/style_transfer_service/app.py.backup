@@ -1,0 +1,528 @@
+import hashlib
+import inspect
+import os
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import tifffile
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from PIL import Image
+
+SERVICE_VERSION = "0.1.0"
+
+DEFAULT_BASE_MODEL = os.environ.get("QRAW_SDXL_BASE_MODEL", "stabilityai/stable-diffusion-xl-base-1.0")
+DEFAULT_REFINER_MODEL = os.environ.get("QRAW_SDXL_REFINER_MODEL", "stabilityai/stable-diffusion-xl-refiner-1.0")
+DEFAULT_CONTROLNET_MODEL = os.environ.get("QRAW_CONTROLNET_MODEL", "diffusers/controlnet-canny-sdxl-1.0")
+DEFAULT_IP_ADAPTER_MODEL = os.environ.get("QRAW_IP_ADAPTER_MODEL", "")
+DEFAULT_IP_ADAPTER_WEIGHT = os.environ.get("QRAW_IP_ADAPTER_WEIGHT", "")
+
+DEFAULT_OUTPUT_DIR = Path(os.environ.get("QRAW_STYLE_TRANSFER_OUTPUT_DIR", Path(tempfile.gettempdir()) / "qraw-style-transfer"))
+DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class StyleTransferRequest(BaseModel):
+    reference_image_path: str = Field(alias="referenceImagePath")
+    content_image_path: str = Field(alias="contentImagePath")
+    current_adjustments: Dict[str, Any] = Field(default_factory=dict, alias="currentAdjustments")
+    preset: str
+    enable_refiner: bool = Field(False, alias="enableRefiner")
+    tile_size: int = Field(1024, alias="tileSize")
+    tile_overlap: int = Field(96, alias="tileOverlap")
+    controlnet_strength: float = Field(0.6, alias="controlnetStrength")
+    controlnet_guidance_end: float = Field(0.8, alias="controlnetGuidanceEnd")
+    denoise_strength: float = Field(0.55, alias="denoiseStrength")
+    steps: int = 35
+    cfg_scale: float = Field(6.0, alias="cfgScale")
+    output_format: str = Field("rgb16", alias="outputFormat")
+    preserve_raw_tone_curve: bool = Field(True, alias="preserveRawToneCurve")
+
+    class Config:
+        populate_by_name = True
+
+
+class StyleTransferResponse(BaseModel):
+    status: str
+    message: Optional[str] = None
+    output_image_path: Optional[str] = Field(None, alias="outputImagePath")
+    preview_image_path: Optional[str] = Field(None, alias="previewImagePath")
+
+    class Config:
+        populate_by_name = True
+
+
+class HealthResponse(BaseModel):
+    status: str
+    ready: bool
+    version: str
+    pipeline: str
+    capabilities: List[str]
+    detail: Optional[str] = None
+
+
+app = FastAPI()
+
+_pipe = None
+_refiner = None
+_pipeline_error: Optional[str] = None
+_deps_error: Optional[str] = None
+_loading = False
+_ip_adapter_loaded = False
+
+
+def _hash_request(req: StyleTransferRequest) -> str:
+    def stat_sig(p: str) -> str:
+        try:
+            st = os.stat(p)
+            return f"{st.st_size}:{int(st.st_mtime)}"
+        except Exception:
+            return "missing"
+
+    h = hashlib.sha256()
+    h.update(req.reference_image_path.encode("utf-8"))
+    h.update(req.content_image_path.encode("utf-8"))
+    h.update(stat_sig(req.reference_image_path).encode("utf-8"))
+    h.update(stat_sig(req.content_image_path).encode("utf-8"))
+    h.update(req.preset.encode("utf-8"))
+    h.update(str(req.enable_refiner).encode("utf-8"))
+    h.update(str(req.tile_size).encode("utf-8"))
+    h.update(str(req.tile_overlap).encode("utf-8"))
+    h.update(str(req.controlnet_strength).encode("utf-8"))
+    h.update(str(req.controlnet_guidance_end).encode("utf-8"))
+    h.update(str(req.denoise_strength).encode("utf-8"))
+    h.update(str(req.steps).encode("utf-8"))
+    h.update(str(req.cfg_scale).encode("utf-8"))
+    h.update(req.output_format.encode("utf-8"))
+    h.update(str(req.preserve_raw_tone_curve).encode("utf-8"))
+    return h.hexdigest()
+
+
+def _load_image(path: str) -> Image.Image:
+    try:
+        return Image.open(path)
+    except Exception as e:
+        try:
+            import rawpy
+            with rawpy.imread(path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True, half_size=True, no_auto_bright=True, output_bps=8)
+            return Image.fromarray(rgb)
+        except ImportError:
+            raise Exception(f"{e} (rawpy not installed for RAW support)")
+        except Exception as raw_e:
+            raise Exception(f"{e} and {raw_e}")
+
+def _ensure_rgb(img: Image.Image) -> Image.Image:
+    if img.mode != "RGB":
+        return img.convert("RGB")
+    return img
+
+
+def _make_weight_1d(length: int, overlap: int, at_start: bool, at_end: bool) -> np.ndarray:
+    w = np.ones((length,), dtype=np.float32)
+    if overlap <= 0:
+        return w
+    o = min(overlap, length // 2)
+    ramp = (1.0 - np.cos(np.linspace(0.0, np.pi, o, dtype=np.float32))) * 0.5
+    if not at_start:
+        w[:o] = ramp
+    if not at_end:
+        w[-o:] = ramp[::-1]
+    return w
+
+
+def _blend_tiles(
+    tiles: List[Tuple[int, int, np.ndarray]],
+    out_w: int,
+    out_h: int,
+    tile_size: int,
+    overlap: int,
+) -> np.ndarray:
+    acc = np.zeros((out_h, out_w, 3), dtype=np.float32)
+    wacc = np.zeros((out_h, out_w, 1), dtype=np.float32)
+    for x0, y0, tile in tiles:
+        th, tw = tile.shape[0], tile.shape[1]
+        wx = _make_weight_1d(tw, overlap, at_start=(x0 == 0), at_end=(x0 + tw >= out_w))
+        wy = _make_weight_1d(th, overlap, at_start=(y0 == 0), at_end=(y0 + th >= out_h))
+        w = (wy[:, None] * wx[None, :]).astype(np.float32)[:, :, None]
+        region = acc[y0 : y0 + th, x0 : x0 + tw, :]
+        wregion = wacc[y0 : y0 + th, x0 : x0 + tw, :]
+        region += tile.astype(np.float32) * w
+        wregion += w
+    wacc = np.maximum(wacc, 1e-6)
+    return np.clip(acc / wacc, 0.0, 255.0).astype(np.float32)
+
+
+def _save_rgb16_tiff(img: np.ndarray, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    u16 = np.clip(np.round(img / 255.0 * 65535.0), 0, 65535).astype(np.uint16)
+    tifffile.imwrite(str(out_path), u16, photometric="rgb")
+
+
+def _save_preview_png(img: np.ndarray, out_path: Path, max_side: int = 1024) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pil = Image.fromarray(np.clip(np.round(img), 0, 255).astype(np.uint8), mode="RGB")
+    w, h = pil.size
+    scale = min(1.0, float(max_side) / float(max(w, h)))
+    if scale < 1.0:
+        pil = pil.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.LANCZOS)
+    pil.save(str(out_path), format="PNG", optimize=True)
+
+
+def _load_pipelines() -> None:
+    global _pipe, _refiner, _pipeline_error, _ip_adapter_loaded
+    if _pipe is not None or _pipeline_error is not None:
+        return
+
+    try:
+        import torch
+        from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline, StableDiffusionXLImg2ImgPipeline
+
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        if torch.cuda.is_available():
+            torch_dtype = torch.float16
+            device = torch.device("cuda")
+        elif has_mps:
+            torch_dtype = torch.float16
+            device = torch.device("mps")
+        else:
+            torch_dtype = torch.float32
+            device = torch.device("cpu")
+
+        controlnet = ControlNetModel.from_pretrained(DEFAULT_CONTROLNET_MODEL, torch_dtype=torch_dtype)
+
+        pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
+            DEFAULT_BASE_MODEL,
+            controlnet=controlnet,
+            torch_dtype=torch_dtype,
+            use_safetensors=True,
+            variant="fp16" if torch_dtype == torch.float16 else None,
+        )
+        pipe = pipe.to(device)
+
+        try:
+            pipe.enable_attention_slicing()
+        except Exception:
+            pass
+        try:
+            pipe.enable_vae_tiling()
+        except Exception:
+            pass
+
+        _ip_adapter_loaded = False
+        if DEFAULT_IP_ADAPTER_MODEL and hasattr(pipe, "load_ip_adapter"):
+            try:
+                if DEFAULT_IP_ADAPTER_WEIGHT:
+                    pipe.load_ip_adapter(DEFAULT_IP_ADAPTER_MODEL, weight_name=DEFAULT_IP_ADAPTER_WEIGHT)
+                else:
+                    pipe.load_ip_adapter(DEFAULT_IP_ADAPTER_MODEL)
+                _ip_adapter_loaded = True
+            except Exception:
+                _ip_adapter_loaded = False
+
+        refiner = None
+        if DEFAULT_REFINER_MODEL:
+            try:
+                refiner = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                    DEFAULT_REFINER_MODEL,
+                    torch_dtype=torch_dtype,
+                    use_safetensors=True,
+                    variant="fp16" if torch_dtype == torch.float16 else None,
+                )
+                refiner = refiner.to(device)
+                try:
+                    refiner.enable_attention_slicing()
+                except Exception:
+                    pass
+                try:
+                    refiner.enable_vae_tiling()
+                except Exception:
+                    pass
+            except Exception:
+                refiner = None
+
+        _pipe = pipe
+        _refiner = refiner
+    except Exception as e:
+        _pipeline_error = str(e)
+
+
+def _check_deps() -> bool:
+    global _deps_error
+    if _deps_error is not None:
+        return False
+    try:
+        import torch
+        import diffusers
+
+        _ = (torch, diffusers)
+        return True
+    except Exception as e:
+        _deps_error = str(e)
+        return False
+
+
+def _ensure_warming_up() -> None:
+    global _loading
+    if _pipe is not None or _pipeline_error is not None or _loading:
+        return
+    _loading = True
+
+    def _runner() -> None:
+        global _loading
+        try:
+            _load_pipelines()
+        finally:
+            _loading = False
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
+def _make_control_image(img: Image.Image) -> Image.Image:
+    try:
+        import cv2
+
+        arr = np.array(_ensure_rgb(img))
+        edges = cv2.Canny(arr, 100, 200)
+        edges = np.stack([edges] * 3, axis=-1).astype(np.uint8)
+        return Image.fromarray(edges, mode="RGB")
+    except Exception:
+        gray = np.array(_ensure_rgb(img).convert("L"))
+        gy, gx = np.gradient(gray.astype(np.float32))
+        mag = np.sqrt(gx * gx + gy * gy)
+        mag = (mag / (mag.max() + 1e-6) * 255.0).astype(np.uint8)
+        edges = np.stack([mag] * 3, axis=-1)
+        return Image.fromarray(edges, mode="RGB")
+
+
+def _run_single(
+    reference_img: Image.Image,
+    content_img: Image.Image,
+    req: StyleTransferRequest,
+) -> np.ndarray:
+    _ensure_warming_up()
+    if _pipe is None:
+        if _pipeline_error is not None:
+            raise RuntimeError(_pipeline_error)
+        raise RuntimeError("warming_up")
+
+    import torch
+
+    pipe = _pipe
+    style_img = _ensure_rgb(reference_img)
+    content_img = _ensure_rgb(content_img)
+    control_img = _make_control_image(content_img)
+
+    steps = max(1, int(req.steps))
+    guidance_end = float(req.controlnet_guidance_end)
+    guidance_end = max(0.0, min(1.0, guidance_end))
+    denoise = float(req.denoise_strength)
+    denoise = max(0.0, min(1.0, denoise))
+
+    extra: Dict[str, Any] = {}
+    try:
+        sig = inspect.signature(pipe.__call__)
+        if _ip_adapter_loaded and "ip_adapter_image" in sig.parameters:
+            extra["ip_adapter_image"] = style_img
+        if _ip_adapter_loaded and "ip_adapter_scale" in sig.parameters:
+            extra["ip_adapter_scale"] = 1.0
+        if "control_guidance_end" in sig.parameters:
+            extra["control_guidance_end"] = guidance_end
+        if "control_guidance_start" in sig.parameters:
+            extra["control_guidance_start"] = 0.0
+    except Exception:
+        pass
+
+    generator = torch.Generator(device=pipe.device)
+    prompt = ""
+    negative_prompt = ""
+
+    if req.enable_refiner and _refiner is not None:
+        split = 0.8
+        base_steps = max(1, int(round(steps * split)))
+        out = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=content_img,
+            control_image=control_img,
+            strength=denoise,
+            num_inference_steps=base_steps,
+            guidance_scale=float(req.cfg_scale),
+            controlnet_conditioning_scale=float(req.controlnet_strength),
+            denoising_end=split,
+            generator=generator,
+            output_type="latent",
+            **extra,
+        )
+        latents = out.images
+        ref = _refiner(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=latents,
+            num_inference_steps=steps,
+            guidance_scale=float(req.cfg_scale),
+            denoising_start=split,
+            generator=generator,
+        )
+        image = ref.images[0]
+    else:
+        image = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=content_img,
+            control_image=control_img,
+            strength=denoise,
+            num_inference_steps=steps,
+            guidance_scale=float(req.cfg_scale),
+            controlnet_conditioning_scale=float(req.controlnet_strength),
+            generator=generator,
+            **extra,
+        ).images[0]
+
+    image = _ensure_rgb(image)
+    return np.array(image).astype(np.float32)
+
+
+def _run_tiled(
+    reference_img: Image.Image,
+    content_img: Image.Image,
+    req: StyleTransferRequest,
+) -> np.ndarray:
+    content_img = _ensure_rgb(content_img)
+    w, h = content_img.size
+    tile = max(256, int(req.tile_size))
+    overlap = max(0, int(req.tile_overlap))
+    if w <= tile and h <= tile:
+        return _run_single(reference_img, content_img, req)
+
+    stride = max(64, tile - overlap)
+    tiles: List[Tuple[int, int, np.ndarray]] = []
+    for y0 in range(0, h, stride):
+        for x0 in range(0, w, stride):
+            x1 = min(w, x0 + tile)
+            y1 = min(h, y0 + tile)
+            cx0 = max(0, x1 - tile)
+            cy0 = max(0, y1 - tile)
+            crop = content_img.crop((cx0, cy0, x1, y1))
+            out = _run_single(reference_img, crop, req)
+            tiles.append((cx0, cy0, out))
+            if x1 == w:
+                break
+        if y1 == h:
+            break
+    return _blend_tiles(tiles, w, h, tile, overlap)
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    deps_ready = _check_deps()
+    if not deps_ready:
+        return HealthResponse(
+            status="missing_deps",
+            ready=False,
+            version=SERVICE_VERSION,
+            pipeline="sdxl+ip-adapter+controlnet+tiled-vae",
+            capabilities=[],
+            detail=_deps_error,
+        )
+
+    _ensure_warming_up()
+    if _pipe is not None:
+        return HealthResponse(
+            status="ok",
+            ready=True,
+            version=SERVICE_VERSION,
+            pipeline="sdxl+ip-adapter+controlnet+tiled-vae",
+            capabilities=[
+                "sdxl",
+                *(("ip_adapter",) if _ip_adapter_loaded else ()),
+                "controlnet",
+                "tiled_vae",
+                "weighted_blending",
+                "fp16",
+            ],
+        )
+
+    if _pipeline_error is not None:
+        return HealthResponse(
+            status="error",
+            ready=False,
+            version=SERVICE_VERSION,
+            pipeline="sdxl+ip-adapter+controlnet+tiled-vae",
+            capabilities=[],
+            detail=_pipeline_error,
+        )
+
+    return HealthResponse(
+        status="warming_up",
+        ready=False,
+        version=SERVICE_VERSION,
+        pipeline="sdxl+ip-adapter+controlnet+tiled-vae",
+        capabilities=[
+            "sdxl",
+            *(("ip_adapter",) if _ip_adapter_loaded else ()),
+            "controlnet",
+            "tiled_vae",
+            "weighted_blending",
+            "fp16",
+        ],
+        detail="loading_models",
+    )
+@app.on_event("startup")
+def startup_event() -> None:
+    if _check_deps():
+        _ensure_warming_up()
+
+
+@app.post("/v1/style-transfer", response_model=StyleTransferResponse)
+def style_transfer(req: StyleTransferRequest) -> StyleTransferResponse:
+    ref_path = Path(req.reference_image_path)
+    content_path = Path(req.content_image_path)
+    if not ref_path.exists():
+        raise HTTPException(status_code=400, detail="reference_image_not_found")
+    if not content_path.exists():
+        raise HTTPException(status_code=400, detail="content_image_not_found")
+
+    key = _hash_request(req)
+    out_dir = DEFAULT_OUTPUT_DIR / key
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_tiff = out_dir / "output.tiff"
+    out_preview = out_dir / "preview.png"
+    if out_tiff.exists() and out_preview.exists():
+        return StyleTransferResponse(
+            status="ok",
+            output_image_path=str(out_tiff),
+            preview_image_path=str(out_preview),
+        )
+
+    try:
+        reference_img = _load_image(str(ref_path))
+        content_img = _load_image(str(content_path))
+        reference_img = _ensure_rgb(reference_img)
+        content_img = _ensure_rgb(content_img)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid_image: {e}")
+
+    try:
+        result = _run_tiled(reference_img, content_img, req)
+    except Exception as e:
+        if str(e) == "warming_up":
+            raise HTTPException(status_code=503, detail="warming_up")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    _save_rgb16_tiff(result, out_tiff)
+    _save_preview_png(result, out_preview)
+
+    return StyleTransferResponse(
+        status="ok",
+        output_image_path=str(out_tiff),
+        preview_image_path=str(out_preview),
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting QRaw AI Style Transfer Service...")
+    uvicorn.run("app:app", host="127.0.0.1", port=7860, reload=False)

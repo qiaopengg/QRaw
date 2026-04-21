@@ -10,7 +10,6 @@ import {
   User,
   RotateCcw,
   ChevronDown,
-  ExternalLink,
   RefreshCw,
   ImagePlus,
   Brain,
@@ -47,6 +46,17 @@ const HSL_COLOR_LABELS: Record<string, string> = {
   magentas: '洋红',
 };
 
+const DEFAULT_STYLE_TRANSFER_SERVICE_URL = 'http://127.0.0.1:7860';
+
+const STYLE_TRANSFER_PRESET_OPTIONS = [
+  { label: 'Realistic', value: 'realistic' },
+  { label: 'Artistic', value: 'artistic' },
+  { label: 'Creative', value: 'creative' },
+] as const;
+
+type StyleTransferModeSetting = 'analysis' | 'generative';
+type StyleTransferPreset = (typeof STYLE_TRANSFER_PRESET_OPTIONS)[number]['value'];
+
 interface AdjustmentSuggestion {
   key: string;
   value: any;
@@ -62,6 +72,30 @@ interface ChatAdjustResponse {
   adjustments: AdjustmentSuggestion[];
   style_debug?: StyleDebugInfo;
   constraint_debug?: ConstraintDebugInfo;
+  executionMeta?: StyleTransferExecutionMeta;
+  serviceStatus?: StyleTransferServiceStatus;
+  outputImagePath?: string;
+  previewImagePath?: string;
+}
+
+interface StyleTransferExecutionMeta {
+  requestedMode: string;
+  resolvedMode: string;
+  engine: string;
+  preset: string;
+  refineEnabled: boolean;
+  usedFallback: boolean;
+}
+
+interface StyleTransferServiceStatus {
+  serviceUrl: string;
+  reachable: boolean;
+  ready: boolean;
+  status: string;
+  version?: string | null;
+  pipeline?: string | null;
+  capabilities?: string[];
+  detail?: string | null;
 }
 
 interface StyleErrorBreakdown {
@@ -167,6 +201,10 @@ interface ChatMessage {
   appliedValues?: Record<string, any>;
   styleDebug?: StyleDebugInfo;
   constraintDebug?: ConstraintDebugInfo;
+  executionMeta?: StyleTransferExecutionMeta;
+  serviceStatus?: StyleTransferServiceStatus;
+  outputImagePath?: string;
+  previewImagePath?: string;
 }
 
 interface StreamChunkPayload {
@@ -192,6 +230,7 @@ interface ChatPanelProps {
   appSettings?: AppSettings | null;
   onSettingsChange?(settings: AppSettings): void;
   currentImagePath?: string | null;
+  onOpenImage?(path: string, options?: { preserveAdjustments?: boolean }): void;
 }
 
 type OllamaStatus = 'checking' | 'online' | 'offline';
@@ -202,6 +241,17 @@ function clampStyleTransferConfig(value: number): number {
 
 function formatStyleTransferConfig(value: number): string {
   return value.toFixed(2).replace(/\.00$/, '');
+}
+
+function normalizeServiceUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return DEFAULT_STYLE_TRANSFER_SERVICE_URL;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return `http://${trimmed}`;
 }
 
 function getSimpleAdjustments(adj: Adjustments): Record<string, any> {
@@ -262,6 +312,7 @@ async function checkOllamaStatus(endpoint: string): Promise<boolean> {
 function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   // 流式结束后自动折叠
   useEffect(() => {
@@ -270,6 +321,17 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
       return () => clearTimeout(timer);
     }
   }, [isStreaming]);
+
+  // 复制内容到剪贴板
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   return (
     <div className="w-full rounded-lg border border-surface overflow-hidden">
@@ -283,6 +345,34 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
           size={10}
           className={`ml-auto transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
         />
+        {/* 复制按钮 */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopy();
+          }}
+          className="ml-1 p-0.5 rounded hover:bg-surface text-text-secondary hover:text-text-primary transition-colors"
+          title={copied ? t('common.copied') : t('common.copy')}
+        >
+          {copied ? (
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="text-green-400"
+            >
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          ) : (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          )}
+        </button>
       </button>
       {expanded && (
         <div className="px-2 pb-1.5 text-[10px] text-text-secondary/70 leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">
@@ -306,6 +396,7 @@ export default function ChatPanel({
   appSettings,
   onSettingsChange,
   currentImagePath,
+  onOpenImage,
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -321,6 +412,23 @@ export default function ChatPanel({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [tuningMenuOpen, setTuningMenuOpen] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
+  const [styleTransferMode, setStyleTransferMode] = useState<StyleTransferModeSetting>(
+    appSettings?.styleTransferMode || 'analysis',
+  );
+  const [styleTransferPreset, setStyleTransferPreset] = useState<StyleTransferPreset>(
+    appSettings?.styleTransferPreset || 'artistic',
+  );
+  const [styleTransferServiceUrl, setStyleTransferServiceUrl] = useState(
+    appSettings?.styleTransferServiceUrl || DEFAULT_STYLE_TRANSFER_SERVICE_URL,
+  );
+  const [styleTransferEnableRefiner, setStyleTransferEnableRefiner] = useState(
+    appSettings?.styleTransferEnableRefiner ?? false,
+  );
+  const [styleTransferAllowFallback, setStyleTransferAllowFallback] = useState(
+    appSettings?.styleTransferAllowFallback ?? true,
+  );
+  const [styleTransferServiceStatus, setStyleTransferServiceStatus] = useState<StyleTransferServiceStatus | null>(null);
+  const [checkingStyleTransferService, setCheckingStyleTransferService] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const tuningMenuRef = useRef<HTMLDivElement>(null);
   const [styleStrengthInput, setStyleStrengthInput] = useState(formatStyleTransferConfig(styleTransferStrength ?? 1.0));
@@ -337,19 +445,26 @@ export default function ChatPanel({
 
   const { addPreset } = usePresets(adjustments);
 
+  const persistAppSettings = useCallback(
+    (patch: Partial<AppSettings>) => {
+      if (onSettingsChange && appSettings) {
+        onSettingsChange({
+          ...appSettings,
+          ...patch,
+        });
+      }
+    },
+    [appSettings, onSettingsChange],
+  );
+
   const saveStyleTransferConfig = useCallback(
     (key: 'styleTransferStrength' | 'styleTransferHighlightGuard' | 'styleTransferSkinProtect', raw: string) => {
       const parsed = Number.parseFloat(raw);
       const clamped = Number.isFinite(parsed) ? clampStyleTransferConfig(parsed) : 1.0;
-      if (onSettingsChange && appSettings) {
-        onSettingsChange({
-          ...appSettings,
-          [key]: clamped,
-        });
-      }
+      persistAppSettings({ [key]: clamped } as Partial<AppSettings>);
       return formatStyleTransferConfig(clamped);
     },
-    [appSettings, onSettingsChange],
+    [persistAppSettings],
   );
 
   const getEffectiveStyleTransferTuning = useCallback(() => {
@@ -396,6 +511,60 @@ export default function ChatPanel({
   useEffect(() => {
     setSkinProtectInput(formatStyleTransferConfig(styleTransferSkinProtect ?? 1.0));
   }, [styleTransferSkinProtect]);
+
+  useEffect(() => {
+    setStyleTransferMode(appSettings?.styleTransferMode || 'analysis');
+  }, [appSettings?.styleTransferMode]);
+
+  useEffect(() => {
+    setStyleTransferPreset(appSettings?.styleTransferPreset || 'artistic');
+  }, [appSettings?.styleTransferPreset]);
+
+  useEffect(() => {
+    setStyleTransferServiceUrl(appSettings?.styleTransferServiceUrl || DEFAULT_STYLE_TRANSFER_SERVICE_URL);
+  }, [appSettings?.styleTransferServiceUrl]);
+
+  useEffect(() => {
+    setStyleTransferEnableRefiner(appSettings?.styleTransferEnableRefiner ?? false);
+  }, [appSettings?.styleTransferEnableRefiner]);
+
+  useEffect(() => {
+    setStyleTransferAllowFallback(appSettings?.styleTransferAllowFallback ?? true);
+  }, [appSettings?.styleTransferAllowFallback]);
+
+  const checkStyleTransferService = useCallback(
+    async (rawUrl?: string) => {
+      const serviceUrl = normalizeServiceUrl(rawUrl ?? styleTransferServiceUrl);
+      setCheckingStyleTransferService(true);
+      try {
+        const status = await invoke<StyleTransferServiceStatus>(Invokes.CheckStyleTransferService, {
+          serviceUrl,
+        });
+        setStyleTransferServiceStatus(status);
+        return status;
+      } catch (e) {
+        const status: StyleTransferServiceStatus = {
+          serviceUrl,
+          reachable: false,
+          ready: false,
+          status: 'error',
+          capabilities: [],
+          detail: String(e),
+        };
+        setStyleTransferServiceStatus(status);
+        return status;
+      } finally {
+        setCheckingStyleTransferService(false);
+      }
+    },
+    [styleTransferServiceUrl],
+  );
+
+  useEffect(() => {
+    if (styleTransferMode === 'generative') {
+      checkStyleTransferService();
+    }
+  }, [styleTransferMode, checkStyleTransferService]);
 
   // 点击外部关闭模型菜单
   useEffect(() => {
@@ -494,9 +663,53 @@ export default function ChatPanel({
     [setAdjustments],
   );
 
+  const applyAssistantResult = useCallback(
+    (msgId: string, result: ChatAdjustResponse) => {
+      const updates: Partial<Adjustments> = {};
+      result.adjustments.forEach((s) => {
+        (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
+      });
+      if (Object.keys(updates).length > 0) {
+        setAdjustments((prev) => mergeAdjustments(prev, updates));
+      }
+
+      if (result.outputImagePath && result.executionMeta?.resolvedMode === 'generative') {
+        onOpenImage?.(result.outputImagePath, { preserveAdjustments: true });
+      }
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === msgId
+            ? {
+                ...msg,
+                content: result.understanding,
+                adjustments: result.adjustments,
+                appliedValues: Object.fromEntries(
+                  result.adjustments.map((s) => [s.key, s.complex_value !== undefined ? s.complex_value : s.value]),
+                ),
+                styleDebug: result.style_debug,
+                constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
+                executionMeta: result.executionMeta,
+                serviceStatus: result.serviceStatus,
+                outputImagePath: result.outputImagePath,
+                previewImagePath: result.previewImagePath,
+              }
+            : msg,
+        ),
+      );
+    },
+    [onOpenImage, setAdjustments],
+  );
+
+  const isChatAvailable = ollamaStatus === 'online';
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || isLoading) return;
+    if (!isChatAvailable) {
+      setError(t('chat.chatUnavailable'));
+      return;
+    }
 
     setInput('');
     setError(null);
@@ -517,8 +730,7 @@ export default function ChatPanel({
 
     const history: LlmChatMessage[] = messages.map((m) => {
       if (m.role === 'assistant' && m.adjustments && m.adjustments.length > 0) {
-        const formatApplied = (v: any) =>
-          v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v);
+        const formatApplied = (v: any) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v));
         const adjSummary = m.adjustments
           .map((a) => `${a.label}(${a.key}): ${formatApplied(m.appliedValues?.[a.key] ?? a.value)}`)
           .join(', ');
@@ -542,29 +754,7 @@ export default function ChatPanel({
           prev.map((msg) => (msg.id === streamMsgId ? { ...msg, content: msg.content + chunkText } : msg)),
         );
       } else if (chunk_type === 'done' && result) {
-        // 流结束，更新最终结果
-        const updates: Partial<Adjustments> = {};
-        result.adjustments.forEach((s) => {
-          (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
-        });
-        if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
-
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamMsgId
-              ? {
-                  ...msg,
-                  content: result.understanding,
-                  adjustments: result.adjustments,
-                  appliedValues: Object.fromEntries(
-                    result.adjustments.map((s) => [s.key, s.complex_value !== undefined ? s.complex_value : s.value]),
-                  ),
-                  styleDebug: result.style_debug,
-                  constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
-                }
-              : msg,
-          ),
-        );
+        applyAssistantResult(streamMsgId, result);
       }
     });
 
@@ -587,7 +777,20 @@ export default function ChatPanel({
       unlisten();
       setIsLoading(false);
     }
-  }, [input, isLoading, messages, adjustments, endpoint, llmApiKey, activeModel, currentImagePath, setAdjustments]);
+  }, [
+    input,
+    isLoading,
+    isChatAvailable,
+    messages,
+    adjustments,
+    endpoint,
+    llmApiKey,
+    activeModel,
+    currentImagePath,
+    setAdjustments,
+    t,
+    applyAssistantResult,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -609,10 +812,33 @@ export default function ChatPanel({
       return;
     }
 
+    let streamMsgId: string | null = null;
+
     try {
       const selected = await openFileDialog({
         multiple: false,
-        filters: [{ name: t('chat.imageFiles'), extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp'] }],
+        filters: [
+          {
+            name: t('chat.imageFiles'),
+            extensions: [
+              'jpg',
+              'jpeg',
+              'png',
+              'tiff',
+              'tif',
+              'webp',
+              'bmp',
+              'dng',
+              'nef',
+              'cr2',
+              'cr3',
+              'arw',
+              'raf',
+              'orf',
+              'rw2',
+            ],
+          },
+        ],
       });
       if (!selected) return;
 
@@ -626,11 +852,14 @@ export default function ChatPanel({
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: t('chat.styleTransferRequest'),
+        content:
+          styleTransferMode === 'generative'
+            ? t('chat.styleTransferRequestGenerative')
+            : t('chat.styleTransferRequest'),
       };
 
       // 创建 AI 流式占位消息（立即显示等待动画）
-      const streamMsgId = crypto.randomUUID();
+      streamMsgId = crypto.randomUUID();
       const streamMsg: ChatMessage = {
         id: streamMsgId,
         role: 'assistant',
@@ -657,75 +886,45 @@ export default function ChatPanel({
             prev.map((msg) => (msg.id === streamMsgId ? { ...msg, content: msg.content + chunkText } : msg)),
           );
         } else if (chunk_type === 'done' && result) {
-          // 流结束，自动应用结果
-          const updates: Partial<Adjustments> = {};
-          result.adjustments.forEach((s) => {
-            (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
-          });
-          if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
-
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === streamMsgId
-                ? {
-                    ...msg,
-                    content: result.understanding,
-                    adjustments: result.adjustments,
-                    appliedValues: Object.fromEntries(
-                      result.adjustments.map((s) => [s.key, s.complex_value !== undefined ? s.complex_value : s.value]),
-                    ),
-                    styleDebug: result.style_debug,
-                    constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
-                  }
-                : msg,
-            ),
-          );
+          applyAssistantResult(streamMsgId, result);
         }
       });
 
       try {
-        const result = await invoke<ChatAdjustResponse>(Invokes.AnalyzeStyleTransfer, {
-          referencePath: refPath,
-          currentImagePath: currentImagePath,
-          currentAdjustments: simpleAdj,
-          styleStrength: tuning.styleStrength,
-          highlightGuardStrength: tuning.highlightGuardStrength,
-          skinProtectStrength: tuning.skinProtectStrength,
-          pureAlgorithm: pureStyleTransfer,
-          enableExpertPreset: enableStyleTransferExpertPreset,
-          enableFeatureMapping: enableStyleTransferFeatureMapping,
-          enableAutoRefine: enableStyleTransferAutoRefine,
-          enableLut: enableStyleTransferLut,
-          enableVlm: enableStyleTransferVlm,
-          llmEndpoint: endpoint,
-          llmApiKey: llmApiKey || null,
-          llmModel: activeModel || null,
+        const result = await invoke<ChatAdjustResponse>(Invokes.RunStyleTransfer, {
+          request: {
+            referencePath: refPath,
+            currentImagePath,
+            currentAdjustments: simpleAdj,
+            mode: styleTransferMode,
+            preset: styleTransferPreset,
+            serviceUrl: normalizeServiceUrl(styleTransferServiceUrl),
+            enableRefiner: styleTransferEnableRefiner,
+            allowFallbackToAnalysis: styleTransferAllowFallback,
+            styleStrength: tuning.styleStrength,
+            highlightGuardStrength: tuning.highlightGuardStrength,
+            skinProtectStrength: tuning.skinProtectStrength,
+            pureAlgorithm: pureStyleTransfer,
+            enableExpertPreset: enableStyleTransferExpertPreset,
+            enableFeatureMapping: enableStyleTransferFeatureMapping,
+            enableAutoRefine: enableStyleTransferAutoRefine,
+            enableLut: enableStyleTransferLut,
+            enableVlm: enableStyleTransferVlm,
+            llmEndpoint: endpoint,
+            llmApiKey: llmApiKey || null,
+            llmModel: activeModel || null,
+          },
         });
 
-        const updates: Partial<Adjustments> = {};
-        result.adjustments.forEach((s) => {
-          (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
-        });
-        if (Object.keys(updates).length > 0) setAdjustments((prev) => mergeAdjustments(prev, updates));
-
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamMsgId
-              ? {
-                  ...msg,
-                  content: result.understanding,
-                  suggestions: result.adjustments,
-                  isLoading: false,
-                  styleDebug: result.style_debug,
-                }
-              : msg,
-          ),
-        );
+        applyAssistantResult(streamMsgId, result);
       } finally {
         unlisten();
       }
     } catch (e) {
       setError(String(e));
+      if (streamMsgId) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== streamMsgId || msg.content || msg.adjustments));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -735,113 +934,23 @@ export default function ChatPanel({
     adjustments,
     setAdjustments,
     t,
-    ollamaStatus,
     endpoint,
     llmApiKey,
     activeModel,
     getEffectiveStyleTransferTuning,
+    styleTransferMode,
+    styleTransferPreset,
+    styleTransferServiceUrl,
+    styleTransferEnableRefiner,
+    styleTransferAllowFallback,
+    pureStyleTransfer,
+    enableStyleTransferExpertPreset,
+    enableStyleTransferFeatureMapping,
+    enableStyleTransferAutoRefine,
+    enableStyleTransferLut,
+    enableStyleTransferVlm,
+    applyAssistantResult,
   ]);
-
-  // 离线引导页
-  if (ollamaStatus === 'offline') {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-surface">
-          <span className="text-xs font-medium text-text-secondary">{t('chat.title')}</span>
-          <button
-            onClick={checkStatus}
-            className="p-1 rounded hover:bg-surface text-text-secondary hover:text-text-primary transition-colors"
-            title={t('chat.retry')}
-          >
-            <RefreshCw size={13} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {/* 状态提示 */}
-          <div className="flex items-center gap-2 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
-            <div className="w-2 h-2 rounded-full bg-yellow-400 flex-shrink-0" />
-            <span className="text-[11px] text-yellow-400">{t('chat.ollamaOffline')}</span>
-          </div>
-
-          {/* 步骤 1：安装 Ollama */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] flex items-center justify-center font-bold flex-shrink-0">
-                1
-              </span>
-              <span className="text-xs font-medium text-text-primary">{t('chat.step1Title')}</span>
-            </div>
-            <p className="text-[11px] text-text-secondary ml-7">{t('chat.step1Desc')}</p>
-            <a
-              href="https://ollama.com/download"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-7 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-[11px] transition-colors"
-            >
-              <ExternalLink size={11} />
-              ollama.com/download
-            </a>
-          </div>
-
-          {/* 步骤 2：拉取模型 */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] flex items-center justify-center font-bold flex-shrink-0">
-                2
-              </span>
-              <span className="text-xs font-medium text-text-primary">{t('chat.step2Title')}</span>
-            </div>
-            <p className="text-[11px] text-text-secondary ml-7">{t('chat.step2Desc')}</p>
-            <div className="ml-7 bg-bg-primary rounded-lg p-2.5 border border-surface">
-              <div className="space-y-1">
-                <code className="block text-[11px] text-green-400 font-mono">ollama pull qwen3.5:9b</code>
-                <code className="block text-[11px] text-green-400 font-mono">ollama pull qwen2.5vl:7b</code>
-              </div>
-            </div>
-            <p className="text-[10px] text-text-secondary opacity-60 ml-7">{t('chat.step2Note')}</p>
-          </div>
-
-          {/* 步骤 3：重试 */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] flex items-center justify-center font-bold flex-shrink-0">
-                3
-              </span>
-              <span className="text-xs font-medium text-text-primary">{t('chat.step3Title')}</span>
-            </div>
-            <button
-              onClick={checkStatus}
-              className="ml-7 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface hover:bg-bg-primary text-text-primary text-[11px] transition-colors border border-surface"
-            >
-              <RefreshCw size={11} />
-              {t('chat.checkAgain')}
-            </button>
-          </div>
-
-          {/* 模型说明 */}
-          <div className="p-3 bg-surface/50 rounded-lg space-y-1.5">
-            <p className="text-[10px] font-medium text-text-secondary">{t('chat.modelInfo')}</p>
-            {PRESET_MODELS.slice(0, 3).map((m) => (
-              <div key={m.value} className="flex items-start gap-2">
-                <code className="text-[10px] text-blue-400 font-mono flex-shrink-0">{m.value}</code>
-                <span className="text-[10px] text-text-secondary opacity-70">{m.desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 检测中
-  if (ollamaStatus === 'checking') {
-    return (
-      <div className="flex flex-col h-full items-center justify-center gap-2">
-        <Loader2 size={18} className="animate-spin text-text-secondary" />
-        <span className="text-[11px] text-text-secondary">{t('chat.checking')}</span>
-      </div>
-    );
-  }
 
   // 正常聊天界面
   return (
@@ -849,7 +958,15 @@ export default function ChatPanel({
       {/* 顶部标题栏 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-surface">
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+          <span
+            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+              ollamaStatus === 'online'
+                ? 'bg-green-400'
+                : ollamaStatus === 'checking'
+                  ? 'bg-yellow-400 animate-pulse'
+                  : 'bg-red-400'
+            }`}
+          />
           <span className="text-xs font-medium text-text-secondary">{t('chat.title')}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -857,7 +974,8 @@ export default function ChatPanel({
           <div className="relative" ref={modelMenuRef}>
             <button
               onClick={() => setModelMenuOpen((v) => !v)}
-              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
+              disabled={!isChatAvailable}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               title={t('chat.switchModel')}
             >
               <span className="max-w-[90px] truncate">{activeModel}</span>
@@ -923,116 +1041,258 @@ export default function ChatPanel({
               title="风格迁移参数"
             >
               <SlidersHorizontal size={10} />
-              <span>迁移参数</span>
+              <span>{t('chat.transferSettings')}</span>
               <ChevronDown size={10} className={`transition-transform ${tuningMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {tuningMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-56 bg-surface/95 backdrop-blur-md rounded-lg shadow-xl p-2 z-50 border border-surface space-y-2">
-                <label className="space-y-1 block">
-                  <span className="text-[9px] text-text-secondary/85">迁移强度</span>
-                  <input
-                    type="number"
-                    min={0.5}
-                    max={2.0}
-                    step={0.05}
-                    value={styleStrengthInput}
-                    onChange={(e) => setStyleStrengthInput(e.target.value)}
-                    onBlur={() =>
-                      setStyleStrengthInput(saveStyleTransferConfig('styleTransferStrength', styleStrengthInput))
-                    }
-                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                  <span>纯算法（仅 Curves + HSL）</span>
-                  <input
-                    type="checkbox"
-                    checked={pureStyleTransfer}
-                    onChange={(e) => setPureStyleTransfer(e.target.checked)}
-                    className="accent-blue-500"
-                  />
-                </label>
-                {!pureStyleTransfer && (
-                  <div className="space-y-1">
+              <div className="absolute right-0 top-full mt-1 w-72 bg-surface/95 backdrop-blur-md rounded-lg shadow-xl p-2 z-50 border border-surface space-y-2">
+                <div className="space-y-1">
+                  <div className="text-[9px] text-text-secondary/85">{t('chat.styleTransferModeLabel')}</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      onClick={() => {
+                        setStyleTransferMode('analysis');
+                        persistAppSettings({ styleTransferMode: 'analysis' });
+                      }}
+                      className={`rounded px-2 py-1.5 text-[10px] transition-colors ${
+                        styleTransferMode === 'analysis'
+                          ? 'bg-blue-500/20 text-blue-300'
+                          : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      {t('chat.styleTransferModeAnalysis')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStyleTransferMode('generative');
+                        persistAppSettings({ styleTransferMode: 'generative' });
+                        checkStyleTransferService();
+                      }}
+                      className={`rounded px-2 py-1.5 text-[10px] transition-colors ${
+                        styleTransferMode === 'generative'
+                          ? 'bg-purple-500/20 text-purple-300'
+                          : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      {t('chat.styleTransferModeGenerative')}
+                    </button>
+                  </div>
+                </div>
+
+                {styleTransferMode === 'generative' ? (
+                  <div className="space-y-2">
+                    <div className="rounded border border-surface bg-bg-primary/60 px-2 py-1.5">
+                      <div className="flex items-center justify-between text-[9px] text-text-secondary">
+                        <span>{t('chat.styleTransferServiceStatus')}</span>
+                        <span
+                          className={
+                            styleTransferServiceStatus?.reachable && styleTransferServiceStatus.ready
+                              ? 'text-green-300'
+                              : 'text-amber-300'
+                          }
+                        >
+                          {checkingStyleTransferService
+                            ? t('chat.checking')
+                            : styleTransferServiceStatus?.reachable && styleTransferServiceStatus.ready
+                              ? t('chat.serviceReady')
+                              : t('chat.serviceUnavailable')}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[9px] text-text-secondary/75 break-all">
+                        {styleTransferServiceStatus?.serviceUrl || normalizeServiceUrl(styleTransferServiceUrl)}
+                      </div>
+                      {styleTransferServiceStatus?.detail && (
+                        <div className="mt-1 text-[9px] text-amber-300/80">{styleTransferServiceStatus.detail}</div>
+                      )}
+                    </div>
+
+                    <label className="space-y-1 block">
+                      <span className="text-[9px] text-text-secondary/85">{t('chat.styleTransferServiceUrl')}</span>
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          value={styleTransferServiceUrl}
+                          onChange={(e) => setStyleTransferServiceUrl(e.target.value)}
+                          onBlur={() => {
+                            const normalized = normalizeServiceUrl(styleTransferServiceUrl);
+                            setStyleTransferServiceUrl(normalized);
+                            persistAppSettings({ styleTransferServiceUrl: normalized });
+                            checkStyleTransferService(normalized);
+                          }}
+                          className="flex-1 bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
+                        />
+                        <button
+                          onClick={() => checkStyleTransferService()}
+                          className="px-2 py-1 rounded bg-bg-primary text-[10px] text-text-secondary hover:text-text-primary"
+                        >
+                          {t('chat.retry')}
+                        </button>
+                      </div>
+                    </label>
+
+                    <div className="space-y-1">
+                      <div className="text-[9px] text-text-secondary/85">{t('chat.styleTransferPreset')}</div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {STYLE_TRANSFER_PRESET_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            onClick={() => {
+                              setStyleTransferPreset(option.value);
+                              persistAppSettings({ styleTransferPreset: option.value });
+                            }}
+                            className={`rounded px-1.5 py-1.5 text-[10px] transition-colors ${
+                              styleTransferPreset === option.value
+                                ? 'bg-purple-500/20 text-purple-300'
+                                : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                      <span>启用 LUT</span>
+                      <span>{t('chat.styleTransferRefiner')}</span>
                       <input
                         type="checkbox"
-                        checked={enableStyleTransferLut}
-                        onChange={(e) => setEnableStyleTransferLut(e.target.checked)}
-                        className="accent-blue-500"
+                        checked={styleTransferEnableRefiner}
+                        onChange={(e) => {
+                          setStyleTransferEnableRefiner(e.target.checked);
+                          persistAppSettings({ styleTransferEnableRefiner: e.target.checked });
+                        }}
+                        className="accent-purple-500"
                       />
                     </label>
                     <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                      <span>启用专家预设</span>
+                      <span>{t('chat.styleTransferFallback')}</span>
                       <input
                         type="checkbox"
-                        checked={enableStyleTransferExpertPreset}
-                        onChange={(e) => setEnableStyleTransferExpertPreset(e.target.checked)}
-                        className="accent-blue-500"
+                        checked={styleTransferAllowFallback}
+                        onChange={(e) => {
+                          setStyleTransferAllowFallback(e.target.checked);
+                          persistAppSettings({ styleTransferAllowFallback: e.target.checked });
+                        }}
+                        className="accent-purple-500"
+                      />
+                    </label>
+                    <div className="rounded border border-purple-400/15 bg-purple-500/5 px-2 py-1.5 text-[9px] text-text-secondary/75">
+                      {t('chat.styleTransferOutputNote')}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="space-y-1 block">
+                      <span className="text-[9px] text-text-secondary/85">{t('chat.styleTransferStrengthLabel')}</span>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={styleStrengthInput}
+                        onChange={(e) => setStyleStrengthInput(e.target.value)}
+                        onBlur={() =>
+                          setStyleStrengthInput(saveStyleTransferConfig('styleTransferStrength', styleStrengthInput))
+                        }
+                        className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
                       />
                     </label>
                     <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                      <span>启用特征映射</span>
+                      <span>{t('chat.styleTransferPureAlgorithm')}</span>
                       <input
                         type="checkbox"
-                        checked={enableStyleTransferFeatureMapping}
-                        onChange={(e) => setEnableStyleTransferFeatureMapping(e.target.checked)}
+                        checked={pureStyleTransfer}
+                        onChange={(e) => setPureStyleTransfer(e.target.checked)}
                         className="accent-blue-500"
                       />
                     </label>
-                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                      <span>启用自动 refine</span>
+                    {!pureStyleTransfer && (
+                      <div className="space-y-1">
+                        <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                          <span>{t('chat.styleTransferEnableLut')}</span>
+                          <input
+                            type="checkbox"
+                            checked={enableStyleTransferLut}
+                            onChange={(e) => setEnableStyleTransferLut(e.target.checked)}
+                            className="accent-blue-500"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                          <span>{t('chat.styleTransferEnableExpertPreset')}</span>
+                          <input
+                            type="checkbox"
+                            checked={enableStyleTransferExpertPreset}
+                            onChange={(e) => setEnableStyleTransferExpertPreset(e.target.checked)}
+                            className="accent-blue-500"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                          <span>{t('chat.styleTransferEnableFeatureMapping')}</span>
+                          <input
+                            type="checkbox"
+                            checked={enableStyleTransferFeatureMapping}
+                            onChange={(e) => setEnableStyleTransferFeatureMapping(e.target.checked)}
+                            className="accent-blue-500"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                          <span>{t('chat.styleTransferEnableAutoRefine')}</span>
+                          <input
+                            type="checkbox"
+                            checked={enableStyleTransferAutoRefine}
+                            onChange={(e) => setEnableStyleTransferAutoRefine(e.target.checked)}
+                            className="accent-blue-500"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
+                          <span>{t('chat.styleTransferEnableVlm')}</span>
+                          <input
+                            type="checkbox"
+                            checked={enableStyleTransferVlm}
+                            onChange={(e) => setEnableStyleTransferVlm(e.target.checked)}
+                            className="accent-blue-500"
+                          />
+                        </label>
+                      </div>
+                    )}
+                    <label className="space-y-1 block">
+                      <span className="text-[9px] text-text-secondary/85">
+                        {t('chat.styleTransferHighlightGuardLabel')}
+                      </span>
                       <input
-                        type="checkbox"
-                        checked={enableStyleTransferAutoRefine}
-                        onChange={(e) => setEnableStyleTransferAutoRefine(e.target.checked)}
-                        className="accent-blue-500"
+                        type="number"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={highlightGuardInput}
+                        onChange={(e) => setHighlightGuardInput(e.target.value)}
+                        onBlur={() =>
+                          setHighlightGuardInput(
+                            saveStyleTransferConfig('styleTransferHighlightGuard', highlightGuardInput),
+                          )
+                        }
+                        className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
                       />
                     </label>
-                    <label className="flex items-center justify-between gap-2 text-[10px] text-text-secondary/85">
-                      <span>启用 VLM 微调</span>
+                    <label className="space-y-1 block">
+                      <span className="text-[9px] text-text-secondary/85">
+                        {t('chat.styleTransferSkinProtectLabel')}
+                      </span>
                       <input
-                        type="checkbox"
-                        checked={enableStyleTransferVlm}
-                        onChange={(e) => setEnableStyleTransferVlm(e.target.checked)}
-                        className="accent-blue-500"
+                        type="number"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={skinProtectInput}
+                        onChange={(e) => setSkinProtectInput(e.target.value)}
+                        onBlur={() =>
+                          setSkinProtectInput(saveStyleTransferConfig('styleTransferSkinProtect', skinProtectInput))
+                        }
+                        className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
                       />
                     </label>
                   </div>
                 )}
-                <label className="space-y-1 block">
-                  <span className="text-[9px] text-text-secondary/85">高光保护</span>
-                  <input
-                    type="number"
-                    min={0.5}
-                    max={2.0}
-                    step={0.05}
-                    value={highlightGuardInput}
-                    onChange={(e) => setHighlightGuardInput(e.target.value)}
-                    onBlur={() =>
-                      setHighlightGuardInput(
-                        saveStyleTransferConfig('styleTransferHighlightGuard', highlightGuardInput),
-                      )
-                    }
-                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
-                  />
-                </label>
-                <label className="space-y-1 block">
-                  <span className="text-[9px] text-text-secondary/85">肤色保护</span>
-                  <input
-                    type="number"
-                    min={0.5}
-                    max={2.0}
-                    step={0.05}
-                    value={skinProtectInput}
-                    onChange={(e) => setSkinProtectInput(e.target.value)}
-                    onBlur={() =>
-                      setSkinProtectInput(saveStyleTransferConfig('styleTransferSkinProtect', skinProtectInput))
-                    }
-                    className="w-full bg-bg-primary rounded px-1.5 py-1 text-[10px] text-text-primary outline-none border border-surface focus:border-blue-500/50"
-                  />
-                </label>
               </div>
             )}
           </div>
@@ -1048,12 +1308,36 @@ export default function ChatPanel({
         </div>
       </div>
 
+      {!isChatAvailable && (
+        <div className="px-3 py-2 border-b border-surface bg-amber-500/10">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-amber-300">
+                {ollamaStatus === 'checking' ? t('chat.checking') : t('chat.chatOfflineNotice')}
+              </div>
+              <div className="text-[9px] text-text-secondary/75">{t('chat.styleTransferAvailableWithoutLlm')}</div>
+            </div>
+            <button
+              onClick={checkStatus}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
+              title={t('chat.retry')}
+            >
+              <RefreshCw size={10} />
+              {t('chat.retry')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3 min-h-0">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <Bot size={28} className="text-text-secondary opacity-50" />
             <p className="text-xs text-text-secondary opacity-70 max-w-[180px]">{t('chat.placeholder')}</p>
+            <p className="text-[10px] text-text-secondary/60 max-w-[220px]">
+              {styleTransferMode === 'generative' ? t('chat.generativeModeHint') : t('chat.analysisModeHint')}
+            </p>
             <button
               onClick={handleStyleTransfer}
               disabled={isLoading}
@@ -1089,6 +1373,20 @@ export default function ChatPanel({
                     <Loader2 size={12} className="animate-spin text-text-secondary" />
                   ) : null)}
               </div>
+              {msg.role === 'assistant' && msg.outputImagePath && (
+                <div className="w-full rounded-lg border border-surface bg-surface/40 px-2 py-1.5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-text-secondary">{t('chat.styleTransferGenerated')}</span>
+                    <button
+                      onClick={() => onOpenImage?.(msg.outputImagePath!, { preserveAdjustments: true })}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      {t('chat.openGenerated')}
+                    </button>
+                  </div>
+                  <div className="text-[9px] text-text-secondary/70">{t('chat.aiDisclaimer')}</div>
+                </div>
+              )}
               {msg.adjustments && msg.adjustments.length > 0 && (
                 <div className="w-full bg-surface/50 rounded-lg p-2 space-y-2 border border-surface">
                   {msg.styleDebug && (
@@ -1229,7 +1527,8 @@ export default function ChatPanel({
                         onClick={() => {
                           const updates: Partial<Adjustments> = {};
                           msg.adjustments?.forEach((s) => {
-                            (updates as Record<string, any>)[s.key] = s.complex_value !== undefined ? s.complex_value : s.value;
+                            (updates as Record<string, any>)[s.key] =
+                              s.complex_value !== undefined ? s.complex_value : s.value;
                           });
                           applyAllSuggestions(msg);
                           const name = prompt('请输入预设名称', 'AI 预设');
@@ -1262,7 +1561,9 @@ export default function ChatPanel({
                           </div>
                           {Object.entries(s.complex_value as Record<string, any>).map(([color, v]) => (
                             <div key={color} className="space-y-0.5">
-                              <div className="text-[9px] text-text-secondary/80">{HSL_COLOR_LABELS[color] || color}</div>
+                              <div className="text-[9px] text-text-secondary/80">
+                                {HSL_COLOR_LABELS[color] || color}
+                              </div>
                               <Slider
                                 label="色相"
                                 min={-100}

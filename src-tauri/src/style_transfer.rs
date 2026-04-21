@@ -348,7 +348,7 @@ fn run_algorithm_pipeline(
         label: "色彩曲线 (Curves)".to_string(),
         min: 0.0,
         max: 1.0,
-        reason: "使用直方图匹配精准还原参考图的高级胶片色调与非线性反差".to_string(),
+        reason: "低权重亮度映射 + 曲线微调（避免强直方图匹配造成偏灰/断层）".to_string(),
     });
     if matched_hsl
         .as_object()
@@ -2838,85 +2838,81 @@ fn generate_matched_curves(
     cur_img: &DynamicImage,
     strength: f64,
 ) -> serde_json::Value {
-    let s = strength.max(0.0).min(1.0);
-    let mut ref_hist = vec![[0u32; 256]; 4];
-    let mut cur_hist = vec![[0u32; 256]; 4];
-
-    let accum = |img: &DynamicImage, hist: &mut Vec<[u32; 256]>| {
-        for p in img.to_rgb8().pixels() {
-            let r = p[0] as usize;
-            let g = p[1] as usize;
-            let b = p[2] as usize;
-            hist[0][r] += 1;
-            hist[1][g] += 1;
-            hist[2][b] += 1;
-            let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
-                .round()
-                .max(0.0)
-                .min(255.0) as usize;
-            hist[3][luma] += 1;
-        }
-    };
-
-    accum(ref_img, &mut ref_hist);
-    accum(cur_img, &mut cur_hist);
-
-    // 解决偏灰元凶 1：直方图峰值裁剪 (Histogram Peak Clipping)
-    // 限制每个亮度级别的最大像素比例为 1.5%，防止 CDF 出现垂直跳跃，从而保证生成的曲线永远具有斜率（对比度）
-    for c in 0..4 {
-        let ref_total: u32 = ref_hist[c].iter().sum();
-        let cur_total: u32 = cur_hist[c].iter().sum();
-        let clip_limit_ref = (ref_total as f64 * 0.015).max(1.0) as u32;
-        let clip_limit_cur = (cur_total as f64 * 0.015).max(1.0) as u32;
-        for i in 0..256 {
-            ref_hist[c][i] = ref_hist[c][i].min(clip_limit_ref);
-            cur_hist[c][i] = cur_hist[c][i].min(clip_limit_cur);
-        }
-    }
-
-    let mut ref_cdf = vec![[0.0; 256]; 4];
-    let mut cur_cdf = vec![[0.0; 256]; 4];
-    for c in 0..4 {
-        let mut ref_sum = 0u32;
-        let mut cur_sum = 0u32;
-        let ref_total: u32 = ref_hist[c].iter().sum();
-        let cur_total: u32 = cur_hist[c].iter().sum();
-        for i in 0..256 {
-            ref_sum += ref_hist[c][i];
-            cur_sum += cur_hist[c][i];
-            ref_cdf[c][i] = ref_sum as f64 / (ref_total.max(1) as f64);
-            cur_cdf[c][i] = cur_sum as f64 / (cur_total.max(1) as f64);
-        }
-    }
-
     let mut curves = serde_json::Map::new();
-    let channels = ["red", "green", "blue", "luma"];
 
-    for (c, ch_name) in channels.iter().enumerate() {
-        let mut points = Vec::with_capacity(16);
-        let mut prev_y = 0.0;
-        
-        for step in 0..16 {
+    let identity = (0..16)
+        .map(|step| {
             let x = if step == 15 { 255 } else { step * 17 };
-            let target_prob = cur_cdf[c][x];
-            
-            let mut y = 255;
-            for j in 0..256 {
-                if ref_cdf[c][j] >= target_prob {
-                    y = j;
-                    break;
-                }
-            }
-            
-            let mut final_y = (x as f64) * (1.0 - s) + (y as f64) * s;
-            // 解决偏灰元凶 2：删除了强制锁死 0 和 255 的代码，允许曲线忠实还原参考图的黑场和白场
-            final_y = final_y.max(prev_y).min(255.0);
-            
-            prev_y = final_y;
-            points.push(serde_json::json!({ "x": x as f64, "y": final_y.round() }));
-        }
-        curves.insert(ch_name.to_string(), serde_json::json!(points));
+            serde_json::json!({ "x": x as f64, "y": x as f64 })
+        })
+        .collect::<Vec<_>>();
+    curves.insert("red".to_string(), serde_json::json!(identity));
+    curves.insert("green".to_string(), serde_json::json!(identity));
+    curves.insert("blue".to_string(), serde_json::json!(identity));
+
+    let s = (strength.max(0.0).min(1.0)) * 0.15;
+    if s <= 1e-6 {
+        curves.insert("luma".to_string(), serde_json::json!(identity));
+        return serde_json::Value::Object(curves);
     }
+
+    let mut ref_hist = [0u32; 256];
+    let mut cur_hist = [0u32; 256];
+    for p in ref_img.to_rgb8().pixels() {
+        let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
+            .round()
+            .max(0.0)
+            .min(255.0) as usize;
+        ref_hist[luma] += 1;
+    }
+    for p in cur_img.to_rgb8().pixels() {
+        let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
+            .round()
+            .max(0.0)
+            .min(255.0) as usize;
+        cur_hist[luma] += 1;
+    }
+
+    let ref_total: u32 = ref_hist.iter().sum();
+    let cur_total: u32 = cur_hist.iter().sum();
+    let clip_limit_ref = (ref_total as f64 * 0.015).max(1.0) as u32;
+    let clip_limit_cur = (cur_total as f64 * 0.015).max(1.0) as u32;
+    for i in 0..256 {
+        ref_hist[i] = ref_hist[i].min(clip_limit_ref);
+        cur_hist[i] = cur_hist[i].min(clip_limit_cur);
+    }
+
+    let mut ref_cdf = [0.0; 256];
+    let mut cur_cdf = [0.0; 256];
+    let mut ref_sum = 0u32;
+    let mut cur_sum = 0u32;
+    let ref_total: u32 = ref_hist.iter().sum();
+    let cur_total: u32 = cur_hist.iter().sum();
+    for i in 0..256 {
+        ref_sum += ref_hist[i];
+        cur_sum += cur_hist[i];
+        ref_cdf[i] = ref_sum as f64 / (ref_total.max(1) as f64);
+        cur_cdf[i] = cur_sum as f64 / (cur_total.max(1) as f64);
+    }
+
+    let mut points = Vec::with_capacity(16);
+    let mut prev_y = 0.0;
+    for step in 0..16 {
+        let x = if step == 15 { 255 } else { step * 17 };
+        let target_prob = cur_cdf[x];
+        let mut y = 255;
+        for j in 0..256 {
+            if ref_cdf[j] >= target_prob {
+                y = j;
+                break;
+            }
+        }
+        let mut final_y = (x as f64) * (1.0 - s) + (y as f64) * s;
+        final_y = final_y.max(prev_y).min(255.0);
+        prev_y = final_y;
+        points.push(serde_json::json!({ "x": x as f64, "y": final_y.round() }));
+    }
+    curves.insert("luma".to_string(), serde_json::json!(points));
 
     serde_json::Value::Object(curves)
 }

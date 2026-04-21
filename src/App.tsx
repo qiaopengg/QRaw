@@ -309,6 +309,11 @@ function App() {
     goToIndex: goToAdjustmentsHistoryIndex,
   } = useHistoryState(INITIAL_ADJUSTMENTS);
   const [adjustments, setLiveAdjustments] = useState<Adjustments>(INITIAL_ADJUSTMENTS);
+  const adjustmentsRef = useRef<Adjustments>(adjustments);
+  useEffect(() => {
+    adjustmentsRef.current = adjustments;
+  }, [adjustments]);
+  const pendingOpenImageOverrideRef = useRef<{ path: string; adjustments: Adjustments } | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
   const [isTreeLoading, setIsTreeLoading] = useState(false);
   const [isViewLoading, setIsViewLoading] = useState(false);
@@ -2501,6 +2506,18 @@ function App() {
     [selectedImage?.path, debouncedSave, debouncedSetHistory, thumbnails, resetAdjustmentsHistory],
   );
 
+  const handleOpenImageFromChat = useCallback(
+    (path: string, options?: { preserveAdjustments?: boolean }) => {
+      if (options?.preserveAdjustments) {
+        pendingOpenImageOverrideRef.current = { path, adjustments: adjustmentsRef.current };
+      } else {
+        pendingOpenImageOverrideRef.current = null;
+      }
+      handleImageSelect(path);
+    },
+    [handleImageSelect],
+  );
+
   const executeDelete = useCallback(
     async (pathsToDelete: Array<string>, options = { includeAssociated: false }) => {
       if (!pathsToDelete || pathsToDelete.length === 0) {
@@ -4001,6 +4018,12 @@ function App() {
             initialAdjusts = { ...INITIAL_ADJUSTMENTS };
           }
 
+          const override = pendingOpenImageOverrideRef.current;
+          if (override && override.path === selectedImage.path) {
+            initialAdjusts = override.adjustments;
+            pendingOpenImageOverrideRef.current = null;
+          }
+
           setLiveAdjustments(initialAdjusts);
           resetAdjustmentsHistory(initialAdjusts);
         } catch (err) {
@@ -5448,6 +5471,7 @@ function App() {
                             appSettings={appSettings}
                             onSettingsChange={handleSettingsChange}
                             currentImagePath={selectedImage?.path ?? null}
+                            onOpenImage={handleOpenImageFromChat}
                           />
                         )}
                       </motion.div>
