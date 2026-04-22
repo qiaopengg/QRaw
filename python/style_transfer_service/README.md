@@ -83,11 +83,11 @@ python test_complete_pipeline.py
 ### 启动
 
 ```bash
-# 使用完整版本（推荐）
-python app_fixed.py
+# 启动当前服务入口（推荐）
+python app.py
 
 # 或使用 uvicorn
-uvicorn app_fixed:app --host 127.0.0.1 --port 7860
+uvicorn app:app --host 127.0.0.1 --port 7860
 ```
 
 ---
@@ -205,7 +205,7 @@ uvicorn app_fixed:app --host 127.0.0.1 --port 7860
 
 ```bash
 export QRAW_DEBUG="1"
-python app_fixed.py
+python app.py
 ```
 
 查看详细日志：

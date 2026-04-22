@@ -34,22 +34,12 @@ def progress_stream(task_id: str, progress_queue: Queue, timeout: int = 3600) ->
             progress_data = progress_queue.get(timeout=1)
             
             # 检查是否是结束信号
-            if progress_data.get("type") == "done":
-                yield f"data: {json.dumps(progress_data)}\n\n"
-                break
-            
             # 发送进度数据
             yield f"data: {json.dumps(progress_data)}\n\n"
-            
-            # 如果进度达到100%，等待done信号或超时
-            if progress_data.get("percentage") == 100:
-                try:
-                    final_data = progress_queue.get(timeout=5)
-                    yield f"data: {json.dumps(final_data)}\n\n"
-                except Empty:
-                    pass
+
+            if progress_data.get("type") in {"done", "cancelled", "error"}:
                 break
-                
+
         except Empty:
             # 队列为空，发送心跳
             yield f": heartbeat\n\n"

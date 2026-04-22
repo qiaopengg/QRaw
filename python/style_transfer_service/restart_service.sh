@@ -1,27 +1,25 @@
 #!/bin/bash
 
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+SERVICE_PORT="${QRAW_STYLE_TRANSFER_PORT:-7860}"
+SERVICE_ENTRY="${QRAW_STYLE_TRANSFER_ENTRY:-app.py}"
+
 echo "=========================================="
-echo "重启风格迁移服务（紧急修复模式）"
-echo "=========================================="
-echo ""
-echo "已禁用所有后处理（色彩对齐 + RAW 融合）"
-echo "直接输出 SDXL Pipeline 结果"
-echo ""
-echo "这将帮助诊断问题是在："
-echo "  1. SDXL Pipeline 本身"
-echo "  2. 还是后处理步骤"
-echo ""
+echo "重启 QRaw 风格迁移服务"
 echo "=========================================="
 echo ""
 
 # 查找并停止现有服务
 echo "正在查找现有服务进程..."
-PID=$(ps aux | grep "python.*app.py" | grep -v grep | awk '{print $2}')
+PID="$(lsof -tiTCP:${SERVICE_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
 
-if [ ! -z "$PID" ]; then
+if [ -n "$PID" ]; then
     echo "找到进程 PID: $PID"
     echo "正在停止..."
-    kill $PID
+    kill "$PID"
     sleep 2
     echo "✓ 已停止"
 else
@@ -34,4 +32,5 @@ echo "=========================================="
 echo ""
 
 export QRAW_DEBUG="1"
-python3 app.py
+export QRAW_STYLE_TRANSFER_ENTRY="$SERVICE_ENTRY"
+bash start_service.sh

@@ -58,6 +58,7 @@ import ExportPanel from './components/panel/right/ExportPanel';
 import LibraryExportPanel from './components/panel/right/LibraryExportPanel';
 import MasksPanel from './components/panel/right/MasksPanel';
 import ChatPanel from './components/panel/right/ChatPanel';
+import type { ChatOpenImageOptions } from './components/panel/right/chat/types';
 import BottomBar from './components/panel/BottomBar';
 import { ContextMenuProvider, useContextMenu } from './context/ContextMenuContext';
 import TaggingSubMenu from './context/TaggingSubMenu';
@@ -314,6 +315,16 @@ function App() {
     adjustmentsRef.current = adjustments;
   }, [adjustments]);
   const pendingOpenImageOverrideRef = useRef<{ path: string; adjustments: Adjustments } | null>(null);
+  const styleTransferPreviewSessionRef = useRef<{
+    compareEnabled?: boolean;
+    compareBasePath?: string | null;
+    compareTargetPath?: string | null;
+    previewPath: string;
+    sourceAdjustments: Adjustments;
+    sourcePath: string;
+  } | null>(null);
+  const [styleTransferComparePreviewUrl, setStyleTransferComparePreviewUrl] = useState<string | null>(null);
+  const [styleTransferCompareSplit, setStyleTransferCompareSplit] = useState(0.5);
   const [showOriginal, setShowOriginal] = useState(false);
   const [isTreeLoading, setIsTreeLoading] = useState(false);
   const [isViewLoading, setIsViewLoading] = useState(false);
@@ -2362,6 +2373,8 @@ function App() {
     debouncedSetHistory.cancel();
 
     const lastActivePath = selectedImage?.path ?? null;
+    styleTransferPreviewSessionRef.current = null;
+    setStyleTransferComparePreviewUrl(null);
     setSelectedImage(null);
     setFinalPreviewUrl(null);
     setUncroppedAdjustedPreviewUrl(null);
@@ -2386,6 +2399,20 @@ function App() {
   const handleImageSelect = useCallback(
     (path: string) => {
       if (selectedImage?.path === path) return;
+
+      const previewSession = styleTransferPreviewSessionRef.current;
+      const trackedSessionPaths = previewSession
+        ? [
+            previewSession.sourcePath,
+            previewSession.previewPath,
+            previewSession.compareBasePath,
+            previewSession.compareTargetPath,
+          ].filter((item): item is string => Boolean(item))
+        : [];
+      if (previewSession && !trackedSessionPaths.includes(path)) {
+        styleTransferPreviewSessionRef.current = null;
+        setStyleTransferComparePreviewUrl(null);
+      }
 
       debouncedSave.flush();
       debouncedSetHistory.cancel();
@@ -2507,7 +2534,91 @@ function App() {
   );
 
   const handleOpenImageFromChat = useCallback(
-    (path: string, options?: { preserveAdjustments?: boolean }) => {
+    (path: string, options?: ChatOpenImageOptions) => {
+      const session = options?.styleTransferSession;
+      if (options?.activatePanel === 'export') {
+        setRenderedRightPanel(Panel.Export);
+        setActiveRightPanel(Panel.Export);
+      }
+
+      if (session) {
+        const currentSession = styleTransferPreviewSessionRef.current;
+        const nextSession =
+          currentSession &&
+          currentSession.sourcePath === session.sourcePath &&
+          currentSession.previewPath === session.previewPath &&
+          currentSession.compareBasePath === (session.compareBasePath ?? null) &&
+          currentSession.compareTargetPath === (session.compareTargetPath ?? null)
+            ? currentSession
+            : {
+                compareEnabled: false,
+                compareBasePath: session.compareBasePath ?? null,
+                compareTargetPath: session.compareTargetPath ?? null,
+                sourcePath: session.sourcePath,
+                previewPath: session.previewPath,
+                sourceAdjustments: adjustmentsRef.current,
+              };
+
+        switch (session.mode) {
+          case 'styleTransferCompare':
+            styleTransferPreviewSessionRef.current = { ...nextSession, compareEnabled: true };
+            setStyleTransferComparePreviewUrl(session.compareTargetPath ?? session.previewPath);
+            pendingOpenImageOverrideRef.current = null;
+            if (selectedImage?.path === (session.compareBasePath ?? session.sourcePath)) {
+              pendingOpenImageOverrideRef.current = null;
+              return;
+            }
+            handleImageSelect(session.compareBasePath ?? session.sourcePath);
+            return;
+          case 'styleTransferPreview':
+            styleTransferPreviewSessionRef.current = { ...nextSession, compareEnabled: false };
+            setStyleTransferComparePreviewUrl(null);
+            pendingOpenImageOverrideRef.current = null;
+            if (selectedImage?.path === session.previewPath) {
+              return;
+            }
+            handleImageSelect(session.previewPath);
+            return;
+          case 'styleTransferSource':
+            styleTransferPreviewSessionRef.current = { ...nextSession, compareEnabled: false };
+            setStyleTransferComparePreviewUrl(null);
+            if (selectedImage?.path === session.sourcePath) {
+              pendingOpenImageOverrideRef.current = null;
+              setLiveAdjustments(nextSession.sourceAdjustments);
+              resetAdjustmentsHistory(nextSession.sourceAdjustments);
+              return;
+            }
+            pendingOpenImageOverrideRef.current = { path: session.sourcePath, adjustments: nextSession.sourceAdjustments };
+            handleImageSelect(session.sourcePath);
+            return;
+          case 'styleTransferDiscard':
+            setStyleTransferComparePreviewUrl(null);
+            styleTransferPreviewSessionRef.current = null;
+            if (selectedImage?.path === session.sourcePath) {
+              pendingOpenImageOverrideRef.current = null;
+              setLiveAdjustments(nextSession.sourceAdjustments);
+              resetAdjustmentsHistory(nextSession.sourceAdjustments);
+              return;
+            }
+            pendingOpenImageOverrideRef.current = { path: session.sourcePath, adjustments: nextSession.sourceAdjustments };
+            handleImageSelect(session.sourcePath);
+            return;
+          case 'styleTransferApply':
+            setStyleTransferComparePreviewUrl(null);
+            styleTransferPreviewSessionRef.current = null;
+            pendingOpenImageOverrideRef.current = null;
+            if (selectedImage?.path === path) {
+              return;
+            }
+            handleImageSelect(path);
+            return;
+          default:
+            break;
+        }
+      }
+
+      styleTransferPreviewSessionRef.current = null;
+      setStyleTransferComparePreviewUrl(null);
       if (options?.preserveAdjustments) {
         pendingOpenImageOverrideRef.current = { path, adjustments: adjustmentsRef.current };
       } else {
@@ -2515,7 +2626,7 @@ function App() {
       }
       handleImageSelect(path);
     },
-    [handleImageSelect],
+    [handleImageSelect, resetAdjustmentsHistory, selectedImage?.path],
   );
 
   const executeDelete = useCallback(
@@ -2667,7 +2778,7 @@ function App() {
         return;
       }
 
-      const { mode, includedAdjustments } = (appSettings.copyPasteSettings as any);
+      const { mode, includedAdjustments } = appSettings.copyPasteSettings as any;
 
       const adjustmentsToApply: Partial<Adjustments> = {};
 
@@ -3612,18 +3723,15 @@ function App() {
     };
   }, []);
 
-  const handleStartCullingModal = useCallback(
-    (paths: string[]) => {
-      setCullingModalState({
-        isOpen: true,
-        progress: null,
-        suggestions: null,
-        error: null,
-        pathsToCull: paths,
-      });
-    },
-    []
-  );
+  const handleStartCullingModal = useCallback((paths: string[]) => {
+    setCullingModalState({
+      isOpen: true,
+      progress: null,
+      suggestions: null,
+      error: null,
+      pathsToCull: paths,
+    });
+  }, []);
 
   const handleStartPanorama = async (paths: string[]) => {
     setPanoramaModalState((prev: PanoramaModalState) => ({
@@ -5249,6 +5357,9 @@ function App() {
               goToAdjustmentsHistoryIndex={goToAdjustmentsHistoryIndex}
               liveRotation={liveRotation}
               isInstantTransition={isInstantTransition}
+              styleTransferComparePreviewUrl={styleTransferComparePreviewUrl}
+              styleTransferCompareSplit={styleTransferCompareSplit}
+              onStyleTransferCompareSplitChange={setStyleTransferCompareSplit}
             />
             <div
               className={clsx(
@@ -5403,7 +5514,7 @@ function App() {
                             setCopiedMask={setCopiedMask}
                             setCustomEscapeHandler={setCustomEscapeHandler}
                             onDragStateChange={setIsSliderDragging}
-                                                        onToggleWaveform={handleToggleWaveform}
+                            onToggleWaveform={handleToggleWaveform}
                             waveform={waveform}
                             activeWaveformChannel={activeWaveformChannel}
                             setActiveWaveformChannel={setActiveWaveformChannel}
@@ -5517,7 +5628,7 @@ function App() {
           isFullScreen ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[60px] opacity-100',
         )}
       >
-        {appSettings?.decorations ? null : (!isWindowFullScreen && <TitleBar />)}
+        {appSettings?.decorations ? null : !isWindowFullScreen && <TitleBar />}
       </div>
       <div
         className={clsx(
@@ -5738,12 +5849,10 @@ function App() {
 }
 
 const AppWrapper = () => (
-  
-    <ContextMenuProvider>
-      <App />
-      <GlobalTooltip />
-    </ContextMenuProvider>
-  
+  <ContextMenuProvider>
+    <App />
+    <GlobalTooltip />
+  </ContextMenuProvider>
 );
 
 export default AppWrapper;

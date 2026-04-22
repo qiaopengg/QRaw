@@ -55,6 +55,8 @@ interface EditorProps {
   setAdjustments(adjustments: Adjustments | ((prev: Adjustments) => Adjustments)): void;
   setShowOriginal(show: boolean | ((prev: boolean) => boolean)): void;
   showOriginal: boolean;
+  styleTransferComparePreviewUrl?: string | null;
+  styleTransferCompareSplit?: number;
   targetZoom: number;
   thumbnails: Record<string, string>;
   transformWrapperRef: React.RefObject<ReactZoomPanPinchRef | null>;
@@ -62,6 +64,7 @@ interface EditorProps {
   uncroppedAdjustedPreviewUrl: string | null;
   updateSubMask(id: string | null, subMask: Partial<SubMask>): void;
   waveform: WaveformData | null;
+  onStyleTransferCompareSplitChange?(value: number): void;
   onDisplaySizeChange?(size: {
     width: number;
     height: number;
@@ -123,6 +126,8 @@ export default function Editor({
   setAdjustments,
   setShowOriginal,
   showOriginal,
+  styleTransferComparePreviewUrl,
+  styleTransferCompareSplit = 0.5,
   targetZoom,
   thumbnails: _thumbnails,
   transformWrapperRef,
@@ -130,6 +135,7 @@ export default function Editor({
   uncroppedAdjustedPreviewUrl,
   updateSubMask,
   waveform,
+  onStyleTransferCompareSplitChange,
   onDisplaySizeChange,
   onInitialFitScale,
   originalSize,
@@ -989,6 +995,8 @@ export default function Editor({
               setCrop={handleCropChange}
               setIsMaskHovered={setIsMaskHovered}
               showOriginal={showOriginal}
+              styleTransferComparePreviewUrl={styleTransferComparePreviewUrl}
+              styleTransferCompareSplit={styleTransferCompareSplit}
               transformedOriginalUrl={transformedOriginalUrl}
               uncroppedAdjustedPreviewUrl={uncroppedAdjustedPreviewUrl}
               updateSubMask={updateSubMask}
@@ -1000,6 +1008,7 @@ export default function Editor({
               cursorStyle={cursorStyle}
               isMaxZoom={isMaxZoom}
               liveRotation={liveRotation}
+              onStyleTransferCompareSplitChange={onStyleTransferCompareSplitChange}
               zoomScale={transformState.scale}
             />
           </TransformComponent>

@@ -178,6 +178,12 @@ pub struct ThumbnailProgressTracker {
 }
 
 pub type TransformedImageCache = (u64, Arc<DynamicImage>, (f32, f32));
+#[derive(Clone)]
+pub struct ActiveStyleTransferTask {
+    pub task_id: String,
+    pub service_url: String,
+}
+
 pub struct AppState {
     window_setup_complete: AtomicBool,
     pub gpu_crash_flag_path: Mutex<Option<PathBuf>>,
@@ -189,6 +195,7 @@ pub struct AppState {
     pub ai_state: Mutex<Option<AiState>>,
     pub ai_init_lock: TokioMutex<()>,
     export_task_handle: Mutex<Option<JoinHandle<()>>>,
+    pub style_transfer_task: Mutex<Option<ActiveStyleTransferTask>>,
     hdr_result: Arc<Mutex<Option<DynamicImage>>>,
     panorama_result: Arc<Mutex<Option<DynamicImage>>>,
     denoise_result: Arc<Mutex<Option<DynamicImage>>>,
@@ -5072,6 +5079,7 @@ pub fn run() {
             ai_state: Mutex::new(None),
             ai_init_lock: TokioMutex::new(()),
             export_task_handle: Mutex::new(None),
+            style_transfer_task: Mutex::new(None),
             hdr_result: Arc::new(Mutex::new(None)),
             panorama_result: Arc::new(Mutex::new(None)),
             denoise_result: Arc::new(Mutex::new(None)),
@@ -5180,6 +5188,7 @@ pub fn run() {
             llm_chat::chat_adjust,
             style_transfer::analyze_style_transfer,
             style_transfer_runtime::check_style_transfer_service,
+            style_transfer_runtime::cancel_style_transfer,
             style_transfer_runtime::run_style_transfer,
             culling::cull_images,
             culling_v4::cull_images_v4,

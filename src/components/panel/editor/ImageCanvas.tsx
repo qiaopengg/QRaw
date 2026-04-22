@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, useMemo, type NamedExoticComponent } from 'react';
 import ReactCrop from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Stage, Layer, Ellipse, Line, Transformer, Group, Circle, Rect } from 'react-konva';
@@ -53,6 +53,8 @@ interface ImageCanvasProps {
   setCrop(crop: Crop, perfentCrop: PercentCrop): void;
   setIsMaskHovered(isHovered: boolean): void;
   showOriginal: boolean;
+  styleTransferComparePreviewUrl?: string | null;
+  styleTransferCompareSplit?: number;
   transformedOriginalUrl: string | null;
   uncroppedAdjustedPreviewUrl: string | null;
   updateSubMask(id: string | null, subMask: Partial<SubMask>): void;
@@ -65,6 +67,7 @@ interface ImageCanvasProps {
   cursorStyle: string;
   isMaxZoom?: boolean;
   liveRotation?: number | null;
+  onStyleTransferCompareSplitChange?(value: number): void;
   zoomScale: number;
 }
 
@@ -700,7 +703,7 @@ const MaskOverlay = memo(
   },
 );
 
-const ImageCanvas = memo(
+const ImageCanvas: NamedExoticComponent<ImageCanvasProps> = memo(
   ({
     activeAiPatchContainerId,
     activeAiSubMaskId,
@@ -731,6 +734,8 @@ const ImageCanvas = memo(
     setCrop,
     setIsMaskHovered,
     showOriginal,
+    styleTransferComparePreviewUrl,
+    styleTransferCompareSplit = 0.5,
     transformedOriginalUrl,
     uncroppedAdjustedPreviewUrl,
     updateSubMask,
@@ -742,6 +747,7 @@ const ImageCanvas = memo(
     cursorStyle,
     isMaxZoom,
     liveRotation,
+    onStyleTransferCompareSplitChange,
     zoomScale,
   }: ImageCanvasProps) => {
     const [isCropViewVisible, setIsCropViewVisible] = useState(false);
@@ -894,7 +900,7 @@ const ImageCanvas = memo(
 
     const isBrushActive =
       (isMasking || isAiEditing) && (activeSubMask?.type === Mask.Brush || activeSubMask?.type === Mask.Flow);
-    const activeLineFlow = activeSubMask?.type === Mask.Flow ? activeSubMask?.parameters?.flow ?? 10 : undefined;
+    const activeLineFlow = activeSubMask?.type === Mask.Flow ? (activeSubMask?.parameters?.flow ?? 10) : undefined;
     const isAiSubjectActive =
       (isMasking || isAiEditing) &&
       (activeSubMask?.type === Mask.AiSubject || activeSubMask?.type === Mask.QuickEraser);
@@ -1530,7 +1536,11 @@ const ImageCanvas = memo(
 
       if (isBrushActive) {
         const wasAltPressed = (window as any).altKeyDown || false;
-        const effectiveToolForFinal = wasAltPressed ? (baseTool === ToolType.Brush ? ToolType.Eraser : ToolType.Brush) : baseTool;
+        const effectiveToolForFinal = wasAltPressed
+          ? baseTool === ToolType.Brush
+            ? ToolType.Eraser
+            : ToolType.Brush
+          : baseTool;
 
         const imageSpaceLine: DrawnLine = {
           brushSize: brushImageSpaceSize,
@@ -1713,6 +1723,8 @@ const ImageCanvas = memo(
     const cropPreviewUrl = uncroppedAdjustedPreviewUrl || selectedImage.thumbnailUrl;
     const originalSrc = transformedOriginalUrl;
     const isShowingOriginal = showOriginal && !!originalSrc;
+    const compareSrc = styleTransferComparePreviewUrl;
+    const compareSplit = Math.max(0, Math.min(1, styleTransferCompareSplit));
 
     useEffect(() => {
       if (!originalSrc) {
@@ -1895,7 +1907,42 @@ const ImageCanvas = memo(
                     style={{ imageRendering: isMaxZoom ? 'pixelated' : 'auto' }}
                   />
                 )}
+
+                {compareSrc && !isShowingOriginal && (
+                  <>
+                    <defs>
+                      <clipPath id="style-transfer-compare-clip">
+                        <rect x="0" y="0" width={`${compareSplit * 100}%`} height="100%" />
+                      </clipPath>
+                    </defs>
+                    <image
+                      href={compareSrc}
+                      x="0"
+                      y="0"
+                      width="100%"
+                      height="100%"
+                      clipPath="url(#style-transfer-compare-clip)"
+                      style={{ imageRendering: isMaxZoom ? 'pixelated' : 'auto' }}
+                    />
+                  </>
+                )}
               </svg>
+
+              {compareSrc && !isShowingOriginal && (
+                <div className="absolute inset-x-0 bottom-3 z-20 flex justify-center pointer-events-none">
+                  <div className="pointer-events-auto w-[240px] rounded-full border border-surface bg-bg-primary/85 px-3 py-2 backdrop-blur-sm">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={Math.round(compareSplit * 100)}
+                      onChange={(event) => onStyleTransferCompareSplitChange?.(Number(event.target.value) / 100)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              )}
 
               {originalSrc && (
                 <img
@@ -2016,9 +2063,15 @@ const ImageCanvas = memo(
                   <Circle
                     listening={false}
                     perfectDrawEnabled={false}
-                    stroke={(window as any).altKeyDown ? 
-                      (baseTool === ToolType.Brush ? '#f43f5e' : '#0ea5e9') : 
-                      (baseTool === ToolType.Eraser ? '#f43f5e' : '#0ea5e9')}
+                    stroke={
+                      (window as any).altKeyDown
+                        ? baseTool === ToolType.Brush
+                          ? '#f43f5e'
+                          : '#0ea5e9'
+                        : baseTool === ToolType.Eraser
+                          ? '#f43f5e'
+                          : '#0ea5e9'
+                    }
                     radius={brushStageSize / 2}
                     strokeWidth={1}
                     x={cursorPreview.x}

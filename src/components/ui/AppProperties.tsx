@@ -114,6 +114,7 @@ export enum Invokes {
   ChatAdjust = 'chat_adjust',
   AnalyzeStyleTransfer = 'analyze_style_transfer',
   CheckStyleTransferService = 'check_style_transfer_service',
+  CancelStyleTransfer = 'cancel_style_transfer',
   UpdateWindowEffect = 'update_window_effect',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
@@ -210,9 +211,10 @@ export interface AppSettings {
   styleTransferStrength?: number;
   styleTransferHighlightGuard?: number;
   styleTransferSkinProtect?: number;
-  styleTransferMode?: 'analysis' | 'generative';
+  styleTransferMode?: 'analysis' | 'generativePreview';
   styleTransferServiceUrl?: string;
   styleTransferPreset?: 'realistic' | 'artistic' | 'creative';
+  styleTransferExportFormat?: 'tiff' | 'png' | 'jpg';
   styleTransferEnableRefiner?: boolean;
   styleTransferAllowFallback?: boolean;
 }
