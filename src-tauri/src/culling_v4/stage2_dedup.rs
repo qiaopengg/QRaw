@@ -12,11 +12,18 @@ pub fn stage_2_dedup(
 ) -> Vec<BurstGroup> {
     let _ = app_handle.emit(
         "culling-progress",
-        CullingProgressV4 { current: 0, total: 0, stage: "Detecting duplicates...".into() },
+        CullingProgressV4 {
+            current: 0,
+            total: 0,
+            stage: "Detecting duplicates...".into(),
+        },
     );
 
     // Only process primary, non-failed assets
-    let mut candidates: Vec<usize> = registry.assets.iter().enumerate()
+    let mut candidates: Vec<usize> = registry
+        .assets
+        .iter()
+        .enumerate()
         .filter(|(i, a)| a.is_primary && !verdicts[*i].is_fail())
         .map(|(i, _)| i)
         .collect();
@@ -36,16 +43,21 @@ pub fn stage_2_dedup(
     let mut groups = Vec::new();
 
     for window in &time_windows {
-        if window.len() <= 1 { continue; }
+        if window.len() <= 1 {
+            continue;
+        }
 
-        let hashes: Vec<(usize, image_hasher::ImageHash)> = window.iter()
+        let hashes: Vec<(usize, image_hasher::ImageHash)> = window
+            .iter()
             .map(|&i| (i, hasher.hash_image(&*registry.assets[i].thumbnail)))
             .collect();
 
         let clusters = cluster_by_hash(&hashes, settings.similarity_threshold);
 
         for cluster in clusters {
-            if cluster.len() <= 1 { continue; }
+            if cluster.len() <= 1 {
+                continue;
+            }
 
             // Select cover by technical quality priority
             let cover = select_cover(&cluster, verdicts);
@@ -53,10 +65,13 @@ pub fn stage_2_dedup(
             groups.push(BurstGroup {
                 group_id: format!("g{}", groups.len() + 1),
                 cover_index: cover,
-                members: cluster.iter().map(|&idx| BurstMember {
-                    asset_index: idx,
-                    is_cover: idx == cover,
-                }).collect(),
+                members: cluster
+                    .iter()
+                    .map(|&idx| BurstMember {
+                        asset_index: idx,
+                        is_cover: idx == cover,
+                    })
+                    .collect(),
             });
         }
     }
@@ -91,12 +106,16 @@ fn cluster_by_hash(hashes: &[(usize, image_hasher::ImageHash)], threshold: u32) 
     let mut clusters: Vec<Vec<usize>> = vec![];
 
     for i in 0..hashes.len() {
-        if visited[i] { continue; }
+        if visited[i] {
+            continue;
+        }
         visited[i] = true;
         let mut cluster = vec![hashes[i].0];
 
         for j in (i + 1)..hashes.len() {
-            if visited[j] { continue; }
+            if visited[j] {
+                continue;
+            }
             let dist = hashes[i].1.dist(&hashes[j].1);
             if dist <= threshold {
                 visited[j] = true;
@@ -109,14 +128,18 @@ fn cluster_by_hash(hashes: &[(usize, image_hasher::ImageHash)], threshold: u32) 
 }
 
 fn select_cover(cluster: &[usize], verdicts: &[TechnicalVerdict]) -> usize {
-    *cluster.iter().max_by(|&&a, &&b| {
-        let sa = verdicts[a].subject_sharpness_or(0.0);
-        let sb = verdicts[b].subject_sharpness_or(0.0);
-        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let ea = verdicts[a].exposure_health_or(0.0);
-                let eb = verdicts[b].exposure_health_or(0.0);
-                ea.partial_cmp(&eb).unwrap_or(std::cmp::Ordering::Equal)
-            })
-    }).unwrap_or(&cluster[0])
+    *cluster
+        .iter()
+        .max_by(|&&a, &&b| {
+            let sa = verdicts[a].subject_sharpness_or(0.0);
+            let sb = verdicts[b].subject_sharpness_or(0.0);
+            sa.partial_cmp(&sb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let ea = verdicts[a].exposure_health_or(0.0);
+                    let eb = verdicts[b].exposure_health_or(0.0);
+                    ea.partial_cmp(&eb).unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+        .unwrap_or(&cluster[0])
 }

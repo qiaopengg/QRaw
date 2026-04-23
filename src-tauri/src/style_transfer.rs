@@ -1,13 +1,13 @@
 use crate::expert_presets::{derive_style_tags, get_expert_preset_by_id, select_expert_preset};
+use base64::{Engine as _, engine::general_purpose};
 use image::{DynamicImage, GenericImageView};
 use rawler::decoders::RawDecodeParams;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::Path;
-use reqwest::Client;
-use base64::{Engine as _, engine::general_purpose};
 use std::io::Cursor;
+use std::path::Path;
 use tauri::Emitter;
 
 const EARLY_EXIT_STYLE_DISTANCE_THRESHOLD: f64 = 0.22;
@@ -372,7 +372,8 @@ fn run_algorithm_pipeline(
     }
 
     if options.pure_algorithm {
-        let predicted_features = estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
+        let predicted_features =
+            estimate_features_for_suggestions(&ctx.cur_features, current_adjustments, &adjustments);
         let style_debug = build_style_debug_info(
             &ctx.ref_features,
             &ctx.cur_features,
@@ -400,7 +401,10 @@ fn run_algorithm_pipeline(
     let mut constraint_debug = if options.pure_algorithm {
         None
     } else {
-        apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+        apply_soft_dynamic_constraints_to_style_suggestions(
+            &mut adjustments,
+            &ctx.constraint_window,
+        );
         Some(apply_dynamic_constraints_to_style_suggestions(
             &mut adjustments,
             &ctx.constraint_window,
@@ -436,7 +440,10 @@ fn run_algorithm_pipeline(
             }
         }
         if !options.pure_algorithm {
-            apply_soft_dynamic_constraints_to_style_suggestions(&mut adjustments, &ctx.constraint_window);
+            apply_soft_dynamic_constraints_to_style_suggestions(
+                &mut adjustments,
+                &ctx.constraint_window,
+            );
             constraint_debug = Some(apply_dynamic_constraints_to_style_suggestions(
                 &mut adjustments,
                 &ctx.constraint_window,
@@ -495,19 +502,19 @@ fn run_algorithm_pipeline(
             }
         }
     }
-    
+
     if options.enable_lut {
         if let Some(lut_data) = generate_3d_lut_with_ot_tps(&ctx.cur_img, &ctx.ref_img, 17) {
-        adjustments.push(StyleTransferSuggestion {
-            key: "lutSize".to_string(),
-            value: 17.0,
-            complex_value: None,
-            label: "LUT Size".to_string(),
-            min: 0.0,
-            max: 64.0,
-            reason: "".to_string(),
-        });
-        adjustments.push(StyleTransferSuggestion {
+            adjustments.push(StyleTransferSuggestion {
+                key: "lutSize".to_string(),
+                value: 17.0,
+                complex_value: None,
+                label: "LUT Size".to_string(),
+                min: 0.0,
+                max: 64.0,
+                reason: "".to_string(),
+            });
+            adjustments.push(StyleTransferSuggestion {
             key: "lutData".to_string(),
             value: 1.0,
             complex_value: Some(serde_json::json!(lut_data)),
@@ -516,18 +523,18 @@ fn run_algorithm_pipeline(
             max: 1.0,
             reason: "基于最优传输算法和薄板样条插值(TPS)生成的 3D 色彩查找表，用于精准匹配参考图的非线性色彩风格".to_string(),
         });
-        adjustments.push(StyleTransferSuggestion {
-            key: "lutIntensity".to_string(),
-            value: 100.0,
-            complex_value: None,
-            label: "LUT Intensity".to_string(),
-            min: 0.0,
-            max: 100.0,
-            reason: "".to_string(),
-        });
+            adjustments.push(StyleTransferSuggestion {
+                key: "lutIntensity".to_string(),
+                value: 100.0,
+                complex_value: None,
+                label: "LUT Intensity".to_string(),
+                min: 0.0,
+                max: 100.0,
+                reason: "".to_string(),
+            });
         }
     }
-AlgorithmPipelineResult {
+    AlgorithmPipelineResult {
         adjustments,
         style_debug,
     }
@@ -964,10 +971,17 @@ pub fn build_dynamic_constraint_window_from_image(
         if Path::new(path).exists() {
             if let Ok(img) = smart_open_image(path) {
                 let feat = extract_features(&img);
-                
+
                 // 检查是否为纯白色图片（高亮度，低对比度，几乎没有色彩）
-                if feat.mean_luminance > 0.95 && feat.contrast_spread < 0.05 && feat.mean_saturation < 0.05 {
-                    let mut window = build_dynamic_constraint_window(&feat, current_adjustments, "image_white_override");
+                if feat.mean_luminance > 0.95
+                    && feat.contrast_spread < 0.05
+                    && feat.mean_saturation < 0.05
+                {
+                    let mut window = build_dynamic_constraint_window(
+                        &feat,
+                        current_adjustments,
+                        "image_white_override",
+                    );
                     // 强制要求 AI 必须降低曝光和高光，拉回细节
                     if let Some(band) = window.bands.get_mut("exposure") {
                         band.hard_max = -1.0;
@@ -986,7 +1000,7 @@ pub fn build_dynamic_constraint_window_from_image(
                     }
                     return window;
                 }
-                
+
                 return build_dynamic_constraint_window(&feat, current_adjustments, "image");
             }
         }
@@ -1415,115 +1429,118 @@ pub fn extract_features(img: &DynamicImage) -> StyleFeatures {
         let g = linear_lut[px[1] as usize];
         let b = linear_lut[px[2] as usize];
 
-            let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            sum_lum += lum;
-            sum_r += r;
-            sum_g += g;
-            sum_b += b;
-            lum_values.push(lum);
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        sum_lum += lum;
+        sum_r += r;
+        sum_g += g;
+        sum_b += b;
+        lum_values.push(lum);
 
-            if lum > 0.8 {
-                highlight_count += 1.0;
-            }
-            if lum < 0.2 {
-                shadow_count += 1.0;
-            }
-            if lum > 0.98 {
-                clipped_highlight_count += 1.0;
-            }
-            if lum < 0.33 {
-                shadow_lum_sum += lum;
-                shadow_lum_count += 1.0;
-            } else if lum < 0.70 {
-                mid_lum_sum += lum;
-                mid_lum_count += 1.0;
+        if lum > 0.8 {
+            highlight_count += 1.0;
+        }
+        if lum < 0.2 {
+            shadow_count += 1.0;
+        }
+        if lum > 0.98 {
+            clipped_highlight_count += 1.0;
+        }
+        if lum < 0.33 {
+            shadow_lum_sum += lum;
+            shadow_lum_count += 1.0;
+        } else if lum < 0.70 {
+            mid_lum_sum += lum;
+            mid_lum_count += 1.0;
+        } else {
+            highlight_lum_sum += lum;
+            highlight_lum_count += 1.0;
+        }
+
+        // HSL saturation
+        let max_c = r.max(g).max(b);
+        let min_c = r.min(g).min(b);
+        let sat = if max_c + min_c == 0.0 || max_c == min_c {
+            0.0
+        } else {
+            let l = (max_c + min_c) / 2.0;
+            let delta = max_c - min_c;
+            if l <= 0.5 {
+                delta / (max_c + min_c)
             } else {
-                highlight_lum_sum += lum;
-                highlight_lum_count += 1.0;
+                delta / (2.0 - max_c - min_c)
             }
-
-            // HSL saturation
+        };
+        sum_sat += sat;
+        sat_values.push(sat);
+        let nx = (x as f64 + 0.5) / aw as f64;
+        let ny = (y as f64 + 0.5) / ah as f64;
+        let center_bias =
+            (1.0 - ((nx - 0.5).abs() * 2.0).powi(2)) * (1.0 - ((ny - 0.5).abs() * 2.0).powi(2));
+        let robust_luma_gate = if lum < 0.04 || lum > 0.95 { 0.0 } else { 1.0 };
+        let highlight_gate = (1.0 - (lum - 0.75).max(0.0) / 0.25).max(0.0).min(1.0);
+        let color_weight = (0.25 + 0.75 * center_bias.max(0.0)) * robust_luma_gate * highlight_gate;
+        if color_weight > 0.0 {
+            robust_sum_r += r * color_weight;
+            robust_sum_g += g * color_weight;
+            robust_sum_b += b * color_weight;
+            robust_color_weight_sum += color_weight;
+        }
+        if sat > 0.06 && lum > 0.04 && lum < 0.96 {
             let max_c = r.max(g).max(b);
             let min_c = r.min(g).min(b);
-            let sat = if max_c + min_c == 0.0 || max_c == min_c {
-                0.0
-            } else {
-                let l = (max_c + min_c) / 2.0;
-                let delta = max_c - min_c;
-                if l <= 0.5 {
-                    delta / (max_c + min_c)
+            let delta = max_c - min_c;
+            if delta > 1e-6 {
+                let mut hue = if (max_c - r).abs() < 1e-6 {
+                    ((g - b) / delta) % 6.0
+                } else if (max_c - g).abs() < 1e-6 {
+                    (b - r) / delta + 2.0
                 } else {
-                    delta / (2.0 - max_c - min_c)
+                    (r - g) / delta + 4.0
+                };
+                hue /= 6.0;
+                if hue < 0.0 {
+                    hue += 1.0;
                 }
-            };
-            sum_sat += sat;
-            sat_values.push(sat);
-            let nx = (x as f64 + 0.5) / aw as f64;
-            let ny = (y as f64 + 0.5) / ah as f64;
-            let center_bias = (1.0 - ((nx - 0.5).abs() * 2.0).powi(2))
-                * (1.0 - ((ny - 0.5).abs() * 2.0).powi(2));
-            let robust_luma_gate = if lum < 0.04 || lum > 0.95 { 0.0 } else { 1.0 };
-            let highlight_gate = (1.0 - (lum - 0.75).max(0.0) / 0.25).max(0.0).min(1.0);
-            let color_weight = (0.25 + 0.75 * center_bias.max(0.0)) * robust_luma_gate * highlight_gate;
-            if color_weight > 0.0 {
-                robust_sum_r += r * color_weight;
-                robust_sum_g += g * color_weight;
-                robust_sum_b += b * color_weight;
-                robust_color_weight_sum += color_weight;
+                hue_values.push(hue);
+                hue_weights.push(
+                    (sat * (0.35 + 0.65 * center_bias.max(0.0)))
+                        .max(0.02)
+                        .min(1.0),
+                );
             }
-            if sat > 0.06 && lum > 0.04 && lum < 0.96 {
-                let max_c = r.max(g).max(b);
-                let min_c = r.min(g).min(b);
-                let delta = max_c - min_c;
-                if delta > 1e-6 {
-                    let mut hue = if (max_c - r).abs() < 1e-6 {
-                        ((g - b) / delta) % 6.0
-                    } else if (max_c - g).abs() < 1e-6 {
-                        (b - r) / delta + 2.0
-                    } else {
-                        (r - g) / delta + 4.0
-                    };
-                    hue /= 6.0;
-                    if hue < 0.0 {
-                        hue += 1.0;
-                    }
-                    hue_values.push(hue);
-                    hue_weights.push((sat * (0.35 + 0.65 * center_bias.max(0.0))).max(0.02).min(1.0));
-                }
-            }
-
-            // 暗角：中心 vs 边缘
-            let dist = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
-            let norm_dist = dist / max_dist;
-            if norm_dist < 0.35 {
-                center_lum_sum += lum;
-                center_count += 1.0;
-            } else if norm_dist > 0.7 {
-                edge_lum_sum += lum;
-                edge_count += 1.0;
-            }
-
-            let y_val = 0.299 * r + 0.587 * g + 0.114 * b;
-            let cb = (b - y_val) * 0.565 + 0.5;
-            let cr = (r - y_val) * 0.713 + 0.5;
-            let chroma_conf = (1.0
-                - ((cb - 0.42).abs() / 0.14 + (cr - 0.58).abs() / 0.16) * 0.5)
-                .max(0.0)
-                .min(1.0);
-            let is_skin = y_val > 0.08 && y_val < 0.90 && sat > 0.05 && chroma_conf > 0.35;
-            if is_skin {
-                let weight = 0.55 + chroma_conf * 0.45;
-                skin_count += weight;
-                skin_lum_sum += lum * weight;
-                skin_rb_sum += if b > 0.001 { (r / b) * weight } else { weight };
-            }
-
-            let mut bin_idx = ((x as f64 / aw as f64) * waveform_bins as f64).floor() as usize;
-            if bin_idx >= waveform_bins {
-                bin_idx = waveform_bins - 1;
-            }
-            waveform_bin_values[bin_idx].push(lum);
         }
+
+        // 暗角：中心 vs 边缘
+        let dist = ((x as f64 - cx).powi(2) + (y as f64 - cy).powi(2)).sqrt();
+        let norm_dist = dist / max_dist;
+        if norm_dist < 0.35 {
+            center_lum_sum += lum;
+            center_count += 1.0;
+        } else if norm_dist > 0.7 {
+            edge_lum_sum += lum;
+            edge_count += 1.0;
+        }
+
+        let y_val = 0.299 * r + 0.587 * g + 0.114 * b;
+        let cb = (b - y_val) * 0.565 + 0.5;
+        let cr = (r - y_val) * 0.713 + 0.5;
+        let chroma_conf = (1.0 - ((cb - 0.42).abs() / 0.14 + (cr - 0.58).abs() / 0.16) * 0.5)
+            .max(0.0)
+            .min(1.0);
+        let is_skin = y_val > 0.08 && y_val < 0.90 && sat > 0.05 && chroma_conf > 0.35;
+        if is_skin {
+            let weight = 0.55 + chroma_conf * 0.45;
+            skin_count += weight;
+            skin_lum_sum += lum * weight;
+            skin_rb_sum += if b > 0.001 { (r / b) * weight } else { weight };
+        }
+
+        let mut bin_idx = ((x as f64 / aw as f64) * waveform_bins as f64).floor() as usize;
+        if bin_idx >= waveform_bins {
+            bin_idx = waveform_bins - 1;
+        }
+        waveform_bin_values[bin_idx].push(lum);
+    }
 
     let mean_lum = sum_lum / a_total;
     let mean_sat = sum_sat / a_total;
@@ -1846,11 +1863,11 @@ fn adaptive_style_thresholds(
         - color_ratio * 0.012)
         .max(0.14)
         .min(0.30);
-    let llm_trigger = (LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD - style_force * 0.14
-        - color_ratio * 0.08
-        + tonal_ratio * 0.03)
-        .max(0.42)
-        .min(0.80);
+    let llm_trigger =
+        (LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD - style_force * 0.14 - color_ratio * 0.08
+            + tonal_ratio * 0.03)
+            .max(0.42)
+            .min(0.80);
     (early_exit, llm_trigger.max(early_exit + 0.12))
 }
 
@@ -1914,7 +1931,9 @@ fn estimate_features_from_adjustments(
     f.mean_saturation += d_sat * 0.0042 + d_vib * 0.0028 - d_exp * 0.0012 + d_sat_vib * 0.28;
     f.saturation_spread += d_vib * 0.0032 + d_sat * 0.0014 + d_sat_vib * 0.22;
     f.p90_luminance += d_wh_hl * 0.25;
-    f.hue_mean += (d_tint * 0.0008 - d_temp * 0.0006 + d_sat_vib * 0.16).max(-0.08).min(0.08);
+    f.hue_mean += (d_tint * 0.0008 - d_temp * 0.0006 + d_sat_vib * 0.16)
+        .max(-0.08)
+        .min(0.08);
     f.hue_spread += (d_vib * 0.0018 + d_sat * 0.0011 + d_sat_vib * 0.20)
         .max(-0.06)
         .min(0.08);
@@ -2254,8 +2273,8 @@ fn apply_reference_normalize_pass(
     );
     let color_conf = clamp(
         (ref_feat.rb_ratio - cur_feat.rb_ratio).abs() * 1.8
-                + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 1.8
-                + (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.3,
+            + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs() * 1.8
+            + (ref_feat.mean_saturation - cur_feat.mean_saturation).abs() * 1.3,
         0.0,
         1.0,
     );
@@ -2450,18 +2469,18 @@ fn apply_low_confidence_damping(
     let improvement = (base_score - after_score) / base_score;
     let tonal_probe = ((ref_feat.p50_luminance - predicted.p50_luminance).abs()
         + (ref_feat.waveform_mid_band - predicted.waveform_mid_band).abs())
-        .max(1e-6);
+    .max(1e-6);
     let tonal_base = ((ref_feat.p50_luminance - cur_feat.p50_luminance).abs()
         + (ref_feat.waveform_mid_band - cur_feat.waveform_mid_band).abs())
-        .max(1e-6);
+    .max(1e-6);
     let color_probe = ((ref_feat.rb_ratio - predicted.rb_ratio).abs()
         + (ref_feat.gb_ratio - predicted.gb_ratio).abs()
         + (ref_feat.hue_mean - predicted.hue_mean).abs())
-        .max(1e-6);
+    .max(1e-6);
     let color_base = ((ref_feat.rb_ratio - cur_feat.rb_ratio).abs()
         + (ref_feat.gb_ratio - cur_feat.gb_ratio).abs()
         + (ref_feat.hue_mean - cur_feat.hue_mean).abs())
-        .max(1e-6);
+    .max(1e-6);
     let probe_improvement = ((tonal_base - tonal_probe) / tonal_base) * 0.55
         + ((color_base - color_probe) / color_base) * 0.45;
     let effective_improvement = improvement.min(probe_improvement);
@@ -2488,7 +2507,9 @@ fn apply_low_confidence_damping(
                     damping_for_key = 0.88;
                 }
             }
-        } else if (s.key == "shadows" || s.key == "blacks") && brighten_need > 0.018 && s.value > cur
+        } else if (s.key == "shadows" || s.key == "blacks")
+            && brighten_need > 0.018
+            && s.value > cur
         {
             if damping_for_key < 0.84 {
                 damping_for_key = 0.84;
@@ -2873,11 +2894,7 @@ fn build_cdf(hist: &[u32; 256]) -> [f64; 256] {
     cdf
 }
 
-fn histogram_match_lut(
-    ref_hist: &[u32; 256],
-    cur_hist: &[u32; 256],
-    strength: f64,
-) -> [f64; 256] {
+fn histogram_match_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], strength: f64) -> [f64; 256] {
     let mut ref_clipped = *ref_hist;
     let mut cur_clipped = *cur_hist;
     clip_histogram(&mut ref_clipped, 0.015);
@@ -2909,7 +2926,11 @@ fn blend_lut(base: &[f64; 256], overlay: &[f64; 256], strength: f64) -> [f64; 25
     out
 }
 
-fn build_range_preserve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], preserve_ratio: f64) -> [f64; 256] {
+fn build_range_preserve_lut(
+    ref_hist: &[u32; 256],
+    cur_hist: &[u32; 256],
+    preserve_ratio: f64,
+) -> [f64; 256] {
     let preserve = preserve_ratio.max(0.0).min(1.0);
     let find_first = |hist: &[u32; 256]| -> usize {
         for idx in 0..256 {
@@ -2937,12 +2958,18 @@ fn build_range_preserve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], preser
     let mut lut = [0.0; 256];
     for idx in 0..256 {
         let normalized = ((idx as f64) - cur_min) / cur_range;
-        lut[idx] = (normalized * (target_max - target_min) + target_min).max(0.0).min(255.0);
+        lut[idx] = (normalized * (target_max - target_min) + target_min)
+            .max(0.0)
+            .min(255.0);
     }
     lut
 }
 
-fn build_contrast_micro_curve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], strength: f64) -> [f64; 256] {
+fn build_contrast_micro_curve_lut(
+    ref_hist: &[u32; 256],
+    cur_hist: &[u32; 256],
+    strength: f64,
+) -> [f64; 256] {
     let ref_cdf = build_cdf(ref_hist);
     let cur_cdf = build_cdf(cur_hist);
     let find_quantile = |cdf: &[f64; 256], q: f64| -> usize {
@@ -2987,10 +3014,21 @@ fn build_contrast_micro_curve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], 
 }
 
 fn extract_tone_curve_lut_from_adjustments(current_adjustments: &Value) -> Option<[f64; 256]> {
-    let get_num = |key: &str| current_adjustments.get(key).and_then(|value| value.as_f64());
-    let has_curve_signal = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks"]
-        .iter()
-        .any(|key| current_adjustments.get(*key).is_some());
+    let get_num = |key: &str| {
+        current_adjustments
+            .get(key)
+            .and_then(|value| value.as_f64())
+    };
+    let has_curve_signal = [
+        "exposure",
+        "contrast",
+        "highlights",
+        "shadows",
+        "whites",
+        "blacks",
+    ]
+    .iter()
+    .any(|key| current_adjustments.get(*key).is_some());
     if !has_curve_signal {
         return None;
     }
@@ -3054,7 +3092,10 @@ fn generate_matched_curves(
 
     let s = strength.max(0.0).min(1.0);
     if s <= 1e-6 {
-        curves.insert("luma".to_string(), serde_json::json!(lut_to_curve_points(&identity_lut)));
+        curves.insert(
+            "luma".to_string(),
+            serde_json::json!(lut_to_curve_points(&identity_lut)),
+        );
         return serde_json::Value::Object(curves);
     }
 
@@ -3134,10 +3175,6 @@ fn generate_matched_curves(
     serde_json::Value::Object(curves)
 }
 
-
-
-
-
 fn rgb_to_hsv(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     let c_max = r.max(g).max(b);
     let c_min = r.min(g).min(b);
@@ -3183,16 +3220,9 @@ fn generate_matched_hsl(
         (330.0, 50.0),
     ];
     let keys: [&str; 8] = [
-        "reds",
-        "oranges",
-        "yellows",
-        "greens",
-        "aquas",
-        "blues",
-        "purples",
-        "magentas",
+        "reds", "oranges", "yellows", "greens", "aquas", "blues", "purples", "magentas",
     ];
-    
+
     let mut ref_w = [0.0f64; 8];
     let mut ref_sum_sin = [0.0f64; 8];
     let mut ref_sum_cos = [0.0f64; 8];
@@ -3215,13 +3245,17 @@ fn generate_matched_hsl(
             let r = p[0] as f64 / 255.0;
             let g = p[1] as f64 / 255.0;
             let b = p[2] as f64 / 255.0;
-            
+
             // 严格对齐 Shader 里的亮度与 HSL 转换
             let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            if luma < 0.02 || luma > 0.98 { continue; }
-            
+            if luma < 0.02 || luma > 0.98 {
+                continue;
+            }
+
             let (hue, sat, _) = rgb_to_hsv(r, g, b);
-            if sat < 0.05 { continue; } // 忽略无色彩像素
+            if sat < 0.05 {
+                continue;
+            } // 忽略无色彩像素
 
             let mut raw = [0.0f64; 8];
             let mut sum_raw = 0.0;
@@ -3230,7 +3264,9 @@ fn generate_matched_hsl(
                 raw[i] = infl;
                 sum_raw += infl;
             }
-            if sum_raw < 1e-9 { continue; }
+            if sum_raw < 1e-9 {
+                continue;
+            }
 
             let hue_rad = hue.to_radians();
             let h_sin = hue_rad.sin();
@@ -3238,8 +3274,10 @@ fn generate_matched_hsl(
 
             for i in 0..8 {
                 let norm = raw[i] / sum_raw;
-                if norm < 0.01 { continue; }
-                
+                if norm < 0.01 {
+                    continue;
+                }
+
                 w[i] += norm;
                 sum_sin[i] += norm * h_sin;
                 sum_cos[i] += norm * h_cos;
@@ -3249,14 +3287,36 @@ fn generate_matched_hsl(
         }
     };
 
-    accumulate(ref_img, &mut ref_w, &mut ref_sum_sin, &mut ref_sum_cos, &mut ref_sum_sat, &mut ref_sum_lum);
-    accumulate(cur_img, &mut cur_w, &mut cur_sum_sin, &mut cur_sum_cos, &mut cur_sum_sat, &mut cur_sum_lum);
+    accumulate(
+        ref_img,
+        &mut ref_w,
+        &mut ref_sum_sin,
+        &mut ref_sum_cos,
+        &mut ref_sum_sat,
+        &mut ref_sum_lum,
+    );
+    accumulate(
+        cur_img,
+        &mut cur_w,
+        &mut cur_sum_sin,
+        &mut cur_sum_cos,
+        &mut cur_sum_sat,
+        &mut cur_sum_lum,
+    );
 
     // 引入色彩中介关联逻辑：色相画像邻域平滑
     // 目的：实现“中介转换”。例如目标图只有黄色，但参考图是绿色调。
     // 通过让黄色区间“借用”邻近绿色区间的画像特征，使黄色能感知到绿色的趋势，从而实现 黄->绿->莫兰迪绿 的引导。
-    let smooth_profile = |w: &mut [f64; 8], s: &mut [f64; 8], c: &mut [f64; 8], sat: &mut [f64; 8], lum: &mut [f64; 8]| {
-        let mut nw = [0.0; 8]; let mut ns = [0.0; 8]; let mut nc = [0.0; 8]; let mut nsat = [0.0; 8]; let mut nlum = [0.0; 8];
+    let smooth_profile = |w: &mut [f64; 8],
+                          s: &mut [f64; 8],
+                          c: &mut [f64; 8],
+                          sat: &mut [f64; 8],
+                          lum: &mut [f64; 8]| {
+        let mut nw = [0.0; 8];
+        let mut ns = [0.0; 8];
+        let mut nc = [0.0; 8];
+        let mut nsat = [0.0; 8];
+        let mut nlum = [0.0; 8];
         for i in 0..8 {
             let prev = if i == 0 { 7 } else { i - 1 };
             let next = if i == 7 { 0 } else { i + 1 };
@@ -3268,13 +3328,31 @@ fn generate_matched_hsl(
             nsat[i] = sat[prev] * kernel[0] + sat[i] * kernel[1] + sat[next] * kernel[2];
             nlum[i] = lum[prev] * kernel[0] + lum[i] * kernel[1] + lum[next] * kernel[2];
         }
-        *w = nw; *s = ns; *c = nc; *sat = nsat; *lum = nlum;
+        *w = nw;
+        *s = ns;
+        *c = nc;
+        *sat = nsat;
+        *lum = nlum;
     };
-    
-    smooth_profile(&mut ref_w, &mut ref_sum_sin, &mut ref_sum_cos, &mut ref_sum_sat, &mut ref_sum_lum);
-    smooth_profile(&mut cur_w, &mut cur_sum_sin, &mut cur_sum_cos, &mut cur_sum_sat, &mut cur_sum_lum);
 
-    let sat_guard = (1.0 - constraint_window.saturation_risk * 0.65).max(0.25).min(1.0);
+    smooth_profile(
+        &mut ref_w,
+        &mut ref_sum_sin,
+        &mut ref_sum_cos,
+        &mut ref_sum_sat,
+        &mut ref_sum_lum,
+    );
+    smooth_profile(
+        &mut cur_w,
+        &mut cur_sum_sin,
+        &mut cur_sum_cos,
+        &mut cur_sum_sat,
+        &mut cur_sum_lum,
+    );
+
+    let sat_guard = (1.0 - constraint_window.saturation_risk * 0.65)
+        .max(0.25)
+        .min(1.0);
 
     let mut out = serde_json::Map::new();
     for i in 0..8 {
@@ -3286,23 +3364,30 @@ fn generate_matched_hsl(
         // 1. 计算圆周平均 Hue
         let ref_mean_hue = ref_sum_sin[i].atan2(ref_sum_cos[i]).to_degrees();
         let cur_mean_hue = cur_sum_sin[i].atan2(cur_sum_cos[i]).to_degrees();
-        
+
         let mut delta_hue = ref_mean_hue - cur_mean_hue;
-        if delta_hue > 180.0 { delta_hue -= 360.0; }
-        if delta_hue < -180.0 { delta_hue += 360.0; }
-        
+        if delta_hue > 180.0 {
+            delta_hue -= 360.0;
+        }
+        if delta_hue < -180.0 {
+            delta_hue += 360.0;
+        }
+
         // 引入“不相干颜色门限”：如果色相差距超过 50 度（意味着跨越了几乎两个大色相区），则认为是不相干颜色。
         // 使用平滑的余弦衰减，防止强行将红色扭曲成蓝色等不自然行为。
         let hue_affinity = (delta_hue.abs() / 50.0).min(1.0);
         let hue_gate = (1.0 - hue_affinity * hue_affinity).max(0.0);
-        
+
         // Shader: hue += slider * 0.3 * 2.0; 故 slider = delta / 0.6
-        let hue_slider = (delta_hue / 0.6 * s * hue_gate).round().max(-100.0).min(100.0);
+        let hue_slider = (delta_hue / 0.6 * s * hue_gate)
+            .round()
+            .max(-100.0)
+            .min(100.0);
 
         // 2. 计算平均 Saturation
         let ref_mean_sat = ref_sum_sat[i] / ref_w[i];
         let cur_mean_sat = (cur_sum_sat[i] / cur_w[i]).max(0.01);
-        
+
         // 解决偏灰元凶 3：消除双重饱和度/明度叠加 (Double Dipping)
         // RGB曲线本身已经极大改变了全图的饱和度，如果 HSL 再拉满，画面会失控。此处削弱系数为 0.4。
         let sat_slider = (((ref_mean_sat / cur_mean_sat) - 1.0) * 100.0 * s * sat_guard * 0.4)
@@ -3313,7 +3398,7 @@ fn generate_matched_hsl(
         // 3. 计算平均 Luminance
         let ref_mean_lum = ref_sum_lum[i] / ref_w[i];
         let cur_mean_lum = (cur_sum_lum[i] / cur_w[i]).max(0.01);
-        
+
         // 明度曲线 (Luma Curve) 已经完美对齐了全图的亮度。如果 HSL 再次应用亮度差值，会导致“暗的变更暗，亮的变更亮”，引发严重死灰。
         // 此处将 Luminance 的系数极大削弱 (0.1)，让它只做极其微弱的局部修饰，不干扰全局曲线。
         let lum_slider = (((ref_mean_lum / cur_mean_lum) - 1.0) * 100.0 * s * 0.1)
@@ -3430,7 +3515,8 @@ fn map_features_to_adjustments(
                 * scene_profile.tonal_gain,
             -0.56,
             positive_exposure_cap,
-        ) * tonal_gate * 0.3;
+        ) * tonal_gate
+            * 0.3;
         let cur_exposure = get_current("exposure", 0.0);
         let new_exposure = clamp(cur_exposure + exposure_delta, -1.0, 1.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3466,7 +3552,10 @@ fn map_features_to_adjustments(
     let high_band_diff = ref_feat.waveform_high_band - cur_feat.waveform_high_band;
     let clip_diff = ref_feat.clipped_highlight_ratio - cur_feat.clipped_highlight_ratio;
     let highlight_gate = gate(
-        high_band_diff.abs().max(clip_diff.abs() * 0.8).max(zone_high_shift.abs()),
+        high_band_diff
+            .abs()
+            .max(clip_diff.abs() * 0.8)
+            .max(zone_high_shift.abs()),
         0.012,
         0.025,
     );
@@ -3477,7 +3566,8 @@ fn map_features_to_adjustments(
             20.0,
         ) * (0.9 + tuning.style_strength * 0.1)
             * scene_profile.highlight_gain
-            * highlight_gate * 0.3;
+            * highlight_gate
+            * 0.3;
         let cur_hl = get_current("highlights", 0.0);
         let new_hl = clamp(cur_hl + hl_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3492,7 +3582,11 @@ fn map_features_to_adjustments(
     }
 
     let low_band_diff = ref_feat.waveform_low_band - cur_feat.waveform_low_band;
-    let shadow_gate = gate(low_band_diff.abs().max(zone_shadow_shift.abs()), 0.012, 0.025);
+    let shadow_gate = gate(
+        low_band_diff.abs().max(zone_shadow_shift.abs()),
+        0.012,
+        0.025,
+    );
     if shadow_gate > 0.0 {
         let lift_bias = if tonal_gap > 0.015 {
             (tonal_gap * 18.0).min(8.0)
@@ -3503,10 +3597,10 @@ fn map_features_to_adjustments(
             low_band_diff * 68.0 + zone_shadow_shift * 55.0 + lift_bias,
             -20.0,
             32.0,
-        )
-            * (0.9 + tuning.style_strength * 0.1)
+        ) * (0.9 + tuning.style_strength * 0.1)
             * scene_profile.shadow_gain
-            * shadow_gate * 0.3;
+            * shadow_gate
+            * 0.3;
         let cur_sh = get_current("shadows", 0.0);
         let new_sh = clamp(cur_sh + sh_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3527,7 +3621,8 @@ fn map_features_to_adjustments(
             (p99_diff * 80.0 - clip_diff * 140.0) * scene_profile.highlight_gain,
             -18.0,
             14.0,
-        ) * white_gate * 0.3;
+        ) * white_gate
+            * 0.3;
         let cur_whites = get_current("whites", 0.0);
         let new_whites = clamp(cur_whites + whites_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3575,7 +3670,8 @@ fn map_features_to_adjustments(
                 * color_scale,
             -30.0,
             30.0,
-        ) * temp_gate * 0.3;
+        ) * temp_gate
+            * 0.3;
         let cur_temp = get_current("temperature", 0.0);
         let new_temp = clamp(cur_temp + temp_delta, -25.0, 25.0);
         suggestions.push(StyleTransferSuggestion {
@@ -3600,7 +3696,8 @@ fn map_features_to_adjustments(
             (-tint_diff * 27.0 + temp_diff * 6.5 - hue_diff * 14.0) * color_scale,
             -24.0,
             24.0,
-        ) * tint_gate * 0.3;
+        ) * tint_gate
+            * 0.3;
         let cur_tint = get_current("tint", 0.0);
         let new_tint = clamp(cur_tint + tint_delta, -20.0, 20.0);
         suggestions.push(StyleTransferSuggestion {
@@ -4212,61 +4309,91 @@ pub async fn analyze_style_transfer(
     } else {
         enable_auto_refine.unwrap_or(true)
     };
-    let enable_lut = if pure_algorithm { false } else { enable_lut.unwrap_or(true) };
-    let enable_vlm = if pure_algorithm { false } else { enable_vlm.unwrap_or(true) };
+    let enable_lut = if pure_algorithm {
+        false
+    } else {
+        enable_lut.unwrap_or(true)
+    };
+    let enable_vlm = if pure_algorithm {
+        false
+    } else {
+        enable_vlm.unwrap_or(true)
+    };
     validate_style_transfer_paths(&reference_path, &current_image_path)?;
     let (ref_img, cur_img) =
         load_style_transfer_images(&reference_path, &current_image_path).await?;
-        
+
     let endpoint_for_check = llm_endpoint.clone();
     let current_adjustments_for_vlm = current_adjustments.clone();
 
-    let (algorithm_result, suffix, early_exit_res, ctx_images) = tokio::task::spawn_blocking(move || {
-        let ctx = build_style_transfer_context(
-            ref_img,
-            cur_img,
-            &current_adjustments,
-            tuning,
-            enable_expert_preset,
-        );
-        let (early_exit_threshold, llm_trigger) =
-            adaptive_style_thresholds(&ctx.ref_features, &ctx.cur_features, &ctx.baseline_error);
-        if !pure_algorithm && ctx.baseline_error.total < early_exit_threshold {
-            let suffix = build_expert_preset_suffix(&ctx);
-            let mut res = build_style_transfer_early_exit_response(&ctx);
-            if !suffix.is_empty() {
-                res.understanding = format!("{}{}", res.understanding, suffix);
-            }
-            return Ok::<(Option<AlgorithmPipelineResult>, String, Option<StyleTransferResponse>, Option<(DynamicImage, DynamicImage)>), String>((None, String::new(), Some(res), None));
-        }
-        let needs_vlm = enable_vlm && endpoint_for_check.is_some() && ctx.baseline_error.total >= llm_trigger;
-        let images = if needs_vlm {
-            Some((ctx.ref_img.clone(), ctx.cur_img.clone()))
-        } else {
-            None
-        };
-
-        let algorithm_result = run_algorithm_pipeline(
-            &ctx,
-            &current_adjustments,
-            StyleTransferAlgoOptions {
-                pure_algorithm,
-                enable_feature_mapping,
-                enable_auto_refine,
+    let (algorithm_result, suffix, early_exit_res, ctx_images) =
+        tokio::task::spawn_blocking(move || {
+            let ctx = build_style_transfer_context(
+                ref_img,
+                cur_img,
+                &current_adjustments,
+                tuning,
                 enable_expert_preset,
-                enable_lut,
-            },
-        );
-        let suffix = build_expert_preset_suffix(&ctx);
-        Ok::<(Option<AlgorithmPipelineResult>, String, Option<StyleTransferResponse>, Option<(DynamicImage, DynamicImage)>), String>((Some(algorithm_result), suffix, None, images))
-    })
-    .await
-    .map_err(|e| format!("分析任务失败: {}", e))??;
+            );
+            let (early_exit_threshold, llm_trigger) = adaptive_style_thresholds(
+                &ctx.ref_features,
+                &ctx.cur_features,
+                &ctx.baseline_error,
+            );
+            if !pure_algorithm && ctx.baseline_error.total < early_exit_threshold {
+                let suffix = build_expert_preset_suffix(&ctx);
+                let mut res = build_style_transfer_early_exit_response(&ctx);
+                if !suffix.is_empty() {
+                    res.understanding = format!("{}{}", res.understanding, suffix);
+                }
+                return Ok::<
+                    (
+                        Option<AlgorithmPipelineResult>,
+                        String,
+                        Option<StyleTransferResponse>,
+                        Option<(DynamicImage, DynamicImage)>,
+                    ),
+                    String,
+                >((None, String::new(), Some(res), None));
+            }
+            let needs_vlm = enable_vlm
+                && endpoint_for_check.is_some()
+                && ctx.baseline_error.total >= llm_trigger;
+            let images = if needs_vlm {
+                Some((ctx.ref_img.clone(), ctx.cur_img.clone()))
+            } else {
+                None
+            };
+
+            let algorithm_result = run_algorithm_pipeline(
+                &ctx,
+                &current_adjustments,
+                StyleTransferAlgoOptions {
+                    pure_algorithm,
+                    enable_feature_mapping,
+                    enable_auto_refine,
+                    enable_expert_preset,
+                    enable_lut,
+                },
+            );
+            let suffix = build_expert_preset_suffix(&ctx);
+            Ok::<
+                (
+                    Option<AlgorithmPipelineResult>,
+                    String,
+                    Option<StyleTransferResponse>,
+                    Option<(DynamicImage, DynamicImage)>,
+                ),
+                String,
+            >((Some(algorithm_result), suffix, None, images))
+        })
+        .await
+        .map_err(|e| format!("分析任务失败: {}", e))??;
 
     if let Some(res) = early_exit_res {
         return Ok(res);
     }
-    
+
     let algorithm_result = algorithm_result.unwrap();
     let mut final_res = build_algorithm_response(
         algorithm_result.adjustments.clone(),
@@ -4277,12 +4404,15 @@ pub async fn analyze_style_transfer(
 
     if let Some((ref_img, cur_img)) = ctx_images {
         if let Some(endpoint) = llm_endpoint {
-            let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
-                "chunk_type": "thinking",
-                "text": "\n\n正在启动视觉大模型进行深度风格匹配...\n",
-                "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
-            }));
-            
+            let _ = app_handle.emit(
+                "style-transfer-stream",
+                serde_json::json!({
+                    "chunk_type": "thinking",
+                    "text": "\n\n正在启动视觉大模型进行深度风格匹配...\n",
+                    "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                }),
+            );
+
             match run_vlm_refinement(
                 &endpoint,
                 llm_api_key.as_deref(),
@@ -4291,11 +4421,16 @@ pub async fn analyze_style_transfer(
                 &cur_img,
                 &current_adjustments_for_vlm,
                 &algorithm_result.adjustments,
-                &app_handle
-            ).await {
+                &app_handle,
+            )
+            .await
+            {
                 Ok(vlm_res) => {
                     if !vlm_res.understanding.is_empty() {
-                        final_res.understanding = format!("{}\n\n[视觉模型微调]\n{}", final_res.understanding, vlm_res.understanding);
+                        final_res.understanding = format!(
+                            "{}\n\n[视觉模型微调]\n{}",
+                            final_res.understanding, vlm_res.understanding
+                        );
                     }
                     if !vlm_res.adjustments.is_empty() {
                         let mut keyed: HashMap<String, usize> = HashMap::new();
@@ -4340,11 +4475,14 @@ pub async fn analyze_style_transfer(
                     }));
                 }
                 Err(e) => {
-                    let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
-                        "chunk_type": "error",
-                        "text": format!("\n视觉模型微调失败: {}\n", e),
-                        "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
-                    }));
+                    let _ = app_handle.emit(
+                        "style-transfer-stream",
+                        serde_json::json!({
+                            "chunk_type": "error",
+                            "text": format!("\n视觉模型微调失败: {}\n", e),
+                            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                        }),
+                    );
                 }
             }
         }
@@ -4368,7 +4506,7 @@ pub async fn analyze_style_transfer(
             }
         }));
     }
-    
+
     Ok(final_res)
 }
 
@@ -4380,7 +4518,9 @@ fn image_to_base64_jpeg(img: &DynamicImage) -> String {
     } else {
         img.clone()
     };
-    resized.write_to(&mut buf, image::ImageFormat::Jpeg).unwrap();
+    resized
+        .write_to(&mut buf, image::ImageFormat::Jpeg)
+        .unwrap();
     general_purpose::STANDARD.encode(buf.get_ref())
 }
 
@@ -4410,7 +4550,11 @@ async fn run_vlm_refinement(
     let cur_b64 = image_to_base64_jpeg(cur_img);
 
     let system_prompt = "你是一位专业摄影师和调色专家。请观察参考图(第一张)和当前图(第二张)，以及初步的参数调整建议。请根据参考图的风格，对当前图的参数进行微调，以达到更好的风格匹配效果。请以JSON格式返回结果，包含understanding和adjustments。";
-    let user_text = format!("当前参数: {}\n初步建议: {}", current_adjustments, serde_json::to_string(suggested_adjustments).unwrap_or_default());
+    let user_text = format!(
+        "当前参数: {}\n初步建议: {}",
+        current_adjustments,
+        serde_json::to_string(suggested_adjustments).unwrap_or_default()
+    );
 
     let messages = json!([
         {
@@ -4470,7 +4614,7 @@ async fn run_vlm_refinement(
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();
     let mut line_buffer = String::new();
-    
+
     use tauri::Emitter;
 
     while let Some(chunk_result) = stream.next().await {
@@ -4488,7 +4632,8 @@ async fn run_vlm_refinement(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str() {
+                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
+                    {
                         if delta_content.is_empty() {
                             continue;
                         }
@@ -4501,7 +4646,8 @@ async fn run_vlm_refinement(
 
                         if in_thinking {
                             thinking_buffer.push_str(delta_content);
-                            let clean = delta_content.replace("<think>", "").replace("</think>", "");
+                            let clean =
+                                delta_content.replace("<think>", "").replace("</think>", "");
                             if !clean.is_empty() {
                                 let _ = app_handle.emit(
                                     "style-transfer-stream",
@@ -4533,13 +4679,14 @@ async fn run_vlm_refinement(
     }
 
     let json_str = crate::llm_chat::extract_json(&full_content)?;
-    let parsed: crate::llm_chat::ChatAdjustResponse = serde_json::from_str(&json_str).map_err(|e| {
-        format!(
-            "解析 JSON 失败: {}，原始内容: {}",
-            e,
-            &full_content[..full_content.len().min(500)]
-        )
-    })?;
+    let parsed: crate::llm_chat::ChatAdjustResponse =
+        serde_json::from_str(&json_str).map_err(|e| {
+            format!(
+                "解析 JSON 失败: {}，原始内容: {}",
+                e,
+                &full_content[..full_content.len().min(500)]
+            )
+        })?;
 
     Ok(parsed)
 }
@@ -4637,7 +4784,7 @@ mod tests {
     }
 }
 
-use crate::color_matching::{kmeans_plus_plus, sinkhorn_ot, TPS, rgb_to_lab, lab_to_rgb};
+use crate::color_matching::{TPS, kmeans_plus_plus, lab_to_rgb, rgb_to_lab, sinkhorn_ot};
 use nalgebra::{DMatrix, DVector, Vector3};
 
 fn extract_lab_pixels_downsampled(img: &image::DynamicImage) -> Vec<Vector3<f64>> {
@@ -4645,7 +4792,7 @@ fn extract_lab_pixels_downsampled(img: &image::DynamicImage) -> Vec<Vector3<f64>
     let (width, height) = img.dimensions();
     let step = (width * height / 5000).max(1);
     let mut pixels = Vec::new();
-    
+
     for (i, (_, _, pixel)) in img.pixels().enumerate() {
         if i as u32 % step == 0 {
             let rgb = Vector3::new(
@@ -4659,7 +4806,11 @@ fn extract_lab_pixels_downsampled(img: &image::DynamicImage) -> Vec<Vector3<f64>
     pixels
 }
 
-fn generate_3d_lut_with_ot_tps(cur_img: &image::DynamicImage, ref_img: &image::DynamicImage, lut_size: usize) -> Option<Vec<f32>> {
+fn generate_3d_lut_with_ot_tps(
+    cur_img: &image::DynamicImage,
+    ref_img: &image::DynamicImage,
+    lut_size: usize,
+) -> Option<Vec<f32>> {
     let cur_pixels = extract_lab_pixels_downsampled(cur_img);
     let ref_pixels = extract_lab_pixels_downsampled(ref_img);
 
@@ -4686,7 +4837,9 @@ fn generate_3d_lut_with_ot_tps(cur_img: &image::DynamicImage, ref_img: &image::D
             target += ref_centroids[j] * p_mat[(i, j)];
             weight_sum += p_mat[(i, j)];
         }
-        if weight_sum > 0.0 { target /= weight_sum; }
+        if weight_sum > 0.0 {
+            target /= weight_sum;
+        }
         src_points.push(cur_centroids[i]);
         dst_points.push(target);
     }
@@ -4705,7 +4858,7 @@ fn generate_3d_lut_with_ot_tps(cur_img: &image::DynamicImage, ref_img: &image::D
                 let lab = rgb_to_lab(&rgb);
                 let mapped_lab = tps.transform(&lab);
                 let mapped_rgb = lab_to_rgb(&mapped_lab);
-                
+
                 lut_data.push(mapped_rgb[0].clamp(0.0, 1.0) as f32);
                 lut_data.push(mapped_rgb[1].clamp(0.0, 1.0) as f32);
                 lut_data.push(mapped_rgb[2].clamp(0.0, 1.0) as f32);

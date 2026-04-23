@@ -119,6 +119,8 @@ export enum Invokes {
   SaveCommunityPreset = 'save_community_preset',
   SaveTempFile = 'save_temp_file',
   RunStyleTransfer = 'run_style_transfer',
+  GetStyleTransferModelStatus = 'get_style_transfer_model_status',
+  PrepareStyleTransferModels = 'prepare_style_transfer_models',
 }
 
 export enum Panel {
@@ -210,6 +212,7 @@ export interface AppSettings {
   styleTransferHighlightGuard?: number;
   styleTransferSkinProtect?: number;
   styleTransferPreset?: 'realistic' | 'artistic' | 'creative';
+  styleTransferStrategyMode?: 'safe' | 'strong';
 }
 
 export interface BrushSettings {

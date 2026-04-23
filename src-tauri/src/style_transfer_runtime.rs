@@ -5,6 +5,7 @@ use crate::file_management::load_settings;
 use crate::style_transfer::{
     self, StyleTransferDebugInfo, StyleTransferResponse, StyleTransferSuggestion,
 };
+use crate::style_transfer_models::{self, StyleTransferModelStatusResponse};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +29,22 @@ impl StyleTransferMode {
     fn expected_wait_range(self) -> &'static str {
         match self {
             Self::Analysis => "1-5s",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StyleTransferStrategyMode {
+    Safe,
+    Strong,
+}
+
+impl StyleTransferStrategyMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Safe => "safe",
+            Self::Strong => "strong",
         }
     }
 }
@@ -61,10 +78,16 @@ impl StyleTransferPreset {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleTransferRunRequest {
-    pub reference_path: String,
+    #[serde(default)]
+    pub reference_path: Option<String>,
+    #[serde(default)]
+    pub main_reference_path: Option<String>,
+    #[serde(default)]
+    pub aux_reference_paths: Vec<String>,
     pub current_image_path: String,
     pub current_adjustments: Value,
     pub mode: Option<StyleTransferMode>,
+    pub strategy_mode: Option<StyleTransferStrategyMode>,
     pub preset: Option<StyleTransferPreset>,
     pub style_strength: Option<f64>,
     pub highlight_guard_strength: Option<f64>,
@@ -87,8 +110,10 @@ pub struct StyleTransferExecutionMeta {
     pub resolved_mode: String,
     pub engine: String,
     pub preset: String,
+    pub strategy_mode: String,
     pub stage: String,
     pub expected_wait_range: String,
+    pub reference_count: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -107,6 +132,8 @@ pub struct StyleTransferExecutionResponse {
     pub pure_generation_image_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_processed_image_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_status: Option<StyleTransferModelStatusResponse>,
     pub execution_meta: StyleTransferExecutionMeta,
 }
 
@@ -136,7 +163,19 @@ fn wrap_analysis_response(
     analysis_response: StyleTransferResponse,
     requested_mode: StyleTransferMode,
     preset: StyleTransferPreset,
+    strategy_mode: StyleTransferStrategyMode,
+    reference_count: usize,
+    model_status: Option<StyleTransferModelStatusResponse>,
 ) -> StyleTransferExecutionResponse {
+    let engine = if model_status
+        .as_ref()
+        .map(|s| s.required_ready)
+        .unwrap_or(false)
+    {
+        "legacy-analysis-v4-skeleton"
+    } else {
+        "legacy-analysis"
+    };
     StyleTransferExecutionResponse {
         understanding: analysis_response.understanding,
         adjustments: analysis_response.adjustments,
@@ -145,14 +184,53 @@ fn wrap_analysis_response(
         preview_image_path: None,
         pure_generation_image_path: None,
         post_processed_image_path: None,
+        model_status,
         execution_meta: StyleTransferExecutionMeta {
             requested_mode: requested_mode.as_str().to_string(),
             resolved_mode: StyleTransferMode::Analysis.as_str().to_string(),
-            engine: "legacy-analysis".to_string(),
+            engine: engine.to_string(),
             preset: preset.as_str().to_string(),
+            strategy_mode: strategy_mode.as_str().to_string(),
             stage: StyleTransferMode::Analysis.stage_label().to_string(),
-            expected_wait_range: StyleTransferMode::Analysis.expected_wait_range().to_string(),
+            expected_wait_range: StyleTransferMode::Analysis
+                .expected_wait_range()
+                .to_string(),
+            reference_count,
         },
+    }
+}
+
+fn resolve_reference_path(request: &StyleTransferRunRequest) -> Result<String, String> {
+    request
+        .main_reference_path
+        .clone()
+        .or_else(|| request.reference_path.clone())
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| "主参考图不能为空".to_string())
+}
+
+fn resolve_strategy_mode(explicit: Option<StyleTransferStrategyMode>) -> StyleTransferStrategyMode {
+    explicit.unwrap_or(StyleTransferStrategyMode::Safe)
+}
+
+fn adjust_tuning_for_strategy(
+    strategy_mode: StyleTransferStrategyMode,
+    style_strength: Option<f64>,
+    highlight_guard_strength: Option<f64>,
+    skin_protect_strength: Option<f64>,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let scale = |value: Option<f64>, factor: f64| value.map(|v| (v * factor).clamp(0.5, 2.0));
+    match strategy_mode {
+        StyleTransferStrategyMode::Safe => (
+            scale(style_strength, 0.9),
+            scale(highlight_guard_strength.or(Some(1.0)), 1.15),
+            scale(skin_protect_strength.or(Some(1.0)), 1.15),
+        ),
+        StyleTransferStrategyMode::Strong => (
+            scale(style_strength, 1.1),
+            scale(highlight_guard_strength.or(Some(1.0)), 0.95),
+            scale(skin_protect_strength.or(Some(1.0)), 0.95),
+        ),
     }
 }
 
@@ -163,13 +241,23 @@ pub async fn run_style_transfer(
 ) -> Result<StyleTransferExecutionResponse, String> {
     let requested_mode = resolve_mode(request.mode, &app_handle);
     let preset = resolve_preset(request.preset, &app_handle);
+    let strategy_mode = resolve_strategy_mode(request.strategy_mode);
+    let reference_path = resolve_reference_path(&request)?;
+    let reference_count = 1 + request.aux_reference_paths.len();
+    let (style_strength, highlight_guard_strength, skin_protect_strength) =
+        adjust_tuning_for_strategy(
+            strategy_mode,
+            request.style_strength,
+            request.highlight_guard_strength,
+            request.skin_protect_strength,
+        );
     let analysis_response = style_transfer::analyze_style_transfer(
-        request.reference_path,
+        reference_path,
         request.current_image_path,
         request.current_adjustments,
-        request.style_strength,
-        request.highlight_guard_strength,
-        request.skin_protect_strength,
+        style_strength,
+        highlight_guard_strength,
+        skin_protect_strength,
         request.pure_algorithm,
         request.enable_expert_preset,
         request.enable_feature_mapping,
@@ -182,10 +270,14 @@ pub async fn run_style_transfer(
         app_handle.clone(),
     )
     .await?;
+    let model_status = style_transfer_models::get_style_transfer_model_status_response().ok();
 
     Ok(wrap_analysis_response(
         analysis_response,
         requested_mode,
         preset,
+        strategy_mode,
+        reference_count,
+        model_status,
     ))
 }

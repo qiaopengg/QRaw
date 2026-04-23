@@ -1,8 +1,8 @@
 use nalgebra::{DMatrix, DVector, Vector3};
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::f64;
-use rand::RngExt;
 
 // ==========================================
 // 1. Color Space Conversions (RGB <-> LAB)
@@ -62,11 +62,7 @@ pub fn xyz_to_lab(xyz: &Vector3<f64>) -> Vector3<f64> {
     let y = f_cbrt(xyz[1] / D65_Y);
     let z = f_cbrt(xyz[2] / D65_Z);
 
-    Vector3::new(
-        (116.0 * y) - 16.0,
-        500.0 * (x - y),
-        200.0 * (y - z),
-    )
+    Vector3::new((116.0 * y) - 16.0, 500.0 * (x - y), 200.0 * (y - z))
 }
 
 pub fn rgb_to_lab(rgb: &Vector3<f64>) -> Vector3<f64> {
@@ -94,9 +90,9 @@ pub fn xyz_to_rgb(xyz: &Vector3<f64>) -> Vector3<f64> {
     let y = xyz[1];
     let z = xyz[2];
 
-    let r = x *  3.2404542 + y * -1.5371385 + z * -0.4985314;
-    let g = x * -0.9692660 + y *  1.8760108 + z *  0.0415560;
-    let b = x *  0.0556434 + y * -0.2040259 + z *  1.0572252;
+    let r = x * 3.2404542 + y * -1.5371385 + z * -0.4985314;
+    let g = x * -0.9692660 + y * 1.8760108 + z * 0.0415560;
+    let b = x * 0.0556434 + y * -0.2040259 + z * 1.0572252;
 
     Vector3::new(
         linear_to_srgb(r).clamp(0.0, 1.0),
@@ -121,19 +117,19 @@ pub fn kmeans_plus_plus(
     if data.is_empty() || k == 0 {
         return (vec![], vec![]);
     }
-    
+
     let mut rng = StdRng::seed_from_u64(42);
     let n = data.len();
     let mut centroids = Vec::with_capacity(k);
-    
+
     let first_idx = (rng.random::<f64>() * n as f64) as usize;
     let first_idx = first_idx.min(n - 1);
     centroids.push(data[first_idx].clone());
-    
+
     for _ in 1..k {
         let mut dist_sq = vec![0.0; n];
         let mut sum_dist_sq = 0.0;
-        
+
         for i in 0..n {
             let min_dist = centroids
                 .iter()
@@ -142,7 +138,7 @@ pub fn kmeans_plus_plus(
             dist_sq[i] = min_dist;
             sum_dist_sq += min_dist;
         }
-        
+
         let mut target = rng.random::<f64>() * sum_dist_sq;
         let mut next_idx = n - 1;
         for i in 0..n {
@@ -154,16 +150,16 @@ pub fn kmeans_plus_plus(
         }
         centroids.push(data[next_idx].clone());
     }
-    
+
     let mut assignments = vec![0; n];
-    
+
     for _ in 0..max_iters {
         let mut changed = false;
-        
+
         for i in 0..n {
             let mut best_k = 0;
             let mut min_dist = f64::INFINITY;
-            
+
             for (j, c) in centroids.iter().enumerate() {
                 let dist = (data[i] - c as &Vector3<f64>).norm_squared();
                 if dist < min_dist {
@@ -171,33 +167,33 @@ pub fn kmeans_plus_plus(
                     best_k = j;
                 }
             }
-            
+
             if assignments[i] != best_k {
                 assignments[i] = best_k;
                 changed = true;
             }
         }
-        
+
         if !changed {
             break;
         }
-        
+
         let mut new_centroids = vec![Vector3::zeros(); k];
         let mut counts = vec![0; k];
-        
+
         for i in 0..n {
             let cluster = assignments[i];
             new_centroids[cluster] += data[i];
             counts[cluster] += 1;
         }
-        
+
         for j in 0..k {
             if counts[j] > 0 {
                 centroids[j] = new_centroids[j] / (counts[j] as f64);
             }
         }
     }
-    
+
     (centroids, assignments)
 }
 
@@ -215,30 +211,30 @@ pub fn sinkhorn_ot(
 ) -> DMatrix<f64> {
     let n = mu.len();
     let m = nu.len();
-    
+
     let mut k_mat = DMatrix::zeros(n, m);
     for i in 0..n {
         for j in 0..m {
             k_mat[(i, j)] = (-cost_matrix[(i, j)] / reg).exp();
         }
     }
-    
+
     let mut u = DVector::from_element(n, 1.0 / n as f64);
     let mut v = DVector::from_element(m, 1.0 / m as f64);
-    
+
     for _ in 0..max_iters {
         let u_prev = u.clone();
-        
+
         let kt_u = k_mat.transpose() * &u;
         for j in 0..m {
             v[j] = nu[j] / kt_u[j].max(1e-15);
         }
-        
+
         let k_v = &k_mat * &v;
         for i in 0..n {
             u[i] = mu[i] / k_v[i].max(1e-15);
         }
-        
+
         let mut max_diff = 0.0_f64;
         for i in 0..n {
             max_diff = max_diff.max((u[i] - u_prev[i]).abs());
@@ -247,7 +243,7 @@ pub fn sinkhorn_ot(
             break;
         }
     }
-    
+
     let mut p = DMatrix::zeros(n, m);
     for i in 0..n {
         for j in 0..m {
@@ -272,7 +268,7 @@ impl TPS {
         if n != dst_points.len() || n < 4 {
             return None; // 至少需要 4 个控制点
         }
-        
+
         let mut k = DMatrix::zeros(n, n);
         for i in 0..n {
             for j in 0..n {
@@ -280,7 +276,7 @@ impl TPS {
                 k[(i, j)] = Self::u(r);
             }
         }
-        
+
         let mut p = DMatrix::zeros(n, 4);
         for i in 0..n {
             p[(i, 0)] = 1.0;
@@ -288,7 +284,7 @@ impl TPS {
             p[(i, 2)] = src_points[i][1];
             p[(i, 3)] = src_points[i][2];
         }
-        
+
         let mut l = DMatrix::zeros(n + 4, n + 4);
         for i in 0..n {
             for j in 0..n {
@@ -299,37 +295,46 @@ impl TPS {
                 l[(n + j, i)] = p[(i, j)];
             }
         }
-        
+
         // 增加正则化项避免奇异矩阵
         for i in 0..(n + 4) {
             l[(i, i)] += 1e-4; // 增大正则化，避免点重合导致求解失败
         }
-        
+
         let mut y = DMatrix::zeros(n + 4, 3);
         for i in 0..n {
             y[(i, 0)] = dst_points[i][0];
             y[(i, 1)] = dst_points[i][1];
             y[(i, 2)] = dst_points[i][2];
         }
-        
+
         let decomp = l.lu();
         let weights = decomp.solve(&y)?;
-        
+
         Some(Self {
             src_points: src_points.to_vec(),
             weights,
         })
     }
-    
+
     pub fn transform(&self, point: &Vector3<f64>) -> Vector3<f64> {
         let n = self.src_points.len();
         let mut res = Vector3::zeros();
-        
+
         // 仿射部分
-        res[0] = self.weights[(n, 0)] + self.weights[(n+1, 0)] * point[0] + self.weights[(n+2, 0)] * point[1] + self.weights[(n+3, 0)] * point[2];
-        res[1] = self.weights[(n, 1)] + self.weights[(n+1, 1)] * point[0] + self.weights[(n+2, 1)] * point[1] + self.weights[(n+3, 1)] * point[2];
-        res[2] = self.weights[(n, 2)] + self.weights[(n+1, 2)] * point[0] + self.weights[(n+2, 2)] * point[1] + self.weights[(n+3, 2)] * point[2];
-        
+        res[0] = self.weights[(n, 0)]
+            + self.weights[(n + 1, 0)] * point[0]
+            + self.weights[(n + 2, 0)] * point[1]
+            + self.weights[(n + 3, 0)] * point[2];
+        res[1] = self.weights[(n, 1)]
+            + self.weights[(n + 1, 1)] * point[0]
+            + self.weights[(n + 2, 1)] * point[1]
+            + self.weights[(n + 3, 1)] * point[2];
+        res[2] = self.weights[(n, 2)]
+            + self.weights[(n + 1, 2)] * point[0]
+            + self.weights[(n + 2, 2)] * point[1]
+            + self.weights[(n + 3, 2)] * point[2];
+
         // 非线性形变部分
         for i in 0..n {
             let r = (point - self.src_points[i]).norm();
@@ -338,10 +343,10 @@ impl TPS {
             res[1] += self.weights[(i, 1)] * u_r;
             res[2] += self.weights[(i, 2)] * u_r;
         }
-        
+
         res
     }
-    
+
     // TPS 三维基函数
     fn u(r: f64) -> f64 {
         r

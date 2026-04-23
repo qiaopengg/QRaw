@@ -1,9 +1,9 @@
+use crate::gpu_processing::{RenderRequest, process_and_get_dynamic_image};
+use crate::image_processing::{downscale_f32_image, get_all_adjustments_from_json};
 use crate::style_transfer::{
     DynamicConstraintClampRecord, DynamicConstraintDebugInfo,
-    build_dynamic_constraint_window_from_image, clamp_value_with_dynamic_window, extract_features
+    build_dynamic_constraint_window_from_image, clamp_value_with_dynamic_window, extract_features,
 };
-use crate::gpu_processing::{process_and_get_dynamic_image, RenderRequest};
-use crate::image_processing::{downscale_f32_image, get_all_adjustments_from_json};
 use crate::{AppState, get_or_init_gpu_context};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -61,7 +61,7 @@ impl AdjustmentSuggestion {
             0.0
         }
     }
-    
+
     pub fn set_f64_value(&mut self, val: f64) {
         self.value = json!(val);
     }
@@ -247,8 +247,7 @@ fn apply_guardrails(
         }
     }
 
-    let sat_push =
-        (saturation_delta.max(0.0) / 40.0) + (vibrance_delta.max(0.0) / 40.0);
+    let sat_push = (saturation_delta.max(0.0) / 40.0) + (vibrance_delta.max(0.0) / 40.0);
     let sat_allow = (0.7 - window.saturation_risk * 0.6).max(0.15).min(0.7);
     if sat_push > sat_allow && sat_push.is_finite() {
         let scale = (sat_allow / sat_push).max(0.0).min(1.0);
@@ -657,8 +656,11 @@ pub async fn chat_adjust(
         }
     }
 
-    let guardrail_clamps =
-        apply_guardrails(&mut parsed.adjustments, &current_adjustments, &constraint_window);
+    let guardrail_clamps = apply_guardrails(
+        &mut parsed.adjustments,
+        &current_adjustments,
+        &constraint_window,
+    );
     clamps.extend(guardrail_clamps);
 
     let constraint_debug = DynamicConstraintDebugInfo {
@@ -686,7 +688,8 @@ pub async fn chat_adjust(
                             }
                         }
                         let preview_base = downscale_f32_image(&original.image, 200, 200);
-                        let all_adjustments = get_all_adjustments_from_json(&merged_adjustments, original.is_raw);
+                        let all_adjustments =
+                            get_all_adjustments_from_json(&merged_adjustments, original.is_raw);
                         if let Ok(processed_image) = process_and_get_dynamic_image(
                             &context,
                             &state,
@@ -703,28 +706,49 @@ pub async fn chat_adjust(
                             let result_features = extract_features(&processed_image);
                             let mut needed_fix = false;
                             if result_features.clipped_highlight_ratio > 0.10 {
-                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "exposure") {
+                                if let Some(adj) =
+                                    parsed.adjustments.iter_mut().find(|a| a.key == "exposure")
+                                {
                                     adj.set_f64_value(adj.get_f64_value() - 0.5);
-                                    adj.reason = format!("{}；图像域验证：触发过曝自愈，强制降曝光", adj.reason);
+                                    adj.reason = format!(
+                                        "{}；图像域验证：触发过曝自愈，强制降曝光",
+                                        adj.reason
+                                    );
                                     needed_fix = true;
                                 }
                             }
-                            if result_features.shadow_ratio > 0.30 && result_features.p10_luminance < 0.05 {
-                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "shadows") {
+                            if result_features.shadow_ratio > 0.30
+                                && result_features.p10_luminance < 0.05
+                            {
+                                if let Some(adj) =
+                                    parsed.adjustments.iter_mut().find(|a| a.key == "shadows")
+                                {
                                     adj.set_f64_value(adj.get_f64_value() + 20.0);
-                                    adj.reason = format!("{}；图像域验证：触发死黑自愈，强制拉阴影", adj.reason);
+                                    adj.reason = format!(
+                                        "{}；图像域验证：触发死黑自愈，强制拉阴影",
+                                        adj.reason
+                                    );
                                     needed_fix = true;
                                 }
                             }
                             if result_features.mean_saturation > 0.65 {
-                                if let Some(adj) = parsed.adjustments.iter_mut().find(|a| a.key == "vibrance") {
+                                if let Some(adj) =
+                                    parsed.adjustments.iter_mut().find(|a| a.key == "vibrance")
+                                {
                                     adj.set_f64_value(adj.get_f64_value() - 20.0);
-                                    adj.reason = format!("{}；图像域验证：触发超饱和自愈，强制降饱和", adj.reason);
+                                    adj.reason = format!(
+                                        "{}；图像域验证：触发超饱和自愈，强制降饱和",
+                                        adj.reason
+                                    );
                                     needed_fix = true;
                                 }
                             }
                             if needed_fix {
-                                if let Some(dbg) = parsed.constraint_debug.as_mut().and_then(|v| v.as_object_mut()) {
+                                if let Some(dbg) = parsed
+                                    .constraint_debug
+                                    .as_mut()
+                                    .and_then(|v| v.as_object_mut())
+                                {
                                     dbg.insert("image_verified".to_string(), json!(true));
                                     dbg.insert("auto_corrected".to_string(), json!(true));
                                 }

@@ -1,25 +1,26 @@
 use crate::ai_processing::{
-    detect_faces_yolov8, detect_faces_yunet, get_or_init_clip_models, get_or_init_culling_models,
-    run_expression_model, score_aesthetics_nima, ClipModels, CullingModels, YunetFace,
+    ClipModels, CullingModels, YunetFace, detect_faces_yolov8, detect_faces_yunet,
+    get_or_init_clip_models, get_or_init_culling_models, run_expression_model,
+    score_aesthetics_nima,
 };
 use crate::exif_processing::get_creation_date_from_path;
 use crate::file_management::{load_settings, parse_virtual_path};
 use crate::formats::is_raw_file;
-use image::{imageops, DynamicImage, GenericImageView, GrayImage, Rgba};
+use image::{DynamicImage, GenericImageView, GrayImage, Rgba, imageops};
 use image_hasher::{HashAlg, HasherConfig};
-use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
+use imageproc::geometric_transformations::{Interpolation, rotate_about_center};
 use ort::value::Tensor;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::f32::consts::PI;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::f32::consts::PI;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::image_loader;
 use crate::candidates::TAG_CANDIDATES;
+use crate::image_loader;
 use crate::image_processing::ImageMetadata;
 use crate::image_processing::perform_auto_analysis;
 use std::time::Duration;
@@ -149,7 +150,6 @@ impl Drop for InferencePermit<'_> {
     }
 }
 
-
 fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
     let (width, height) = image.dimensions();
     if width < 3 || height < 3 {
@@ -188,10 +188,7 @@ fn softmax_1d(xs: &[f32]) -> Vec<f32> {
     if xs.is_empty() {
         return Vec::new();
     }
-    let m = xs
-        .iter()
-        .cloned()
-        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+    let m = xs.iter().cloned().fold(f32::NEG_INFINITY, |a, b| a.max(b));
     let mut exps = Vec::with_capacity(xs.len());
     let mut sum = 0.0f32;
     for &x in xs {
@@ -246,7 +243,14 @@ fn preprocess_clip_image(image: &DynamicImage) -> ndarray::Array4<f32> {
     arr
 }
 
-fn mean_and_highlight_clip(gray: &GrayImage, x: u32, y: u32, w: u32, h: u32, clip_thresh: u8) -> (f64, f64, u32) {
+fn mean_and_highlight_clip(
+    gray: &GrayImage,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    clip_thresh: u8,
+) -> (f64, f64, u32) {
     if w == 0 || h == 0 {
         return (0.0, 0.0, 0);
     }
@@ -336,7 +340,7 @@ fn analyze_image(
     let mut face_score: Option<f64> = None;
     let mut unnatural_expression_max = 0.0;
     let expression_strictness_factor = (expression_strictness.min(100) as f64) / 100.0;
-    
+
     // Default 0.6. Strictness 0 -> 0.9, 50 -> 0.6, 100 -> 0.3
     let blink_thresh = 0.9 - 0.6 * expression_strictness_factor;
     // Default 0.5. Strictness 0 -> 0.8, 50 -> 0.5, 100 -> 0.2
@@ -345,9 +349,27 @@ fn analyze_image(
     let is_portrait_profile = matches!(profile, CullingProfile::Portrait);
     let is_landscape_profile = matches!(profile, CullingProfile::Landscape);
 
-    let exp_skip = if is_portrait_profile { 4.5 } else if is_landscape_profile { 5.0 } else { 3.0 };
-    let shadow_skip = if is_portrait_profile { 85.0 } else if is_landscape_profile { 95.0 } else { 60.0 };
-    let highlight_skip = if is_portrait_profile { 85.0 } else if is_landscape_profile { 95.0 } else { 60.0 };
+    let exp_skip = if is_portrait_profile {
+        4.5
+    } else if is_landscape_profile {
+        5.0
+    } else {
+        3.0
+    };
+    let shadow_skip = if is_portrait_profile {
+        85.0
+    } else if is_landscape_profile {
+        95.0
+    } else {
+        60.0
+    };
+    let highlight_skip = if is_portrait_profile {
+        85.0
+    } else if is_landscape_profile {
+        95.0
+    } else {
+        60.0
+    };
     let skip_face = sharpness_metric < (blur_threshold * 0.25).max(5.0);
     let skip_heavy = skip_face
         || exposure_stops.abs() > exp_skip
@@ -372,75 +394,81 @@ fn analyze_image(
 
             let current_face_detector;
 
-            let faces: Result<Vec<DetectedFace>, String> = if let Some(yunet) = models.yunet_detector.as_ref() {
-                match detect_faces_yunet(&img, yunet) {
-                    Ok(fs) if !fs.is_empty() => {
-                        current_face_detector = Some("yunet".to_string());
-                        Ok(fs.into_iter()
-                            .map(|f: YunetFace| DetectedFace {
-                                x1: f.x1,
-                                y1: f.y1,
-                                x2: f.x2,
-                                y2: f.y2,
-                                score: f.score,
-                                landmarks: Some(f.landmarks),
-                            })
-                            .collect())
-                    },
-                    _ => {
-                        current_face_detector = Some("yolov8".to_string());
-                        detect_faces_yolov8(&img, &models.face_detector)
-                            .map(|fs| {
-                                fs.into_iter()
-                                    .map(|f| DetectedFace {
-                                        x1: f.x1,
-                                        y1: f.y1,
-                                        x2: f.x2,
-                                        y2: f.y2,
-                                        score: f.score,
-                                        landmarks: None,
-                                    })
-                                    .collect()
-                            })
-                            .map_err(|e| e.to_string())
+            let faces: Result<Vec<DetectedFace>, String> =
+                if let Some(yunet) = models.yunet_detector.as_ref() {
+                    match detect_faces_yunet(&img, yunet) {
+                        Ok(fs) if !fs.is_empty() => {
+                            current_face_detector = Some("yunet".to_string());
+                            Ok(fs
+                                .into_iter()
+                                .map(|f: YunetFace| DetectedFace {
+                                    x1: f.x1,
+                                    y1: f.y1,
+                                    x2: f.x2,
+                                    y2: f.y2,
+                                    score: f.score,
+                                    landmarks: Some(f.landmarks),
+                                })
+                                .collect())
+                        }
+                        _ => {
+                            current_face_detector = Some("yolov8".to_string());
+                            detect_faces_yolov8(&img, &models.face_detector)
+                                .map(|fs| {
+                                    fs.into_iter()
+                                        .map(|f| DetectedFace {
+                                            x1: f.x1,
+                                            y1: f.y1,
+                                            x2: f.x2,
+                                            y2: f.y2,
+                                            score: f.score,
+                                            landmarks: None,
+                                        })
+                                        .collect()
+                                })
+                                .map_err(|e| e.to_string())
+                        }
                     }
-                }
-            } else {
-                current_face_detector = Some("yolov8".to_string());
-                detect_faces_yolov8(&img, &models.face_detector)
-                    .map(|fs| {
-                        fs.into_iter()
-                            .map(|f| DetectedFace {
-                                x1: f.x1,
-                                y1: f.y1,
-                                x2: f.x2,
-                                y2: f.y2,
-                                score: f.score,
-                                landmarks: None,
-                            })
-                            .collect()
-                    })
-                    .map_err(|e| e.to_string())
-            };
-            
+                } else {
+                    current_face_detector = Some("yolov8".to_string());
+                    detect_faces_yolov8(&img, &models.face_detector)
+                        .map(|fs| {
+                            fs.into_iter()
+                                .map(|f| DetectedFace {
+                                    x1: f.x1,
+                                    y1: f.y1,
+                                    x2: f.x2,
+                                    y2: f.y2,
+                                    score: f.score,
+                                    landmarks: None,
+                                })
+                                .collect()
+                        })
+                        .map_err(|e| e.to_string())
+                };
+
             face_detector_type = current_face_detector;
 
             match faces {
                 Ok(mut faces) => {
                     let img_area = (width as f64) * (height as f64);
                     faces.sort_by(|a, b| {
-                        let area_a =
-                            (a.x2 - a.x1).max(0.0) as f64 * (a.y2 - a.y1).max(0.0) as f64;
-                        let area_b =
-                            (b.x2 - b.x1).max(0.0) as f64 * (b.y2 - b.y1).max(0.0) as f64;
-                        area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
+                        let area_a = (a.x2 - a.x1).max(0.0) as f64 * (a.y2 - a.y1).max(0.0) as f64;
+                        let area_b = (b.x2 - b.x1).max(0.0) as f64 * (b.y2 - b.y1).max(0.0) as f64;
+                        area_b
+                            .partial_cmp(&area_a)
+                            .unwrap_or(std::cmp::Ordering::Equal)
                     });
 
                     let mut primary_faces = Vec::new();
                     for f in faces.into_iter() {
                         let area =
                             ((f.x2 - f.x1).max(0.0) as f64) * ((f.y2 - f.y1).max(0.0) as f64);
-                        let ratio = if img_area <= 0.0 { 0.0 } else { area / img_area };
+                        let ratio = if img_area <= 0.0 {
+                            0.0
+                        } else {
+                            area / img_area
+                        };
                         if ratio >= 0.01 {
                             primary_faces.push((f, ratio));
                         }
@@ -499,8 +527,8 @@ fn analyze_image(
                             let y1u = y1 as u32;
                             let x2u = x2 as u32;
                             let y2u = y2 as u32;
-                            let crop = imageops::crop_imm(&img, x1u, y1u, x2u - x1u, y2u - y1u)
-                                .to_image();
+                            let crop =
+                                imageops::crop_imm(&img, x1u, y1u, x2u - x1u, y2u - y1u).to_image();
                             let mut crop_dyn = DynamicImage::ImageRgba8(crop);
                             if let Some(lms) = face.landmarks {
                                 let (le, re) = (lms[0], lms[1]);
@@ -531,7 +559,7 @@ fn analyze_image(
                                 } else {
                                     // If expression check is disabled, just assume good expressions
                                     blink_max = 0.0;
-                                    smile_sum += 0.5; 
+                                    smile_sum += 0.5;
                                     unnatural_max = 0.0;
                                     expr_count += 1;
                                 }
@@ -546,16 +574,16 @@ fn analyze_image(
                         } else {
                             0.0
                         };
-                        
+
                         let base = (1.0 - blink_prob).clamp(0.0, 1.0);
                         let mut final_face_score = base * (0.85 + 0.15 * smile_prob);
-                        
+
                         if is_portrait_profile && check_expression {
                             let max_penalty = 0.2 + 0.4 * expression_strictness_factor;
                             let penalty = (unnatural_max * max_penalty).clamp(0.0, max_penalty);
-                            final_face_score -= penalty; 
+                            final_face_score -= penalty;
                         }
-                        
+
                         face_score = Some(final_face_score.clamp(0.0, 1.0));
                         unnatural_expression_max = unnatural_max;
                     }
@@ -583,7 +611,9 @@ fn analyze_image(
     }
 
     if !skip_heavy {
-        if let (Some(cm), Some((texts, ids_data, mask_data, max_len))) = (clip_models, clip_text_inputs) {
+        if let (Some(cm), Some((texts, ids_data, mask_data, max_len))) =
+            (clip_models, clip_text_inputs)
+        {
             let _permit = inference_sem.acquire();
             let image_input = preprocess_clip_image(&img);
 
@@ -596,12 +626,12 @@ fn analyze_image(
                 .into_dyn();
             let image_dyn = image_input.into_dyn();
 
-            let image_val =
-                Tensor::from_array(image_dyn.as_standard_layout().into_owned()).map_err(|e| e.to_string())?;
-            let ids_val =
-                Tensor::from_array(ids_array.as_standard_layout().into_owned()).map_err(|e| e.to_string())?;
-            let mask_val =
-                Tensor::from_array(mask_array.as_standard_layout().into_owned()).map_err(|e| e.to_string())?;
+            let image_val = Tensor::from_array(image_dyn.as_standard_layout().into_owned())
+                .map_err(|e| e.to_string())?;
+            let ids_val = Tensor::from_array(ids_array.as_standard_layout().into_owned())
+                .map_err(|e| e.to_string())?;
+            let mask_val = Tensor::from_array(mask_array.as_standard_layout().into_owned())
+                .map_err(|e| e.to_string())?;
 
             let logits = {
                 let mut sess = cm.model.lock().unwrap();
@@ -631,7 +661,7 @@ fn analyze_image(
     let k_blur = (2.0f64.ln()) / bt;
     let norm_blur = (1.0 - (-k_blur * sharpness_metric).exp()).clamp(0.0, 1.0);
     let norm_center_blur = (1.0 - (-k_blur * center_focus_metric).exp()).clamp(0.0, 1.0);
-    
+
     let blended_blur = if is_landscape_profile {
         norm_center_blur.max(norm_blur)
     } else {
@@ -656,14 +686,8 @@ fn analyze_image(
                 let clip_thresh: u8 = 250;
                 let (face_mean, face_clip, face_px) =
                     mean_and_highlight_clip(&gray_thumbnail, fx1, fy1, fw, fh, clip_thresh);
-                let (global_mean, global_clip, global_px) = mean_and_highlight_clip(
-                    &gray_thumbnail,
-                    0,
-                    0,
-                    thumb_w,
-                    thumb_h,
-                    clip_thresh,
-                );
+                let (global_mean, global_clip, global_px) =
+                    mean_and_highlight_clip(&gray_thumbnail, 0, 0, thumb_w, thumb_h, clip_thresh);
                 let bg_px = global_px.saturating_sub(face_px).max(1);
                 let bg_clip = ((global_clip * (global_px as f64)) - (face_clip * (face_px as f64)))
                     / (bg_px as f64);
@@ -681,7 +705,7 @@ fn analyze_image(
                 if halo_forgiven {
                     exposure_metric = exposure_metric.max(0.6);
                 }
-                
+
                 exposure_metric = (0.7 * face_metric) + (0.3 * exposure_metric);
                 exposure_metric = exposure_metric.clamp(0.0, 1.0);
                 let _ = global_mean;
@@ -690,15 +714,16 @@ fn analyze_image(
         }
     } else if is_landscape_profile {
         let clip_thresh: u8 = 250;
-        let (_, global_clip, _) = mean_and_highlight_clip(&gray_thumbnail, 0, 0, thumb_w, thumb_h, clip_thresh);
-        
+        let (_, global_clip, _) =
+            mean_and_highlight_clip(&gray_thumbnail, 0, 0, thumb_w, thumb_h, clip_thresh);
+
         if global_clip > 0.05 {
             let max_highlight_penalty = 0.5;
             let current_penalty = 1.0 - exposure_metric;
             let capped_penalty = current_penalty.min(max_highlight_penalty);
             exposure_metric = 1.0 - capped_penalty;
         }
-        
+
         if auto.shadows.abs() > 40.0 && auto.highlights.abs() > 40.0 {
             exposure_metric = exposure_metric.max(0.65);
         }
@@ -748,13 +773,20 @@ fn analyze_image(
 
     let mut quality_score = (blended_blur * w_blur)
         + (exposure_metric * w_exp)
-        + (aesthetic_score.map(|s| (s / 10.0).clamp(0.0, 1.0)).unwrap_or(0.0) * w_aes)
+        + (aesthetic_score
+            .map(|s| (s / 10.0).clamp(0.0, 1.0))
+            .unwrap_or(0.0)
+            * w_aes)
         + (face_score.unwrap_or(0.0) * w_face);
 
     if blended_blur < 0.15 {
         quality_score *= 0.5;
     }
-    let base_blink_thresh = if is_portrait_profile { blink_thresh } else { blink_thresh + 0.1 };
+    let base_blink_thresh = if is_portrait_profile {
+        blink_thresh
+    } else {
+        blink_thresh + 0.1
+    };
     if has_large_face && check_expression && blink_prob > base_blink_thresh {
         quality_score *= 0.6;
     }
@@ -774,7 +806,7 @@ fn analyze_image(
     } else if blended_blur < 0.4 {
         reasons.push("blurMild".to_string());
     }
-    
+
     if is_portrait_profile && has_large_face {
         if let Some(fm) = face_exposure_metric {
             if fm < 0.35 {
@@ -783,7 +815,10 @@ fn analyze_image(
                 reasons.push("exposurePoor".to_string());
             }
         } else {
-            if exposure_stops.abs() > 3.0 || auto.shadows.abs() > 60.0 || auto.highlights.abs() > 60.0 {
+            if exposure_stops.abs() > 3.0
+                || auto.shadows.abs() > 60.0
+                || auto.highlights.abs() > 60.0
+            {
                 reasons.push("exposureSevere".to_string());
             } else if exposure_stops.abs() > 1.5 {
                 reasons.push("exposurePoor".to_string());
@@ -849,7 +884,9 @@ fn analyze_image(
     score_breakdown.insert("face".to_string(), face_score.unwrap_or(0.0));
     score_breakdown.insert(
         "aesthetic".to_string(),
-        aesthetic_score.map(|s| (s / 10.0).clamp(0.0, 1.0)).unwrap_or(0.0),
+        aesthetic_score
+            .map(|s| (s / 10.0).clamp(0.0, 1.0))
+            .unwrap_or(0.0),
     );
     score_breakdown.insert("calibrated".to_string(), calibrated_score);
 
@@ -920,43 +957,52 @@ pub async fn cull_images(
         let mut cluster: Vec<AssetEntry> = Vec::new();
         let mut last_time: Option<i64> = None;
 
-        let flush_cluster = |cluster: &mut Vec<AssetEntry>,
-                             primary_paths: &mut Vec<String>,
-                             primary_to_secondaries: &mut HashMap<String, Vec<String>>| {
-            if cluster.is_empty() {
-                return;
-            }
-            let mut primary_idx: usize = 0;
-            for (i, e) in cluster.iter().enumerate() {
-                if e.is_raw {
-                    primary_idx = i;
-                    break;
+        let flush_cluster =
+            |cluster: &mut Vec<AssetEntry>,
+             primary_paths: &mut Vec<String>,
+             primary_to_secondaries: &mut HashMap<String, Vec<String>>| {
+                if cluster.is_empty() {
+                    return;
                 }
-            }
-            let primary_path = cluster[primary_idx].path.clone();
-            let mut secondaries = Vec::new();
-            for (i, e) in cluster.iter().enumerate() {
-                if i != primary_idx {
-                    secondaries.push(e.path.clone());
+                let mut primary_idx: usize = 0;
+                for (i, e) in cluster.iter().enumerate() {
+                    if e.is_raw {
+                        primary_idx = i;
+                        break;
+                    }
                 }
-            }
-            primary_paths.push(primary_path.clone());
-            if !secondaries.is_empty() {
-                primary_to_secondaries.insert(primary_path, secondaries);
-            }
-            cluster.clear();
-        };
+                let primary_path = cluster[primary_idx].path.clone();
+                let mut secondaries = Vec::new();
+                for (i, e) in cluster.iter().enumerate() {
+                    if i != primary_idx {
+                        secondaries.push(e.path.clone());
+                    }
+                }
+                primary_paths.push(primary_path.clone());
+                if !secondaries.is_empty() {
+                    primary_to_secondaries.insert(primary_path, secondaries);
+                }
+                cluster.clear();
+            };
 
         for e in entries {
             if let Some(t) = last_time {
                 if (e.capture_time - t).abs() >= 1000 {
-                    flush_cluster(&mut cluster, &mut primary_paths, &mut primary_to_secondaries);
+                    flush_cluster(
+                        &mut cluster,
+                        &mut primary_paths,
+                        &mut primary_to_secondaries,
+                    );
                 }
             }
             last_time = Some(e.capture_time);
             cluster.push(e);
         }
-        flush_cluster(&mut cluster, &mut primary_paths, &mut primary_to_secondaries);
+        flush_cluster(
+            &mut cluster,
+            &mut primary_paths,
+            &mut primary_to_secondaries,
+        );
     }
 
     let total_count = primary_paths.len();
@@ -975,7 +1021,10 @@ pub async fn cull_images(
     let hc = app_settings.raw_highlight_compression.unwrap_or(2.5);
     let lrm = app_settings.linear_raw_mode;
 
-    let culling_models = get_or_init_culling_models(&app_handle, &state.ai_state, &state.ai_init_lock).await.ok();
+    let culling_models =
+        get_or_init_culling_models(&app_handle, &state.ai_state, &state.ai_init_lock)
+            .await
+            .ok();
     let clip_models = if settings.group_similar {
         match tokio::time::timeout(
             Duration::from_secs(
@@ -1012,27 +1061,27 @@ pub async fn cull_images(
         if encodings.is_empty() {
             None
         } else {
-        let max_len = encodings
-            .iter()
-            .map(|e| e.get_ids().len())
-            .max()
-            .unwrap_or(0)
-            .max(1);
-        let mut ids_data = Vec::with_capacity(texts.len() * max_len);
-        let mut mask_data = Vec::with_capacity(texts.len() * max_len);
-        for enc in encodings {
-            let mut ids = enc.get_ids().iter().map(|&i| i as i64).collect::<Vec<_>>();
-            let mut mask = enc
-                .get_attention_mask()
+            let max_len = encodings
                 .iter()
-                .map(|&m| m as i64)
-                .collect::<Vec<_>>();
-            ids.resize(max_len, 0);
-            mask.resize(max_len, 0);
-            ids_data.extend_from_slice(&ids);
-            mask_data.extend_from_slice(&mask);
-        }
-        Some(Arc::new((texts, ids_data, mask_data, max_len)))
+                .map(|e| e.get_ids().len())
+                .max()
+                .unwrap_or(0)
+                .max(1);
+            let mut ids_data = Vec::with_capacity(texts.len() * max_len);
+            let mut mask_data = Vec::with_capacity(texts.len() * max_len);
+            for enc in encodings {
+                let mut ids = enc.get_ids().iter().map(|&i| i as i64).collect::<Vec<_>>();
+                let mut mask = enc
+                    .get_attention_mask()
+                    .iter()
+                    .map(|&m| m as i64)
+                    .collect::<Vec<_>>();
+                ids.resize(max_len, 0);
+                mask.resize(max_len, 0);
+                ids_data.extend_from_slice(&ids);
+                mask_data.extend_from_slice(&mask);
+            }
+            Some(Arc::new((texts, ids_data, mask_data, max_len)))
         }
     } else {
         None
@@ -1164,7 +1213,9 @@ pub async fn cull_images(
                         break;
                     }
 
-                    if is_similar(current_idx, j, &successful_analyses) && is_similar(rep_idx, j, &successful_analyses) {
+                    if is_similar(current_idx, j, &successful_analyses)
+                        && is_similar(rep_idx, j, &successful_analyses)
+                    {
                         processed_indices[j] = true;
                         current_group_indices.push(j);
                         queue.push_back(j);
@@ -1190,7 +1241,9 @@ pub async fn cull_images(
                         break;
                     }
 
-                    if is_similar(current_idx, j, &successful_analyses) && is_similar(rep_idx, j, &successful_analyses) {
+                    if is_similar(current_idx, j, &successful_analyses)
+                        && is_similar(rep_idx, j, &successful_analyses)
+                    {
                         processed_indices[j] = true;
                         current_group_indices.push(j);
                         queue.push_back(j);
@@ -1219,7 +1272,9 @@ pub async fn cull_images(
                     })
                     .unwrap_or(i);
 
-                let best_score = successful_analyses[representative_idx].result.calibrated_score;
+                let best_score = successful_analyses[representative_idx]
+                    .result
+                    .calibrated_score;
                 for &idx in &current_group_indices {
                     let is_cover = idx == representative_idx;
                     let res = &mut successful_analyses[idx].result;
@@ -1283,14 +1338,29 @@ pub async fn cull_images(
     if settings.check_expression {
         for i in 0..successful_analyses.len() {
             let item = &successful_analyses[i];
-            if item.result.reasons.iter().any(|r| r == "unnaturalExpression" || r == "blinkDetected") {
+            if item
+                .result
+                .reasons
+                .iter()
+                .any(|r| r == "unnaturalExpression" || r == "blinkDetected")
+            {
                 suggestions.bad_expressions.push(item.result.clone());
             }
         }
         suggestions.bad_expressions.sort_by(|a, b| {
-            let a_unnatural = a.score_breakdown.get("unnaturalProb").copied().unwrap_or(0.0);
-            let b_unnatural = b.score_breakdown.get("unnaturalProb").copied().unwrap_or(0.0);
-            b_unnatural.partial_cmp(&a_unnatural).unwrap_or(std::cmp::Ordering::Equal)
+            let a_unnatural = a
+                .score_breakdown
+                .get("unnaturalProb")
+                .copied()
+                .unwrap_or(0.0);
+            let b_unnatural = b
+                .score_breakdown
+                .get("unnaturalProb")
+                .copied()
+                .unwrap_or(0.0);
+            b_unnatural
+                .partial_cmp(&a_unnatural)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -1325,7 +1395,10 @@ pub async fn cull_images(
             adjustments = serde_json::json!({});
         }
         if let Some(map) = adjustments.as_object_mut() {
-            map.insert("rating".to_string(), serde_json::json!(res.suggested_rating));
+            map.insert(
+                "rating".to_string(),
+                serde_json::json!(res.suggested_rating),
+            );
             map.insert(
                 "autoCulling".to_string(),
                 serde_json::json!({
@@ -1347,7 +1420,10 @@ pub async fn cull_images(
 
     let mut by_rating: HashMap<u8, Vec<String>> = HashMap::new();
     for (path, res) in &all_paths_with_results {
-        by_rating.entry(res.suggested_rating).or_default().push(path.clone());
+        by_rating
+            .entry(res.suggested_rating)
+            .or_default()
+            .push(path.clone());
     }
     for (rating, paths) in by_rating {
         let _ = crate::file_management::apply_adjustments_to_paths(

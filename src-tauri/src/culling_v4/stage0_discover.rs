@@ -14,10 +14,7 @@ use super::types::{Asset, AssetRegistry, CullingProgressV4};
 
 const ANALYSIS_DIM: u32 = 720;
 
-pub fn stage_0_discover(
-    paths: &[String],
-    app_handle: &AppHandle,
-) -> Result<AssetRegistry, String> {
+pub fn stage_0_discover(paths: &[String], app_handle: &AppHandle) -> Result<AssetRegistry, String> {
     if paths.is_empty() {
         return Ok(AssetRegistry {
             assets: vec![],
@@ -27,16 +24,27 @@ pub fn stage_0_discover(
 
     let _ = app_handle.emit(
         "culling-progress",
-        CullingProgressV4 { current: 0, total: paths.len(), stage: "Discovering assets...".into() },
+        CullingProgressV4 {
+            current: 0,
+            total: paths.len(),
+            stage: "Discovering assets...".into(),
+        },
     );
 
     // ── Step 1: RAW+JPEG pairing ──
     let mut by_stem: HashMap<String, Vec<(String, bool)>> = HashMap::new();
     for path in paths {
         let p = Path::new(path);
-        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
         let is_raw = is_raw_file(p);
-        by_stem.entry(stem).or_default().push((path.clone(), is_raw));
+        by_stem
+            .entry(stem)
+            .or_default()
+            .push((path.clone(), is_raw));
     }
 
     let mut primary_paths: Vec<String> = Vec::new();
@@ -50,17 +58,22 @@ pub fn stage_0_discover(
             primary_paths.push(entries[0].0.clone());
         } else {
             // Check time proximity for pairing
-            let times: Vec<i64> = entries.iter()
+            let times: Vec<i64> = entries
+                .iter()
                 .map(|(p, _)| get_creation_date_from_path(Path::new(p)).timestamp_millis())
                 .collect();
 
             let mut paired = vec![false; entries.len()];
             for i in 0..entries.len() {
-                if paired[i] { continue; }
+                if paired[i] {
+                    continue;
+                }
                 if entries[i].1 {
                     // This is a RAW file, look for JPEG pair
                     for j in 0..entries.len() {
-                        if i == j || paired[j] || entries[j].1 { continue; }
+                        if i == j || paired[j] || entries[j].1 {
+                            continue;
+                        }
                         if (times[i] - times[j]).abs() < 2000 {
                             // Pair found: RAW is primary, JPEG is secondary
                             raw_jpeg_pairs.insert(entries[i].0.clone(), entries[j].0.clone());
@@ -92,11 +105,19 @@ pub fn stage_0_discover(
             let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             let _ = app_handle.emit(
                 "culling-progress",
-                CullingProgressV4 { current: done, total, stage: "Loading images...".into() },
+                CullingProgressV4 {
+                    current: done,
+                    total,
+                    stage: "Loading images...".into(),
+                },
             );
 
             let p = Path::new(path);
-            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             let is_raw = is_raw_file(p);
             let is_primary = true;
             let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -113,12 +134,11 @@ pub fn stage_0_discover(
             let focal_length: Option<f32> = None;
 
             // Load and generate thumbnail
-            let img = match load_base_image_from_bytes(
-                &file_bytes, path, true, hc, lrm.clone(), None,
-            ) {
-                Ok(i) => i,
-                Err(_) => return None,
-            };
+            let img =
+                match load_base_image_from_bytes(&file_bytes, path, true, hc, lrm.clone(), None) {
+                    Ok(i) => i,
+                    Err(_) => return None,
+                };
 
             let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
             let gray_thumbnail = thumbnail.to_luma8();
@@ -141,6 +161,8 @@ pub fn stage_0_discover(
 
     let assets: Vec<Asset> = assets.into_iter().flatten().collect();
 
-    Ok(AssetRegistry { assets, raw_jpeg_pairs })
+    Ok(AssetRegistry {
+        assets,
+        raw_jpeg_pairs,
+    })
 }
-

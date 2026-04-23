@@ -26,7 +26,9 @@ fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
             sum += v;
         }
     }
-    if values.is_empty() { return 0.0; }
+    if values.is_empty() {
+        return 0.0;
+    }
     let mean = sum / values.len() as f64;
     values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64
 }
@@ -34,12 +36,16 @@ fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
 /// Calculate Laplacian variance only on masked (white) regions
 pub fn calculate_masked_laplacian_variance(gray: &GrayImage, mask: &GrayImage) -> f64 {
     let (w, h) = gray.dimensions();
-    if w < 3 || h < 3 { return 0.0; }
+    if w < 3 || h < 3 {
+        return 0.0;
+    }
     let mut values = Vec::new();
     let mut sum = 0.0;
     for y in 1..h - 1 {
         for x in 1..w - 1 {
-            if mask.get_pixel(x, y)[0] < 128 { continue; }
+            if mask.get_pixel(x, y)[0] < 128 {
+                continue;
+            }
             let c = gray.get_pixel(x, y)[0] as i32;
             let n = gray.get_pixel(x, y - 1)[0] as i32;
             let s = gray.get_pixel(x, y + 1)[0] as i32;
@@ -50,7 +56,9 @@ pub fn calculate_masked_laplacian_variance(gray: &GrayImage, mask: &GrayImage) -
             sum += v;
         }
     }
-    if values.is_empty() { return 0.0; }
+    if values.is_empty() {
+        return 0.0;
+    }
     let mean = sum / values.len() as f64;
     values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64
 }
@@ -112,12 +120,18 @@ fn compute_dynamic_range(gray: &GrayImage) -> f64 {
     let mut cumsum = 0u32;
     for (i, &count) in hist.iter().enumerate() {
         cumsum += count;
-        if cumsum as f64 > threshold { low = i; break; }
+        if cumsum as f64 > threshold {
+            low = i;
+            break;
+        }
     }
     cumsum = 0;
     for i in (0..256).rev() {
         cumsum += hist[i];
-        if cumsum as f64 > threshold { high = i; break; }
+        if cumsum as f64 > threshold {
+            high = i;
+            break;
+        }
     }
     (high.saturating_sub(low)) as f64 / 255.0
 }

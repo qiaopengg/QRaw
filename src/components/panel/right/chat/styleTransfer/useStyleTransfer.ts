@@ -4,7 +4,14 @@ import { listen } from '@tauri-apps/api/event';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { AppSettings, Invokes } from '../../../../ui/AppProperties';
 import { Adjustments } from '../../../../../utils/adjustments';
-import { ChatAdjustResponse, ChatMessage, StreamChunkPayload, StyleTransferPreset } from '../types';
+import {
+  ChatAdjustResponse,
+  ChatMessage,
+  StreamChunkPayload,
+  StyleTransferModelStatusResponse,
+  StyleTransferPreset,
+  StyleTransferStrategyMode,
+} from '../types';
 import {
   clampStyleTransferConfig,
   formatStyleTransferConfig,
@@ -67,6 +74,13 @@ export function useStyleTransfer({
   const [enableStyleTransferFeatureMapping, setEnableStyleTransferFeatureMapping] = useState(true);
   const [enableStyleTransferAutoRefine, setEnableStyleTransferAutoRefine] = useState(true);
   const [enableStyleTransferVlm, setEnableStyleTransferVlm] = useState(true);
+  const [styleTransferStrategyMode, setStyleTransferStrategyMode] = useState<StyleTransferStrategyMode>(
+    appSettings?.styleTransferStrategyMode || 'safe',
+  );
+  const [styleTransferModelStatus, setStyleTransferModelStatus] = useState<StyleTransferModelStatusResponse | null>(
+    null,
+  );
+  const [isPreparingStyleTransferModels, setIsPreparingStyleTransferModels] = useState(false);
   const activeRunTokenRef = useRef<string | null>(null);
 
   const parseStyleTransferProgress = useCallback((rawText: string) => {
@@ -155,6 +169,26 @@ export function useStyleTransfer({
     setStyleTransferPreset(appSettings?.styleTransferPreset || 'artistic');
   }, [appSettings?.styleTransferPreset]);
 
+  useEffect(() => {
+    setStyleTransferStrategyMode(appSettings?.styleTransferStrategyMode || 'safe');
+  }, [appSettings?.styleTransferStrategyMode]);
+
+  const refreshStyleTransferModelStatus = useCallback(() => {
+    return invoke<StyleTransferModelStatusResponse>(Invokes.GetStyleTransferModelStatus)
+      .then((status) => {
+        setStyleTransferModelStatus(status);
+        return status;
+      })
+      .catch((error) => {
+        setError(String(error));
+        return null;
+      });
+  }, [setError]);
+
+  useEffect(() => {
+    void refreshStyleTransferModelStatus();
+  }, [refreshStyleTransferModelStatus]);
+
   const updateStyleTransferPreset = useCallback(
     (preset: StyleTransferPreset) => {
       setStyleTransferPreset(preset);
@@ -163,8 +197,41 @@ export function useStyleTransfer({
     [persistAppSettings],
   );
 
+  const updateStyleTransferStrategyMode = useCallback(
+    (mode: StyleTransferStrategyMode) => {
+      setStyleTransferStrategyMode(mode);
+      persistAppSettings({ styleTransferStrategyMode: mode });
+    },
+    [persistAppSettings],
+  );
+
+  const prepareStyleTransferModels = useCallback(() => {
+    setIsPreparingStyleTransferModels(true);
+    setError(null);
+    return invoke<StyleTransferModelStatusResponse>(Invokes.PrepareStyleTransferModels)
+      .then((status) => {
+        setStyleTransferModelStatus(status);
+        return status;
+      })
+      .catch((error) => {
+        setError(String(error));
+        throw error;
+      })
+      .finally(() => {
+        setIsPreparingStyleTransferModels(false);
+      });
+  }, [setError]);
+
   const runStyleTransfer = useCallback(
-    ({ referencePath, sourceImagePath }: { referencePath: string; sourceImagePath: string }) => {
+    ({
+      mainReferencePath,
+      auxReferencePaths,
+      sourceImagePath,
+    }: {
+      mainReferencePath: string;
+      auxReferencePaths: string[];
+      sourceImagePath: string;
+    }) => {
       let streamMsgId: string | null = null;
 
       setError(null);
@@ -185,9 +252,12 @@ export function useStyleTransfer({
         role: 'assistant',
         content: '',
         thinkingContent: '',
-        referencePath,
+        referencePath: mainReferencePath,
+        mainReferencePath,
+        auxReferencePaths,
         sourceImagePath,
         requestedMode: 'analysis',
+        strategyMode: styleTransferStrategyMode,
       };
       setMessages((prev) => [...prev, userMsg, streamMsg]);
 
@@ -260,10 +330,13 @@ export function useStyleTransfer({
           unlisten = stopListening;
           return invoke<ChatAdjustResponse>(Invokes.RunStyleTransfer, {
             request: {
-              referencePath,
+              referencePath: mainReferencePath,
+              mainReferencePath,
+              auxReferencePaths,
               currentImagePath: sourceImagePath,
               currentAdjustments: simpleAdj,
               mode: 'analysis',
+              strategyMode: styleTransferStrategyMode,
               preset: styleTransferPreset,
               styleStrength: tuning.styleStrength,
               highlightGuardStrength: tuning.highlightGuardStrength,
@@ -318,6 +391,7 @@ export function useStyleTransfer({
       setIsLoading,
       setMessages,
       styleTransferPreset,
+      styleTransferStrategyMode,
       t,
     ],
   );
@@ -330,7 +404,7 @@ export function useStyleTransfer({
     }
 
     return openFileDialog({
-      multiple: false,
+      multiple: true,
       filters: [
         {
           name: t('chat.imageFiles'),
@@ -357,11 +431,14 @@ export function useStyleTransfer({
       .then((selected) => {
         if (!selected) return;
 
-        const referencePath = typeof selected === 'string' ? selected : selected;
-        if (!referencePath) return;
+        const selectedPaths = Array.isArray(selected) ? selected : [selected];
+        const sanitizedPaths = selectedPaths.filter((path): path is string => typeof path === 'string' && !!path);
+        if (!sanitizedPaths.length) return;
+        const [mainReferencePath, ...auxReferencePaths] = sanitizedPaths;
 
         return runStyleTransfer({
-          referencePath,
+          mainReferencePath,
+          auxReferencePaths,
           sourceImagePath: currentImagePath,
         });
       })
@@ -390,8 +467,14 @@ export function useStyleTransfer({
     setSkinProtectInput,
     setStyleStrengthInput,
     skinProtectInput,
+    isPreparingStyleTransferModels,
     styleStrengthInput,
+    styleTransferModelStatus,
     styleTransferPreset,
+    styleTransferStrategyMode,
+    prepareStyleTransferModels,
+    refreshStyleTransferModelStatus,
+    updateStyleTransferStrategyMode,
     updateStyleTransferPreset,
   };
 }

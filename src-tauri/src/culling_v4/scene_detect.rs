@@ -5,18 +5,13 @@ use super::types::*;
 pub fn auto_detect_scene(portraits: &[PortraitVerdict]) -> SceneType {
     let total = portraits.len().max(1) as f64;
 
-    let large_face = portraits.iter()
+    let large_face = portraits
+        .iter()
         .filter(|p| p.primary_face_area_ratio > 0.08)
         .count() as f64;
-    let multi_face = portraits.iter()
-        .filter(|p| p.faces.len() >= 3)
-        .count() as f64;
-    let no_face = portraits.iter()
-        .filter(|p| !p.has_faces)
-        .count() as f64;
-    let any_face = portraits.iter()
-        .filter(|p| p.has_faces)
-        .count();
+    let multi_face = portraits.iter().filter(|p| p.faces.len() >= 3).count() as f64;
+    let no_face = portraits.iter().filter(|p| !p.has_faces).count() as f64;
+    let any_face = portraits.iter().filter(|p| p.has_faces).count();
 
     // 80%+ photos have large face → portrait
     if large_face / total > 0.8 {

@@ -1,7 +1,12 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
-import { STYLE_TRANSFER_PRESET_OPTIONS, StyleTransferPreset } from '../types';
+import {
+  STYLE_TRANSFER_PRESET_OPTIONS,
+  StyleTransferModelStatusResponse,
+  StyleTransferPreset,
+  StyleTransferStrategyMode,
+} from '../types';
 
 interface StyleTransferSettingsProps {
   enableStyleTransferAutoRefine: boolean;
@@ -28,8 +33,13 @@ interface StyleTransferSettingsProps {
   setSkinProtectInput(value: React.SetStateAction<string>): void;
   setStyleStrengthInput(value: React.SetStateAction<string>): void;
   skinProtectInput: string;
+  isPreparingStyleTransferModels: boolean;
+  prepareStyleTransferModels(): void | Promise<unknown>;
   styleStrengthInput: string;
+  styleTransferModelStatus: StyleTransferModelStatusResponse | null;
   styleTransferPreset: StyleTransferPreset;
+  styleTransferStrategyMode: StyleTransferStrategyMode;
+  updateStyleTransferStrategyMode(mode: StyleTransferStrategyMode): void;
   updateStyleTransferPreset(preset: StyleTransferPreset): void;
 }
 
@@ -55,8 +65,13 @@ export function StyleTransferSettings({
   setSkinProtectInput,
   setStyleStrengthInput,
   skinProtectInput,
+  isPreparingStyleTransferModels,
+  prepareStyleTransferModels,
   styleStrengthInput,
+  styleTransferModelStatus,
   styleTransferPreset,
+  styleTransferStrategyMode,
+  updateStyleTransferStrategyMode,
   updateStyleTransferPreset,
 }: StyleTransferSettingsProps) {
   const { t } = useTranslation();
@@ -75,6 +90,67 @@ export function StyleTransferSettings({
       {menuOpen && (
         <div className="absolute right-0 top-full mt-1 w-72 bg-surface/95 backdrop-blur-md rounded-lg shadow-xl p-2 z-50 border border-surface space-y-2">
           <div className="space-y-2">
+            <div className="space-y-1">
+              <div className="text-[9px] text-text-secondary/85">{t('chat.styleTransferStrategyMode')}</div>
+              <div className="grid grid-cols-2 gap-1">
+                {(['safe', 'strong'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => updateStyleTransferStrategyMode(mode)}
+                    className={`rounded px-1.5 py-1.5 text-[10px] transition-colors ${
+                      styleTransferStrategyMode === mode
+                        ? 'bg-blue-500/20 text-blue-300'
+                        : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {mode === 'safe' ? t('chat.styleTransferStrategySafe') : t('chat.styleTransferStrategyStrong')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1 rounded border border-surface bg-bg-primary/70 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[9px] text-text-secondary/85">{t('chat.styleTransferModelStatusTitle')}</div>
+                  <div className="text-[10px] text-text-primary">
+                    {styleTransferModelStatus
+                      ? `${styleTransferModelStatus.readyCount}/${styleTransferModelStatus.requiredCount} ${t('chat.styleTransferModelReadySuffix')}`
+                      : t('chat.styleTransferModelStatusUnknown')}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void prepareStyleTransferModels()}
+                  disabled={isPreparingStyleTransferModels}
+                  className="rounded px-2 py-1 text-[10px] bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition-colors disabled:opacity-50"
+                >
+                  {isPreparingStyleTransferModels
+                    ? t('chat.styleTransferModelPreparing')
+                    : t('chat.styleTransferPrepareModels')}
+                </button>
+              </div>
+              <div className="text-[9px] text-text-secondary/70">
+                {styleTransferModelStatus?.requiredReady
+                  ? t('chat.styleTransferModelStatusReady')
+                  : t('chat.styleTransferModelStatusPending')}
+              </div>
+              {styleTransferModelStatus?.models?.length ? (
+                <div className="max-h-24 overflow-y-auto space-y-1 pt-1">
+                  {styleTransferModelStatus.models.map((model) => (
+                    <div
+                      key={model.id}
+                      className="flex items-center justify-between gap-2 rounded bg-surface/40 px-1.5 py-1 text-[9px]"
+                    >
+                      <span className="truncate text-text-secondary">{model.name}</span>
+                      <span className={model.ready ? 'text-emerald-300' : 'text-amber-300'}>
+                        {model.ready ? t('chat.styleTransferArtifactReady') : t('chat.styleTransferArtifactPending')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
             <div className="space-y-1">
               <div className="text-[9px] text-text-secondary/85">{t('chat.styleTransferPreset')}</div>
               <div className="grid grid-cols-3 gap-1">

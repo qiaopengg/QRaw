@@ -4,7 +4,7 @@ use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use image::imageops::{self, FilterType};
 use image::{
     DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma, Rgb, Rgb32FImage, Rgba, RgbaImage,
@@ -64,13 +64,11 @@ const CULL_EXPRESSION_FILENAME: &str = "emotion-ferplus-8.onnx";
 const CULL_AESTHETIC_FILENAME: &str = "nima.onnx";
 const CULL_YUNET_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
 
-const DEFAULT_CULL_EXPRESSION_URL: &str =
-    "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx";
+const DEFAULT_CULL_EXPRESSION_URL: &str = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx";
 const DEFAULT_CULL_EXPRESSION_SHA256: &str =
     "a2a2ba6a335a3b29c21acb6272f962bd3d47f84952aaffa03b60986e04efa61c";
 
-const DEFAULT_CULL_YUNET_URL: &str =
-    "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
+const DEFAULT_CULL_YUNET_URL: &str = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
 const DEFAULT_CULL_YUNET_SHA256: &str =
     "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 
@@ -187,6 +185,9 @@ fn edt_2d(grid: &[bool], width: usize, height: usize) -> Vec<f32> {
 }
 
 fn get_models_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf> {
+    if let Ok(shared_dir) = get_qraw_models_dir() {
+        return Ok(shared_dir);
+    }
     let models_dir = app_handle.path().app_data_dir()?.join("models");
     if !models_dir.exists() {
         fs::create_dir_all(&models_dir)?;
@@ -276,7 +277,7 @@ async fn download_and_verify_model(
     Ok(())
 }
 
-fn get_model_env(name: &str, key: &str) -> Option<String> {
+pub fn get_model_env(name: &str, key: &str) -> Option<String> {
     let env_key = format!("QRAW_MODEL_{}_{}", name, key);
     env::var(env_key).ok().filter(|v| !v.trim().is_empty())
 }
@@ -299,10 +300,16 @@ pub async fn ensure_model(
                     download_model(u, &path).await?;
                     let _ = app_handle.emit("ai-model-download-finish", model_name);
                     if !verify_sha256(&path, hash)? {
-                        return Err(anyhow::anyhow!("Failed to verify model {} after download.", model_name));
+                        return Err(anyhow::anyhow!(
+                            "Failed to verify model {} after download.",
+                            model_name
+                        ));
                     }
                 } else {
-                    return Err(anyhow::anyhow!("Model {} hash mismatch and no URL provided.", model_name));
+                    return Err(anyhow::anyhow!(
+                        "Model {} hash mismatch and no URL provided.",
+                        model_name
+                    ));
                 }
             }
         }
@@ -315,7 +322,10 @@ pub async fn ensure_model(
         let _ = app_handle.emit("ai-model-download-finish", model_name);
         if let Some(hash) = sha256 {
             if !verify_sha256(&path, hash)? {
-                return Err(anyhow::anyhow!("Failed to verify model {} after download.", model_name));
+                return Err(anyhow::anyhow!(
+                    "Failed to verify model {} after download.",
+                    model_name
+                ));
             }
         }
         return Ok(path);
@@ -667,12 +677,14 @@ pub async fn get_or_init_culling_models(
 
     let face_url = get_model_env("FACE_DETECTOR", "URL");
     let face_sha = get_model_env("FACE_DETECTOR", "SHA256");
-    let yunet_url = get_model_env("YUNET", "URL").or_else(|| Some(DEFAULT_CULL_YUNET_URL.to_string()));
+    let yunet_url =
+        get_model_env("YUNET", "URL").or_else(|| Some(DEFAULT_CULL_YUNET_URL.to_string()));
     let yunet_sha =
         get_model_env("YUNET", "SHA256").or_else(|| Some(DEFAULT_CULL_YUNET_SHA256.to_string()));
-    let expr_url = get_model_env("EXPRESSION", "URL").or_else(|| Some(DEFAULT_CULL_EXPRESSION_URL.to_string()));
-    let expr_sha =
-        get_model_env("EXPRESSION", "SHA256").or_else(|| Some(DEFAULT_CULL_EXPRESSION_SHA256.to_string()));
+    let expr_url = get_model_env("EXPRESSION", "URL")
+        .or_else(|| Some(DEFAULT_CULL_EXPRESSION_URL.to_string()));
+    let expr_sha = get_model_env("EXPRESSION", "SHA256")
+        .or_else(|| Some(DEFAULT_CULL_EXPRESSION_SHA256.to_string()));
     let aes_url = get_model_env("AESTHETIC", "URL");
     let aes_sha = get_model_env("AESTHETIC", "SHA256");
 
@@ -693,7 +705,8 @@ pub async fn get_or_init_culling_models(
         yunet_url.as_deref(),
         yunet_sha.as_deref(),
     )
-    .await.ok();
+    .await
+    .ok();
     let expr_path = ensure_model(
         app_handle,
         &models_dir,
@@ -702,8 +715,9 @@ pub async fn get_or_init_culling_models(
         expr_url.as_deref(),
         expr_sha.as_deref(),
     )
-    .await.ok();
-    
+    .await
+    .ok();
+
     let aes_path = ensure_model(
         app_handle,
         &models_dir,
@@ -712,7 +726,8 @@ pub async fn get_or_init_culling_models(
         aes_url.as_deref(),
         aes_sha.as_deref(),
     )
-    .await.ok();
+    .await
+    .ok();
 
     let _ = ort::init().with_name("AI-Culling").commit();
 
@@ -724,10 +739,14 @@ pub async fn get_or_init_culling_models(
     };
     let expression_model = if let Some(p) = expr_path {
         Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
-    } else { None };
+    } else {
+        None
+    };
     let aesthetic_model = if let Some(p) = aes_path {
         Session::builder()?.commit_from_file(p).ok().map(Mutex::new)
-    } else { None };
+    } else {
+        None
+    };
 
     crate::register_exit_handler();
 
@@ -783,10 +802,7 @@ fn softmax_1d(xs: &[f32]) -> Vec<f32> {
     if xs.is_empty() {
         return Vec::new();
     }
-    let m = xs
-        .iter()
-        .cloned()
-        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+    let m = xs.iter().cloned().fold(f32::NEG_INFINITY, |a, b| a.max(b));
     let mut exps = Vec::with_capacity(xs.len());
     let mut sum = 0.0f32;
     for &x in xs {
@@ -811,15 +827,15 @@ fn iou(a: &FaceBox, b: &FaceBox) -> f32 {
     let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
     let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
     let union = area_a + area_b - inter;
-    if union <= 0.0 {
-        0.0
-    } else {
-        inter / union
-    }
+    if union <= 0.0 { 0.0 } else { inter / union }
 }
 
 fn nms(mut boxes: Vec<FaceBox>, iou_thresh: f32) -> Vec<FaceBox> {
-    boxes.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    boxes.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut kept: Vec<FaceBox> = Vec::new();
     for b in boxes {
         if kept.iter().all(|k| iou(k, &b) < iou_thresh) {
@@ -840,15 +856,15 @@ fn iou_yunet(a: &YunetFace, b: &YunetFace) -> f32 {
     let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
     let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
     let union = area_a + area_b - inter;
-    if union <= 0.0 {
-        0.0
-    } else {
-        inter / union
-    }
+    if union <= 0.0 { 0.0 } else { inter / union }
 }
 
 fn nms_yunet(mut faces: Vec<YunetFace>, iou_thresh: f32) -> Vec<YunetFace> {
-    faces.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    faces.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut kept: Vec<YunetFace> = Vec::new();
     for f in faces {
         if kept.iter().all(|k| iou_yunet(k, &f) < iou_thresh) {
@@ -960,7 +976,11 @@ pub fn detect_faces_yolov8(
             continue;
         };
 
-        let conf = if (0.0..=1.0).contains(&conf) { conf } else { sigmoid(conf) };
+        let conf = if (0.0..=1.0).contains(&conf) {
+            conf
+        } else {
+            sigmoid(conf)
+        };
         if conf < conf_thresh {
             continue;
         }
@@ -989,7 +1009,10 @@ pub fn detect_faces_yolov8(
     Ok(nms(boxes, iou_thresh))
 }
 
-pub fn detect_faces_yunet(image: &DynamicImage, yunet_mutex: &Mutex<Session>) -> Result<Vec<YunetFace>> {
+pub fn detect_faces_yunet(
+    image: &DynamicImage,
+    yunet_mutex: &Mutex<Session>,
+) -> Result<Vec<YunetFace>> {
     let input_size: u32 = env::var("QRAW_YUNET_INPUT_SIZE")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -1080,14 +1103,14 @@ pub fn run_expression_model(
     let size = 64;
     let resized = imageops::resize(&gray, size, size, FilterType::Triangle);
     let mut arr = Array4::<f32>::zeros((1, 1, size as usize, size as usize));
-    
+
     for (x, y, p) in resized.enumerate_pixels() {
         arr[[0, 0, y as usize, x as usize]] = p[0] as f32; // FERPlus uses 0-255 grayscale
     }
 
     let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
     let mut last_err: Option<anyhow::Error> = None;
-    
+
     let out_dyns = {
         let mut session = expression_mutex.lock().unwrap();
         match session.run(ort::inputs!["Input3" => input_val]) {
@@ -1120,7 +1143,7 @@ pub fn run_expression_model(
 
     // 0: neutral, 1: happiness, 2: surprise, 3: sadness, 4: anger, 5: disgust, 6: fear, 7: contempt
     let smile_prob = probs[1];
-    
+
     // Define unnatural as negative emotions that look awkward in typical portrait photography
     let mut unnatural_prob = probs[3] + probs[4] + probs[5] + probs[6] + probs[7];
 
@@ -1131,13 +1154,13 @@ pub fn run_expression_model(
             entropy -= p * p.ln();
         }
     }
-    
-    // Max entropy for 8 classes is ln(8) ≈ 2.079. 
+
+    // Max entropy for 8 classes is ln(8) ≈ 2.079.
     // If entropy > 1.2, it's very ambiguous.
     if entropy > 1.2 && !entropy.is_nan() {
         unnatural_prob += (entropy - 1.2) * 0.5;
     }
-    
+
     // Add surprise penalty if it's awkward (surprise but no smile/happiness)
     if probs[2] > 0.4 && probs[1] < 0.2 {
         unnatural_prob += probs[2] * 0.5;
@@ -1147,7 +1170,7 @@ pub fn run_expression_model(
         unnatural_prob = 0.0;
     }
     unnatural_prob = unnatural_prob.clamp(0.0, 1.0);
-    
+
     // We cannot detect blink with this model. Fallback to 0.
     let blink_prob = 0.0;
 

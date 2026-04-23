@@ -6,11 +6,7 @@ use super::types::{FaceAnalysis, SceneType};
 
 /// Score composition using 10 rules (0.0 ~ 1.0)
 /// Rules 1-5: face-dependent, Rules 6-10: general
-pub fn score_composition(
-    gray: &GrayImage,
-    faces: &[FaceAnalysis],
-    scene: &SceneType,
-) -> f64 {
+pub fn score_composition(gray: &GrayImage, faces: &[FaceAnalysis], scene: &SceneType) -> f64 {
     let mut score: f64 = 0.5;
     let (w, h) = gray.dimensions();
     let wf = w as f32;
@@ -20,17 +16,24 @@ pub fn score_composition(
     if let Some(face) = faces.first() {
         let cx = (face.bbox.0 + face.bbox.2) / 2.0;
         let cy = (face.bbox.1 + face.bbox.3) / 2.0;
-        let dx = [wf / 3.0, wf * 2.0 / 3.0].iter()
-            .map(|t| (cx - t).abs()).fold(f32::MAX, f32::min);
-        let dy = [hf / 3.0, hf * 2.0 / 3.0].iter()
-            .map(|t| (cy - t).abs()).fold(f32::MAX, f32::min);
+        let dx = [wf / 3.0, wf * 2.0 / 3.0]
+            .iter()
+            .map(|t| (cx - t).abs())
+            .fold(f32::MAX, f32::min);
+        let dy = [hf / 3.0, hf * 2.0 / 3.0]
+            .iter()
+            .map(|t| (cy - t).abs())
+            .fold(f32::MAX, f32::min);
         if dx < wf * 0.1 || dy < hf * 0.1 {
             score += 0.08;
         }
     }
 
     // ── Rule 2: Edge cropping penalty ──
-    if faces.iter().any(|f| f.is_edge_cropped && f.area_ratio > 0.05) {
+    if faces
+        .iter()
+        .any(|f| f.is_edge_cropped && f.area_ratio > 0.05)
+    {
         score -= 0.15;
     }
 
@@ -58,9 +61,11 @@ pub fn score_composition(
 
     // ── Rule 5: Multi-face balance ──
     if faces.len() >= 2 {
-        let mean_x: f32 = faces.iter()
+        let mean_x: f32 = faces
+            .iter()
             .map(|f| (f.bbox.0 + f.bbox.2) / 2.0)
-            .sum::<f32>() / faces.len() as f32;
+            .sum::<f32>()
+            / faces.len() as f32;
         if (mean_x - wf / 2.0).abs() / (wf / 2.0) < 0.15 {
             score += 0.05;
         }
@@ -145,7 +150,9 @@ fn compute_visual_center(gray: &GrayImage) -> (f64, f64) {
             total += weight;
         }
     }
-    if total < 1.0 { return (0.5, 0.5); }
+    if total < 1.0 {
+        return (0.5, 0.5);
+    }
     (sum_x / total / w as f64, sum_y / total / h as f64)
 }
 
@@ -163,13 +170,17 @@ fn region_variance(gray: &GrayImage, x: u32, y: u32, w: u32, h: u32) -> f64 {
             count += 1;
         }
     }
-    if count == 0 { return 0.0; }
+    if count == 0 {
+        return 0.0;
+    }
     let mean = sum / count as f64;
     (sum_sq / count as f64 - mean * mean).max(0.0)
 }
 
 fn find_dominant_tilt(lines: &[imageproc::hough::PolarLine]) -> Option<f32> {
-    if lines.is_empty() { return None; }
+    if lines.is_empty() {
+        return None;
+    }
     // Find the line with most votes
     // PolarLine has angle_in_degrees (u32) and r (f32)
     // We look for deviation from horizontal (0/180) or vertical (90/270)

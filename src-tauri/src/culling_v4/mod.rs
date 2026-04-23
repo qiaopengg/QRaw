@@ -17,7 +17,7 @@ use std::time::Instant;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::ai_processing::{get_or_init_clip_models, ClipModels};
+use crate::ai_processing::{ClipModels, get_or_init_clip_models};
 use crate::file_management::parse_virtual_path;
 use crate::image_processing::ImageMetadata;
 
@@ -81,33 +81,33 @@ pub async fn cull_images_v4(
     let clip_models: Option<Arc<ClipModels>> = match tokio::time::timeout(
         std::time::Duration::from_secs(2),
         get_or_init_clip_models(&app_handle, &state.ai_state, &state.ai_init_lock),
-    ).await {
+    )
+    .await
+    {
         Ok(Ok(m)) => Some(m),
         _ => None,
     };
 
     // ── Stage 1: Technical Elimination ──
     // Depth Anything: try to get from existing AiState (don't trigger download)
-    let depth_available = state.ai_state.lock().unwrap()
+    let depth_available = state
+        .ai_state
+        .lock()
+        .unwrap()
         .as_ref()
         .and_then(|s| s.models.as_ref())
         .is_some();
 
     // Depth Anything: currently None (TODO: integrate properly)
     // When available, pass a closure that runs depth inference
-    let depth_fn_ref: Option<&(dyn Fn(&image::DynamicImage) -> Option<image::GrayImage> + Sync)> = None;
+    let depth_fn_ref: Option<&(dyn Fn(&image::DynamicImage) -> Option<image::GrayImage> + Sync)> =
+        None;
 
-    let verdicts = stage1_technical::stage_1_technical(
-        &registry,
-        depth_fn_ref,
-        &settings,
-        &app_handle,
-    );
+    let verdicts =
+        stage1_technical::stage_1_technical(&registry, depth_fn_ref, &settings, &app_handle);
 
     // ── Stage 2: Burst Deduplication ──
-    let groups = stage2_dedup::stage_2_dedup(
-        &registry, &verdicts, &settings, &app_handle,
-    );
+    let groups = stage2_dedup::stage_2_dedup(&registry, &verdicts, &settings, &app_handle);
 
     // ── Stage 3: Portrait Assessment ──
     let skip_portrait_stage = !settings.enable_auto_scene
@@ -125,7 +125,14 @@ pub async fn cull_images_v4(
             ),
         );
     } else {
-        let _ = app_handle.emit("culling-debug", format!("[Stage3] Starting with {} assets, models={}", registry.assets.len(), culling_models.is_some()));
+        let _ = app_handle.emit(
+            "culling-debug",
+            format!(
+                "[Stage3] Starting with {} assets, models={}",
+                registry.assets.len(),
+                culling_models.is_some()
+            ),
+        );
     }
 
     let portraits = if skip_portrait_stage {
@@ -143,35 +150,48 @@ pub async fn cull_images_v4(
             .collect()
     } else if let Some(ref models) = culling_models {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stage3_portrait::stage_3_portrait(
-                &registry, &verdicts, models, &settings, &app_handle,
-            )
+            stage3_portrait::stage_3_portrait(&registry, &verdicts, models, &settings, &app_handle)
         }));
         match result {
             Ok(p) => {
-                let _ = app_handle.emit("culling-debug", format!("[Stage3] Completed: {} portraits", p.len()));
+                let _ = app_handle.emit(
+                    "culling-debug",
+                    format!("[Stage3] Completed: {} portraits", p.len()),
+                );
                 p
             }
             Err(e) => {
                 let msg = format!("[Stage3] PANIC: {:?}", e);
                 let _ = app_handle.emit("culling-debug", &msg);
                 eprintln!("{}", msg);
-                registry.assets.iter().enumerate().map(|(i, _)| {
-                    PortraitVerdict { asset_index: i, has_faces: false, primary_face_area_ratio: 0.0, faces: vec![], composition_score: 0.5 }
-                }).collect()
+                registry
+                    .assets
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| PortraitVerdict {
+                        asset_index: i,
+                        has_faces: false,
+                        primary_face_area_ratio: 0.0,
+                        faces: vec![],
+                        composition_score: 0.5,
+                    })
+                    .collect()
             }
         }
     } else {
         // No models available: generate empty portrait verdicts
-        registry.assets.iter().enumerate().map(|(i, _)| {
-            PortraitVerdict {
+        registry
+            .assets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| PortraitVerdict {
                 asset_index: i,
                 has_faces: false,
                 primary_face_area_ratio: 0.0,
                 faces: vec![],
                 composition_score: 0.5,
-            }
-        }).collect()
+            })
+            .collect()
     };
 
     // ── Scene Detection ──
@@ -188,12 +208,23 @@ pub async fn cull_images_v4(
     let clip_quality_scores: Vec<Option<f64>> = if let Some(ref clip) = clip_models {
         let _ = app_handle.emit(
             "culling-progress",
-            CullingProgressV4 { current: 0, total: 0, stage: "Computing quality scores...".into() },
+            CullingProgressV4 {
+                current: 0,
+                total: 0,
+                stage: "Computing quality scores...".into(),
+            },
         );
-        registry.assets.iter().enumerate().map(|(i, asset)| {
-            if verdicts[i].is_fail() { return None; }
-            clip_quality::compute_clip_quality(&*asset.thumbnail, clip)
-        }).collect()
+        registry
+            .assets
+            .iter()
+            .enumerate()
+            .map(|(i, asset)| {
+                if verdicts[i].is_fail() {
+                    return None;
+                }
+                clip_quality::compute_clip_quality(&*asset.thumbnail, clip)
+            })
+            .collect()
     } else {
         vec![None; registry.assets.len()]
     };
@@ -205,10 +236,17 @@ pub async fn cull_images_v4(
     } else {
         if let Some(ref models) = culling_models {
             if let Some(ref nima_model) = models.nima_aesthetic {
-                registry.assets.iter().enumerate().map(|(i, asset)| {
-                    if verdicts[i].is_fail() { return None; }
-                    score_nima_nhwc(&*asset.thumbnail, nima_model).ok()
-                }).collect()
+                registry
+                    .assets
+                    .iter()
+                    .enumerate()
+                    .map(|(i, asset)| {
+                        if verdicts[i].is_fail() {
+                            return None;
+                        }
+                        score_nima_nhwc(&*asset.thumbnail, nima_model).ok()
+                    })
+                    .collect()
             } else {
                 vec![None; registry.assets.len()]
             }
@@ -220,16 +258,36 @@ pub async fn cull_images_v4(
     // ── Stage 4: Final Scoring ──
     let _ = app_handle.emit(
         "culling-progress",
-        CullingProgressV4 { current: 0, total: 0, stage: "Computing final ratings...".into() },
+        CullingProgressV4 {
+            current: 0,
+            total: 0,
+            stage: "Computing final ratings...".into(),
+        },
     );
 
-    let _ = app_handle.emit("culling-debug", format!("[Stage4] Starting scoring for {} assets, scene={}", registry.assets.len(), scene));
+    let _ = app_handle.emit(
+        "culling-debug",
+        format!(
+            "[Stage4] Starting scoring for {} assets, scene={}",
+            registry.assets.len(),
+            scene
+        ),
+    );
     let ratings = stage4_score::stage_4_score(
-        &registry, &verdicts, &groups, &portraits,
-        &scene, &nima_aesthetic_scores, &clip_quality_scores, &settings,
+        &registry,
+        &verdicts,
+        &groups,
+        &portraits,
+        &scene,
+        &nima_aesthetic_scores,
+        &clip_quality_scores,
+        &settings,
         &app_handle,
     );
-    let _ = app_handle.emit("culling-debug", format!("[Stage4] Done: {} ratings", ratings.len()));
+    let _ = app_handle.emit(
+        "culling-debug",
+        format!("[Stage4] Done: {} ratings", ratings.len()),
+    );
 
     // ── Persist results to .rrdata ──
     persist_ratings(&registry, &ratings, &app_handle).await;
@@ -242,12 +300,14 @@ pub async fn cull_images_v4(
         }
     }
 
-    let duplicates_count: usize = groups.iter()
+    let duplicates_count: usize = groups
+        .iter()
         .map(|g| g.members.len().saturating_sub(1))
         .sum();
 
     let technical_failures = verdicts.iter().filter(|v| v.is_fail()).count();
-    let blink_detected = portraits.iter()
+    let blink_detected = portraits
+        .iter()
         .filter(|p| p.faces.iter().any(|f| f.is_eye_closed))
         .count();
 
@@ -319,11 +379,16 @@ fn score_nima_nhwc(
     let output = {
         let mut sess = model.lock().unwrap();
         let outputs = sess.run(ort::inputs![input]).map_err(|e| e.to_string())?;
-        outputs[0].try_extract_array::<f32>().map_err(|e| e.to_string())?.to_owned()
+        outputs[0]
+            .try_extract_array::<f32>()
+            .map_err(|e| e.to_string())?
+            .to_owned()
     };
 
     let flat = output.into_raw_vec_and_offset().0;
-    if flat.len() < 10 { return Ok(5.0); }
+    if flat.len() < 10 {
+        return Ok(5.0);
+    }
 
     // Compute weighted mean score (1-10)
     let probs = if flat.iter().all(|v| (0.0..=1.0).contains(v)) {
@@ -336,7 +401,9 @@ fn score_nima_nhwc(
         exps.into_iter().map(|e| e / sum.max(1e-8)).collect()
     };
 
-    let mean_score: f64 = probs.iter().enumerate()
+    let mean_score: f64 = probs
+        .iter()
+        .enumerate()
         .map(|(i, &p)| (i as f64 + 1.0) * p as f64)
         .sum();
 
@@ -368,15 +435,18 @@ async fn persist_ratings(
         }
         if let Some(map) = adjustments.as_object_mut() {
             map.insert("rating".to_string(), json!(rating.stars));
-            map.insert("aiCulling".to_string(), json!({
-                "version": 4,
-                "stars": rating.stars,
-                "qualityScore": rating.quality_score,
-                "reasons": rating.reasons,
-                "breakdown": rating.breakdown,
-                "groupId": rating.breakdown.group_id,
-                "isCover": rating.breakdown.is_cover,
-            }));
+            map.insert(
+                "aiCulling".to_string(),
+                json!({
+                    "version": 4,
+                    "stars": rating.stars,
+                    "qualityScore": rating.quality_score,
+                    "reasons": rating.reasons,
+                    "breakdown": rating.breakdown,
+                    "groupId": rating.breakdown.group_id,
+                    "isCover": rating.breakdown.is_cover,
+                }),
+            );
         }
         metadata.adjustments = adjustments;
         metadata.rating = rating.stars;
@@ -398,7 +468,9 @@ async fn persist_ratings(
             };
             jpeg_meta.rating = rating.stars;
             let mut adj = jpeg_meta.adjustments;
-            if adj.is_null() { adj = json!({}); }
+            if adj.is_null() {
+                adj = json!({});
+            }
             if let Some(map) = adj.as_object_mut() {
                 map.insert("rating".to_string(), json!(rating.stars));
             }
@@ -410,16 +482,21 @@ async fn persist_ratings(
     }
 
     // Batch update ratings via existing mechanism
-    let mut by_rating: std::collections::HashMap<u8, Vec<String>> = std::collections::HashMap::new();
+    let mut by_rating: std::collections::HashMap<u8, Vec<String>> =
+        std::collections::HashMap::new();
     for rating in ratings {
-        by_rating.entry(rating.stars).or_default().push(rating.path.clone());
+        by_rating
+            .entry(rating.stars)
+            .or_default()
+            .push(rating.path.clone());
     }
     for (star, paths) in by_rating {
         let _ = crate::file_management::apply_adjustments_to_paths(
             paths,
             json!({ "rating": star }),
             app_handle.clone(),
-        ).await;
+        )
+        .await;
     }
 }
 
@@ -460,26 +537,46 @@ fn build_legacy_suggestions(
         }
     };
 
-    let similar_groups: Vec<LegacyCullGroup> = groups.iter().map(|g| {
-        let cover_rating = &ratings[g.cover_index];
-        let representative = to_legacy(g.cover_index, cover_rating);
-        let duplicates: Vec<LegacyImageAnalysisResult> = g.members.iter()
-            .filter(|m| !m.is_cover)
-            .map(|m| to_legacy(m.asset_index, &ratings[m.asset_index]))
-            .collect();
-        LegacyCullGroup { representative, duplicates }
-    }).collect();
+    let similar_groups: Vec<LegacyCullGroup> = groups
+        .iter()
+        .map(|g| {
+            let cover_rating = &ratings[g.cover_index];
+            let representative = to_legacy(g.cover_index, cover_rating);
+            let duplicates: Vec<LegacyImageAnalysisResult> = g
+                .members
+                .iter()
+                .filter(|m| !m.is_cover)
+                .map(|m| to_legacy(m.asset_index, &ratings[m.asset_index]))
+                .collect();
+            LegacyCullGroup {
+                representative,
+                duplicates,
+            }
+        })
+        .collect();
 
-    let blurry_images: Vec<LegacyImageAnalysisResult> = ratings.iter().enumerate()
-        .filter(|(_, r)| r.reasons.iter().any(|reason| reason.contains("Blur") || reason.contains("blur")))
+    let blurry_images: Vec<LegacyImageAnalysisResult> = ratings
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            r.reasons
+                .iter()
+                .any(|reason| reason.contains("Blur") || reason.contains("blur"))
+        })
         .map(|(i, r)| to_legacy(i, r))
         .collect();
 
-    let bad_expressions: Vec<LegacyImageAnalysisResult> = ratings.iter().enumerate()
-        .filter(|(_, r)| r.reasons.iter().any(|reason|
-            reason == "eyesClosed" || reason == "mouthWideOpen" ||
-            reason == "negativeExpression" || reason == "unnaturalExpression"
-        ))
+    let bad_expressions: Vec<LegacyImageAnalysisResult> = ratings
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            r.reasons.iter().any(|reason| {
+                reason == "eyesClosed"
+                    || reason == "mouthWideOpen"
+                    || reason == "negativeExpression"
+                    || reason == "unnaturalExpression"
+            })
+        })
         .map(|(i, r)| to_legacy(i, r))
         .collect();
 

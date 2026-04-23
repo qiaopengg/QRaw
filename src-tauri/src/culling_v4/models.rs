@@ -4,8 +4,8 @@ use anyhow::Result;
 use ort::session::Session;
 use tauri::AppHandle;
 
-use crate::ai_processing::{ensure_model, get_qraw_models_dir};
 use super::types::CullingModelsV4;
+use crate::ai_processing::{ensure_model, get_qraw_models_dir};
 
 const FACE_DETECTOR_FILENAME: &str = "yolov8n-face.onnx";
 const YUNET_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
@@ -16,15 +16,24 @@ const FERPLUS_URL: &str = "https://github.com/onnx/models/raw/main/validated/vis
 const FERPLUS_SHA256: &str = "a2a2ba6a335a3b29c21acb6272f962bd3d47f84952aaffa03b60986e04efa61c";
 const NIMA_AESTHETIC_FILENAME: &str = "nima.onnx";
 const LANDMARK_106_FILENAME: &str = "2d106det.onnx";
-const LANDMARK_106_URL: &str = "https://huggingface.co/fofr/comfyui/resolve/main/insightface/models/buffalo_l/2d106det.onnx";
+const LANDMARK_106_URL: &str =
+    "https://huggingface.co/fofr/comfyui/resolve/main/insightface/models/buffalo_l/2d106det.onnx";
 const HSEMOTION_FILENAME: &str = "hsemotion.onnx";
 const NIMA_TECHNICAL_FILENAME: &str = "nima_technical.onnx";
 
 fn try_load(path: &std::path::Path, name: &str) -> Option<Session> {
-    if !path.exists() { return None; }
+    if !path.exists() {
+        return None;
+    }
     match Session::builder().and_then(|b| b.commit_from_file(path)) {
-        Ok(s) => { log::info!("Loaded {}", name); Some(s) }
-        Err(e) => { log::warn!("Failed to load {}: {}", name, e); None }
+        Ok(s) => {
+            log::info!("Loaded {}", name);
+            Some(s)
+        }
+        Err(e) => {
+            log::warn!("Failed to load {}: {}", name, e);
+            None
+        }
     }
 }
 
@@ -33,7 +42,16 @@ pub async fn get_or_init_culling_models_v4(app_handle: &AppHandle) -> Result<Arc
     let _ = ort::init().with_name("AI-CullingV4").commit();
 
     // ── YuNet (primary face detector, auto-download) ──
-    let yunet_detector = match ensure_model(app_handle, &dir, YUNET_FILENAME, "YUNET", Some(YUNET_URL), Some(YUNET_SHA256)).await {
+    let yunet_detector = match ensure_model(
+        app_handle,
+        &dir,
+        YUNET_FILENAME,
+        "YUNET",
+        Some(YUNET_URL),
+        Some(YUNET_SHA256),
+    )
+    .await
+    {
         Ok(p) => try_load(&p, "YuNet").map(Mutex::new),
         Err(_) => None,
     };
@@ -53,7 +71,16 @@ pub async fn get_or_init_culling_models_v4(app_handle: &AppHandle) -> Result<Arc
     };
 
     // ── FerPlus (auto-download) ──
-    let ferplus = match ensure_model(app_handle, &dir, FERPLUS_FILENAME, "EXPRESSION", Some(FERPLUS_URL), Some(FERPLUS_SHA256)).await {
+    let ferplus = match ensure_model(
+        app_handle,
+        &dir,
+        FERPLUS_FILENAME,
+        "EXPRESSION",
+        Some(FERPLUS_URL),
+        Some(FERPLUS_SHA256),
+    )
+    .await
+    {
         Ok(p) => try_load(&p, "FerPlus"),
         Err(_) => None,
     };
@@ -63,16 +90,27 @@ pub async fn get_or_init_culling_models_v4(app_handle: &AppHandle) -> Result<Arc
     let expression_model = hsemotion.or(ferplus).map(Mutex::new);
 
     // ── 106-point landmark (auto-download) ──
-    let landmark_106 = match ensure_model(app_handle, &dir, LANDMARK_106_FILENAME, "LANDMARK_106", Some(LANDMARK_106_URL), None).await {
+    let landmark_106 = match ensure_model(
+        app_handle,
+        &dir,
+        LANDMARK_106_FILENAME,
+        "LANDMARK_106",
+        Some(LANDMARK_106_URL),
+        None,
+    )
+    .await
+    {
         Ok(p) => try_load(&p, "2d106det").map(Mutex::new),
         Err(_) => None,
     };
 
     // ── NIMA Aesthetic (loaded if present) ──
-    let nima_aesthetic = try_load(&dir.join(NIMA_AESTHETIC_FILENAME), "NIMA-Aesthetic").map(Mutex::new);
+    let nima_aesthetic =
+        try_load(&dir.join(NIMA_AESTHETIC_FILENAME), "NIMA-Aesthetic").map(Mutex::new);
 
     // ── NIMA Technical (loaded if present) ──
-    let nima_technical = try_load(&dir.join(NIMA_TECHNICAL_FILENAME), "NIMA-Technical").map(Mutex::new);
+    let nima_technical =
+        try_load(&dir.join(NIMA_TECHNICAL_FILENAME), "NIMA-Technical").map(Mutex::new);
 
     crate::register_exit_handler();
 

@@ -25,6 +25,7 @@ mod panorama_utils;
 mod preset_converter;
 mod raw_processing;
 mod style_transfer;
+mod style_transfer_models;
 mod style_transfer_runtime;
 mod tagging;
 mod tagging_utils;
@@ -5187,6 +5188,8 @@ pub fn run() {
             tagging::remove_tag_for_paths,
             llm_chat::chat_adjust,
             style_transfer::analyze_style_transfer,
+            style_transfer_models::get_style_transfer_model_status,
+            style_transfer_models::prepare_style_transfer_models,
             style_transfer_runtime::run_style_transfer,
             culling::cull_images,
             culling_v4::cull_images_v4,

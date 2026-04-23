@@ -8,6 +8,26 @@ export const STYLE_TRANSFER_PRESET_OPTIONS = [
 
 export type StyleTransferRequestMode = 'analysis';
 export type StyleTransferPreset = (typeof STYLE_TRANSFER_PRESET_OPTIONS)[number]['value'];
+export type StyleTransferStrategyMode = 'safe' | 'strong';
+
+export interface StyleTransferModelArtifactStatus {
+  id: string;
+  name: string;
+  filename: string;
+  role: string;
+  required: boolean;
+  ready: boolean;
+  path?: string;
+  bytes?: number;
+}
+
+export interface StyleTransferModelStatusResponse {
+  modelDir: string;
+  requiredReady: boolean;
+  readyCount: number;
+  requiredCount: number;
+  models: StyleTransferModelArtifactStatus[];
+}
 
 export interface AdjustmentSuggestion {
   key: string;
@@ -28,8 +48,10 @@ export interface StyleTransferExecutionMeta {
   resolvedMode: string;
   engine: string;
   preset: string;
+  strategyMode: string;
   stage: string;
   expectedWaitRange: string;
+  referenceCount: number;
 }
 
 export interface StyleTransferProgressState {
@@ -167,6 +189,7 @@ export interface ChatAdjustResponse {
   style_debug?: StyleDebugInfo;
   constraint_debug?: ConstraintDebugInfo;
   executionMeta?: StyleTransferExecutionMeta;
+  modelStatus?: StyleTransferModelStatusResponse;
   outputImagePath?: string;
   previewImagePath?: string;
   pureGenerationImagePath?: string;
@@ -187,9 +210,13 @@ export interface ChatMessage {
   previewImagePath?: string;
   pureGenerationImagePath?: string;
   postProcessedImagePath?: string;
+  modelStatus?: StyleTransferModelStatusResponse;
   referencePath?: string;
+  mainReferencePath?: string;
+  auxReferencePaths?: string[];
   sourceImagePath?: string;
   requestedMode?: StyleTransferRequestMode;
+  strategyMode?: StyleTransferStrategyMode;
   styleTransferProgress?: StyleTransferProgressState;
   previewWorkflowState?: StyleTransferPreviewWorkflowState;
   qualityGuardPassed?: boolean;

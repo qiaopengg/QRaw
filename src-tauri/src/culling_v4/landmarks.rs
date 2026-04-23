@@ -83,22 +83,30 @@ pub fn run_landmark_106(
     let output = {
         let mut sess = model.lock().unwrap();
         let outputs = sess.run(ort::inputs![input]).map_err(|e| e.to_string())?;
-        outputs[0].try_extract_array::<f32>().map_err(|e| e.to_string())?.to_owned()
+        outputs[0]
+            .try_extract_array::<f32>()
+            .map_err(|e| e.to_string())?
+            .to_owned()
     };
 
     let flat = output.into_raw_vec_and_offset().0;
     if flat.len() < 212 {
-        return Err(format!("Landmark output too short: {} (expected >= 212)", flat.len()));
+        return Err(format!(
+            "Landmark output too short: {} (expected >= 212)",
+            flat.len()
+        ));
     }
 
     // De-normalize to original image coordinates
     let crop_w = (x2 - x1) as f32;
     let crop_h = (y2 - y1) as f32;
-    let landmarks: Vec<(f32, f32)> = (0..106).map(|i| {
-        let lx = flat[i * 2] * crop_w + x1 as f32;
-        let ly = flat[i * 2 + 1] * crop_h + y1 as f32;
-        (lx, ly)
-    }).collect();
+    let landmarks: Vec<(f32, f32)> = (0..106)
+        .map(|i| {
+            let lx = flat[i * 2] * crop_w + x1 as f32;
+            let ly = flat[i * 2 + 1] * crop_h + y1 as f32;
+            (lx, ly)
+        })
+        .collect();
 
     Ok(landmarks)
 }
@@ -183,7 +191,9 @@ pub fn compute_ear_106(landmarks: &[(f32, f32)], eye_start: usize) -> f64 {
 
 /// Compute mouth open ratio
 pub fn compute_mouth_open(landmarks: &[(f32, f32)]) -> f64 {
-    if landmarks.len() <= MOUTH_LOWER_LIP_MID { return 0.0; }
+    if landmarks.len() <= MOUTH_LOWER_LIP_MID {
+        return 0.0;
+    }
 
     let upper = landmarks[MOUTH_UPPER_LIP_MID];
     let lower = landmarks[MOUTH_LOWER_LIP_MID];
@@ -192,19 +202,29 @@ pub fn compute_mouth_open(landmarks: &[(f32, f32)]) -> f64 {
 
     let vertical = dist(upper, lower);
     let horizontal = dist(left, right);
-    if horizontal < 1e-6 { 0.0 } else { vertical / horizontal }
+    if horizontal < 1e-6 {
+        0.0
+    } else {
+        vertical / horizontal
+    }
 }
 
 /// Compute brow furrow (how close eyebrows are to eyes)
 pub fn compute_brow_furrow(landmarks: &[(f32, f32)]) -> f64 {
-    if landmarks.len() <= LEFT_EYE_TOP_MID { return 0.0; }
+    if landmarks.len() <= LEFT_EYE_TOP_MID {
+        return 0.0;
+    }
 
     let brow = landmarks[LEFT_BROW_MID];
     let eye_top = landmarks[LEFT_EYE_TOP_MID];
 
-    if landmarks.len() <= FACE_CHIN { return 0.0; }
+    if landmarks.len() <= FACE_CHIN {
+        return 0.0;
+    }
     let face_height = dist(landmarks[FACE_TOP], landmarks[FACE_CHIN]);
-    if face_height < 1e-6 { return 0.0; }
+    if face_height < 1e-6 {
+        return 0.0;
+    }
 
     let brow_eye_dist = dist(brow, eye_top);
     // Smaller distance = more furrowed
@@ -213,7 +233,9 @@ pub fn compute_brow_furrow(landmarks: &[(f32, f32)]) -> f64 {
 
 /// Compute mouth corner droop
 pub fn compute_mouth_corner_droop(landmarks: &[(f32, f32)]) -> f64 {
-    if landmarks.len() <= MOUTH_LOWER_LIP_MID { return 0.0; }
+    if landmarks.len() <= MOUTH_LOWER_LIP_MID {
+        return 0.0;
+    }
 
     let left_corner = landmarks[MOUTH_LEFT_CORNER];
     let right_corner = landmarks[MOUTH_RIGHT_CORNER];

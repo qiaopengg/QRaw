@@ -374,6 +374,8 @@ export default function ChatPanel({
     enableStyleTransferVlm,
     handleStyleTransfer,
     highlightGuardInput,
+    isPreparingStyleTransferModels,
+    prepareStyleTransferModels,
     pureStyleTransfer,
     saveStyleTransferConfig,
     setEnableStyleTransferAutoRefine,
@@ -387,7 +389,10 @@ export default function ChatPanel({
     setStyleStrengthInput,
     skinProtectInput,
     styleStrengthInput,
+    styleTransferModelStatus,
     styleTransferPreset,
+    styleTransferStrategyMode,
+    updateStyleTransferStrategyMode,
     updateStyleTransferPreset,
   } = useStyleTransfer({
     activeModel,
@@ -507,8 +512,13 @@ export default function ChatPanel({
             setSkinProtectInput={setSkinProtectInput}
             setStyleStrengthInput={setStyleStrengthInput}
             skinProtectInput={skinProtectInput}
+            isPreparingStyleTransferModels={isPreparingStyleTransferModels}
+            prepareStyleTransferModels={prepareStyleTransferModels}
             styleStrengthInput={styleStrengthInput}
+            styleTransferModelStatus={styleTransferModelStatus}
             styleTransferPreset={styleTransferPreset}
+            styleTransferStrategyMode={styleTransferStrategyMode}
+            updateStyleTransferStrategyMode={updateStyleTransferStrategyMode}
             updateStyleTransferPreset={updateStyleTransferPreset}
           />
           {messages.length > 0 && (

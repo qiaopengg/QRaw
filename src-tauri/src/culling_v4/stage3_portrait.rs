@@ -1,7 +1,7 @@
 use image::{DynamicImage, GenericImageView, imageops};
 use tauri::{AppHandle, Emitter};
 
-use crate::ai_processing::{detect_faces_yunet, detect_faces_yolov8, run_expression_model};
+use crate::ai_processing::{detect_faces_yolov8, detect_faces_yunet, run_expression_model};
 
 use super::composition::score_composition;
 use super::landmarks::*;
@@ -61,15 +61,21 @@ pub fn stage_3_portrait(
         // Scale face boxes back to thumbnail coordinates
         let scale_x = width as f32 / det_w as f32;
         let scale_y = height as f32 / det_h as f32;
-        let face_boxes: Vec<(f32,f32,f32,f32)> = face_boxes_raw.into_iter()
-            .map(|(x1,y1,x2,y2)| (x1*scale_x, y1*scale_y, x2*scale_x, y2*scale_y))
+        let face_boxes: Vec<(f32, f32, f32, f32)> = face_boxes_raw
+            .into_iter()
+            .map(|(x1, y1, x2, y2)| (x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y))
             .collect();
 
-        let _ = app_handle.emit("culling-debug", format!(
-            "[Stage3] {} → raw_faces={} img={}x{}",
-            asset.path.split('/').last().unwrap_or(&asset.path),
-            face_boxes.len(), width, height
-        ));
+        let _ = app_handle.emit(
+            "culling-debug",
+            format!(
+                "[Stage3] {} → raw_faces={} img={}x{}",
+                asset.path.split('/').last().unwrap_or(&asset.path),
+                face_boxes.len(),
+                width,
+                height
+            ),
+        );
 
         // Filter: area > 1%, take top 3
         let face_candidates: Vec<((f32, f32, f32, f32), f64)> = face_boxes
@@ -177,9 +183,14 @@ pub fn stage_3_portrait(
             let debug_msg = format!(
                 "[Stage3] {} face: area={:.3} ear_l={:.3} ear_r={:.3} closed={} smile={:.3} neg={:.3} emotion={} profile={}",
                 asset.path.split('/').last().unwrap_or(&asset.path),
-                analysis.area_ratio, analysis.ear_left, analysis.ear_right,
-                analysis.is_eye_closed, analysis.smile_prob, analysis.negative_emotion_prob,
-                analysis.emotion_label, analysis.is_extreme_profile
+                analysis.area_ratio,
+                analysis.ear_left,
+                analysis.ear_right,
+                analysis.is_eye_closed,
+                analysis.smile_prob,
+                analysis.negative_emotion_prob,
+                analysis.emotion_label,
+                analysis.is_extreme_profile
             );
             let _ = app_handle.emit("culling-debug", &debug_msg);
 
@@ -208,7 +219,9 @@ fn detect_faces_yunet_multi_output(
     yunet: &std::sync::Mutex<ort::session::Session>,
 ) -> Vec<(f32, f32, f32, f32, f32)> {
     let (img_w, img_h) = img.dimensions();
-    if img_w == 0 || img_h == 0 { return vec![]; }
+    if img_w == 0 || img_h == 0 {
+        return vec![];
+    }
 
     let input_size = 640u32;
     let rgb = img.to_rgb8();
@@ -222,10 +235,11 @@ fn detect_faces_yunet_multi_output(
         arr[[0, 2, y as usize, x as usize]] = p[2] as f32;
     }
 
-    let input = match ort::value::Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned()) {
-        Ok(t) => t,
-        Err(_) => return vec![],
-    };
+    let input =
+        match ort::value::Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned()) {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        };
 
     let raw_outputs: Vec<(String, Vec<f32>, Vec<usize>)> = {
         let mut sess = yunet.lock().unwrap();
@@ -234,7 +248,10 @@ fn detect_faces_yunet_multi_output(
             Err(_) => return vec![],
         };
         let mut result = vec![];
-        let names = ["cls_8","cls_16","cls_32","obj_8","obj_16","obj_32","bbox_8","bbox_16","bbox_32"];
+        let names = [
+            "cls_8", "cls_16", "cls_32", "obj_8", "obj_16", "obj_32", "bbox_8", "bbox_16",
+            "bbox_32",
+        ];
         for name in names {
             if let Some(v) = outputs.get(name) {
                 if let Ok(arr) = v.try_extract_array::<f32>() {
@@ -257,7 +274,10 @@ fn detect_faces_yunet_multi_output(
     let grid_sizes = [80u32, 40, 20]; // 640/8, 640/16, 640/32
 
     let find_output = |name: &str| -> Option<&Vec<f32>> {
-        raw_outputs.iter().find(|(n, _, _)| n == name).map(|(_, d, _)| d)
+        raw_outputs
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .map(|(_, d, _)| d)
     };
 
     let output_names = [
@@ -285,9 +305,13 @@ fn detect_faces_yunet_multi_output(
         let num_anchors = grid * grid;
 
         for i in 0..num_anchors {
-            if i >= cls.len() || i >= obj.len() { break; }
+            if i >= cls.len() || i >= obj.len() {
+                break;
+            }
             let score = cls[i] * obj[i];
-            if score < conf_thresh { continue; }
+            if score < conf_thresh {
+                continue;
+            }
 
             let row = i / grid;
             let col = i % grid;
@@ -295,7 +319,9 @@ fn detect_faces_yunet_multi_output(
             let cy = (row as f32 + 0.5) * stride;
 
             let bi = i * 4;
-            if bi + 3 >= bbox.len() { continue; }
+            if bi + 3 >= bbox.len() {
+                continue;
+            }
             let bx = bbox[bi] * stride;
             let by = bbox[bi + 1] * stride;
             let bw = bbox[bi + 2].exp() * stride;
@@ -327,7 +353,9 @@ fn detect_faces_yunet_multi_output(
             let union = area_a + area_b - inter;
             union > 0.0 && inter / union > 0.3
         });
-        if !dominated { kept.push(*f); }
+        if !dominated {
+            kept.push(*f);
+        }
     }
     kept
 }
@@ -341,18 +369,27 @@ fn detect_faces_for_culling(
     if let Some(yunet) = &models.yunet_detector {
         let faces = detect_faces_yunet_multi_output(img, yunet);
         if !faces.is_empty() {
-            return faces.into_iter().map(|(x1, y1, x2, y2, _)| (x1, y1, x2, y2)).collect();
+            return faces
+                .into_iter()
+                .map(|(x1, y1, x2, y2, _)| (x1, y1, x2, y2))
+                .collect();
         }
         // Also try standard format as fallback
         if let Ok(faces) = detect_faces_yunet(img, yunet) {
             if !faces.is_empty() {
-                return faces.into_iter().map(|f| (f.x1, f.y1, f.x2, f.y2)).collect();
+                return faces
+                    .into_iter()
+                    .map(|f| (f.x1, f.y1, f.x2, f.y2))
+                    .collect();
             }
         }
     }
     // Fallback to YOLOv8
     if let Ok(faces) = detect_faces_yolov8(img, &models.face_detector) {
-        return faces.into_iter().map(|f| (f.x1, f.y1, f.x2, f.y2)).collect();
+        return faces
+            .into_iter()
+            .map(|f| (f.x1, f.y1, f.x2, f.y2))
+            .collect();
     }
     vec![]
 }
@@ -382,8 +419,8 @@ fn crop_face_for_expression(
         return img.clone();
     }
 
-    let crop = imageops::crop_imm(img, crop_x1, crop_y1, crop_x2 - crop_x1, crop_y2 - crop_y1)
-        .to_image();
+    let crop =
+        imageops::crop_imm(img, crop_x1, crop_y1, crop_x2 - crop_x1, crop_y2 - crop_y1).to_image();
     DynamicImage::ImageRgba8(crop)
 }
 
@@ -411,7 +448,10 @@ fn run_expression_model_v4(
     let output = {
         let mut sess = model.lock().unwrap();
         let outputs = sess.run(ort::inputs![input]).map_err(|e| e.to_string())?;
-        outputs[0].try_extract_array::<f32>().map_err(|e| e.to_string())?.to_owned()
+        outputs[0]
+            .try_extract_array::<f32>()
+            .map_err(|e| e.to_string())?
+            .to_owned()
     };
 
     let flat = output.into_raw_vec_and_offset().0;
@@ -421,9 +461,18 @@ fn run_expression_model_v4(
 
     let probs = softmax(&flat[..8]);
     let labels = [
-        "anger", "contempt", "disgust", "fear", "happiness", "neutral", "sadness", "surprise",
+        "anger",
+        "contempt",
+        "disgust",
+        "fear",
+        "happiness",
+        "neutral",
+        "sadness",
+        "surprise",
     ];
-    let max_idx = probs.iter().enumerate()
+    let max_idx = probs
+        .iter()
+        .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
         .map(|(i, _)| i)
         .unwrap_or(5);
@@ -440,11 +489,15 @@ fn run_expression_model_v4(
 }
 
 fn softmax(xs: &[f32]) -> Vec<f32> {
-    if xs.is_empty() { return vec![]; }
+    if xs.is_empty() {
+        return vec![];
+    }
     let max = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = xs.iter().map(|&x| (x - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
-    if sum <= 0.0 { return vec![0.0; xs.len()]; }
+    if sum <= 0.0 {
+        return vec![0.0; xs.len()];
+    }
     exps.into_iter().map(|e| e / sum).collect()
 }
 

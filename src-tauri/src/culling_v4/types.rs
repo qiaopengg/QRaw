@@ -64,15 +64,21 @@ impl TechnicalVerdict {
 
     pub fn subject_sharpness_or(&self, default: f64) -> f64 {
         match self {
-            TechnicalVerdict::Pass { subject_sharpness, .. } => *subject_sharpness,
+            TechnicalVerdict::Pass {
+                subject_sharpness, ..
+            } => *subject_sharpness,
             _ => default,
         }
     }
 
     pub fn exposure_health_or(&self, default: f64) -> f64 {
         match self {
-            TechnicalVerdict::Pass { exposure_health, .. } => *exposure_health,
-            TechnicalVerdict::Marginal { exposure_health, .. } => *exposure_health,
+            TechnicalVerdict::Pass {
+                exposure_health, ..
+            } => *exposure_health,
+            TechnicalVerdict::Marginal {
+                exposure_health, ..
+            } => *exposure_health,
             _ => default,
         }
     }
@@ -260,12 +266,24 @@ pub struct CullingSettingsV4 {
     pub strictness: String, // "conservative" | "balanced" | "aggressive"
 }
 
-fn default_blur_threshold() -> f64 { 100.0 }
-fn default_similarity_threshold() -> u32 { 28 }
-fn default_ear_threshold() -> f64 { 0.20 }
-fn default_true() -> bool { true }
-fn default_scene() -> SceneType { SceneType::Default }
-fn default_strictness() -> String { "balanced".to_string() }
+fn default_blur_threshold() -> f64 {
+    100.0
+}
+fn default_similarity_threshold() -> u32 {
+    28
+}
+fn default_ear_threshold() -> f64 {
+    0.20
+}
+fn default_true() -> bool {
+    true
+}
+fn default_scene() -> SceneType {
+    SceneType::Default
+}
+fn default_strictness() -> String {
+    "balanced".to_string()
+}
 
 impl Default for CullingSettingsV4 {
     fn default() -> Self {
@@ -318,7 +336,6 @@ pub struct CullingProgressV4 {
     pub total: usize,
     pub stage: String,
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 // Legacy-compatible types for frontend (replaces culling.rs types)

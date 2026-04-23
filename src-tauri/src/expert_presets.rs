@@ -197,4 +197,3 @@ pub fn select_expert_preset(tags: &[&'static str]) -> Option<&'static ExpertPres
 pub fn get_expert_preset_by_id(id: &str) -> Option<&'static ExpertPreset> {
     EXPERT_PRESETS.iter().find(|p| p.id == id)
 }
-
