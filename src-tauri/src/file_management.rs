@@ -457,17 +457,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub active_waveform_channel: Option<String>,
     #[serde(default)]
-    pub style_transfer_mode: Option<String>,
-    #[serde(default)]
-    pub style_transfer_service_url: Option<String>,
-    #[serde(default)]
     pub style_transfer_preset: Option<String>,
-    #[serde(default)]
-    pub style_transfer_export_format: Option<String>,
-    #[serde(default)]
-    pub style_transfer_enable_refiner: Option<bool>,
-    #[serde(default)]
-    pub style_transfer_allow_fallback: Option<bool>,
 }
 
 fn default_adjustment_visibility() -> HashMap<String, bool> {
@@ -538,12 +528,7 @@ impl Default for AppSettings {
             is_waveform_visible: Some(false),
             waveform_height: Some(220),
             active_waveform_channel: Some("luma".to_string()),
-            style_transfer_mode: Some("analysis".to_string()),
-            style_transfer_service_url: Some("http://127.0.0.1:7860".to_string()),
             style_transfer_preset: Some("artistic".to_string()),
-            style_transfer_export_format: Some("tiff".to_string()),
-            style_transfer_enable_refiner: Some(false),
-            style_transfer_allow_fallback: Some(false),
         }
     }
 }

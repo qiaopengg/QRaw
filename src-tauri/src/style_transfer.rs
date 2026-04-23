@@ -333,7 +333,12 @@ fn run_algorithm_pipeline(
         Vec::new()
     };
 
-    let matched_curves = generate_matched_curves(&ctx.ref_img, &ctx.cur_img, ctx.tuning.style_strength);
+    let matched_curves = generate_matched_curves(
+        &ctx.ref_img,
+        &ctx.cur_img,
+        current_adjustments,
+        ctx.tuning.style_strength,
+    );
     let matched_hsl = generate_matched_hsl(
         &ctx.ref_img,
         &ctx.cur_img,
@@ -2833,32 +2838,239 @@ fn build_style_debug_info(
     }
 }
 
+fn identity_curve_lut() -> [f64; 256] {
+    std::array::from_fn(|idx| idx as f64)
+}
+
+fn lut_to_curve_points(lut: &[f64; 256]) -> Vec<serde_json::Value> {
+    let mut points = Vec::with_capacity(16);
+    let mut prev_y = 0.0;
+    for step in 0..16 {
+        let x = if step == 15 { 255 } else { step * 17 };
+        let y = lut[x].max(prev_y).min(255.0);
+        prev_y = y;
+        points.push(json!({ "x": x as f64, "y": y.round() }));
+    }
+    points
+}
+
+fn clip_histogram(hist: &mut [u32; 256], ratio: f64) {
+    let total: u32 = hist.iter().sum();
+    let clip_limit = (total as f64 * ratio).max(1.0) as u32;
+    for bucket in hist.iter_mut() {
+        *bucket = (*bucket).min(clip_limit);
+    }
+}
+
+fn build_cdf(hist: &[u32; 256]) -> [f64; 256] {
+    let total: u32 = hist.iter().sum();
+    let mut cdf = [0.0; 256];
+    let mut running = 0u32;
+    for idx in 0..256 {
+        running += hist[idx];
+        cdf[idx] = running as f64 / total.max(1) as f64;
+    }
+    cdf
+}
+
+fn histogram_match_lut(
+    ref_hist: &[u32; 256],
+    cur_hist: &[u32; 256],
+    strength: f64,
+) -> [f64; 256] {
+    let mut ref_clipped = *ref_hist;
+    let mut cur_clipped = *cur_hist;
+    clip_histogram(&mut ref_clipped, 0.015);
+    clip_histogram(&mut cur_clipped, 0.015);
+    let ref_cdf = build_cdf(&ref_clipped);
+    let cur_cdf = build_cdf(&cur_clipped);
+    let mix = strength.max(0.0).min(1.0);
+    let mut lut = [0.0; 256];
+    for x in 0..256 {
+        let target_prob = cur_cdf[x];
+        let mut y = 255usize;
+        for idx in 0..256 {
+            if ref_cdf[idx] >= target_prob {
+                y = idx;
+                break;
+            }
+        }
+        lut[x] = (x as f64) * (1.0 - mix) + (y as f64) * mix;
+    }
+    lut
+}
+
+fn blend_lut(base: &[f64; 256], overlay: &[f64; 256], strength: f64) -> [f64; 256] {
+    let mix = strength.max(0.0).min(1.0);
+    let mut out = [0.0; 256];
+    for idx in 0..256 {
+        out[idx] = base[idx] * (1.0 - mix) + overlay[idx] * mix;
+    }
+    out
+}
+
+fn build_range_preserve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], preserve_ratio: f64) -> [f64; 256] {
+    let preserve = preserve_ratio.max(0.0).min(1.0);
+    let find_first = |hist: &[u32; 256]| -> usize {
+        for idx in 0..256 {
+            if hist[idx] > 0 {
+                return idx;
+            }
+        }
+        0
+    };
+    let find_last = |hist: &[u32; 256]| -> usize {
+        for idx in (0..256).rev() {
+            if hist[idx] > 0 {
+                return idx;
+            }
+        }
+        255
+    };
+    let ref_min = find_first(ref_hist) as f64;
+    let ref_max = find_last(ref_hist) as f64;
+    let cur_min = find_first(cur_hist) as f64;
+    let cur_max = find_last(cur_hist) as f64;
+    let target_min = ref_min * (1.0 - preserve) + cur_min * preserve;
+    let target_max = ref_max * (1.0 - preserve) + cur_max * preserve;
+    let cur_range = (cur_max - cur_min).max(1.0);
+    let mut lut = [0.0; 256];
+    for idx in 0..256 {
+        let normalized = ((idx as f64) - cur_min) / cur_range;
+        lut[idx] = (normalized * (target_max - target_min) + target_min).max(0.0).min(255.0);
+    }
+    lut
+}
+
+fn build_contrast_micro_curve_lut(ref_hist: &[u32; 256], cur_hist: &[u32; 256], strength: f64) -> [f64; 256] {
+    let ref_cdf = build_cdf(ref_hist);
+    let cur_cdf = build_cdf(cur_hist);
+    let find_quantile = |cdf: &[f64; 256], q: f64| -> usize {
+        for idx in 0..256 {
+            if cdf[idx] >= q {
+                return idx;
+            }
+        }
+        255
+    };
+    let ref_spread = find_quantile(&ref_cdf, 0.90) as f64 - find_quantile(&ref_cdf, 0.10) as f64;
+    let cur_spread = find_quantile(&cur_cdf, 0.90) as f64 - find_quantile(&cur_cdf, 0.10) as f64;
+    let contrast_delta = ((ref_spread - cur_spread) / 255.0).max(-1.0).min(1.0);
+    let pivot_strength = strength.max(0.0).min(1.0) * contrast_delta * 24.0;
+    let points = [
+        (0.0, 0.0),
+        (64.0, (64.0 - pivot_strength).max(0.0).min(255.0)),
+        (128.0, 128.0),
+        (192.0, (192.0 + pivot_strength).max(0.0).min(255.0)),
+        (255.0, 255.0),
+    ];
+    let mut lut = [0.0; 256];
+    for idx in 0..256 {
+        let x = idx as f64;
+        let mut y = x;
+        for window in points.windows(2) {
+            let (x0, y0) = window[0];
+            let (x1, y1) = window[1];
+            if x >= x0 && x <= x1 {
+                let t = if (x1 - x0).abs() < f64::EPSILON {
+                    0.0
+                } else {
+                    (x - x0) / (x1 - x0)
+                };
+                y = y0 * (1.0 - t) + y1 * t;
+                break;
+            }
+        }
+        lut[idx] = y.max(0.0).min(255.0);
+    }
+    lut
+}
+
+fn extract_tone_curve_lut_from_adjustments(current_adjustments: &Value) -> Option<[f64; 256]> {
+    let get_num = |key: &str| current_adjustments.get(key).and_then(|value| value.as_f64());
+    let has_curve_signal = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks"]
+        .iter()
+        .any(|key| current_adjustments.get(*key).is_some());
+    if !has_curve_signal {
+        return None;
+    }
+
+    let mut curve = identity_curve_lut();
+    if let Some(exposure) = get_num("exposure") {
+        let multiplier = 2.0f64.powf(exposure / 100.0);
+        for value in &mut curve {
+            *value *= multiplier;
+        }
+    }
+    if let Some(contrast) = get_num("contrast") {
+        let factor = 1.0 + contrast / 100.0;
+        for value in &mut curve {
+            *value = (*value - 128.0) * factor + 128.0;
+        }
+    }
+    if let Some(highlights) = get_num("highlights") {
+        for value in &mut curve {
+            let mask = ((*value - 192.0) / 63.0).max(0.0);
+            *value += mask * (highlights / 100.0 * 63.0);
+        }
+    }
+    if let Some(shadows) = get_num("shadows") {
+        for value in &mut curve {
+            let mask = ((64.0 - *value) / 64.0).max(0.0);
+            *value += mask * (shadows / 100.0 * 64.0);
+        }
+    }
+    if let Some(whites) = get_num("whites") {
+        for value in &mut curve {
+            let mask = ((*value - 128.0) / 127.0).max(0.0);
+            *value += mask * (whites / 100.0 * 50.0);
+        }
+    }
+    if let Some(blacks) = get_num("blacks") {
+        for value in &mut curve {
+            let mask = ((128.0 - *value) / 128.0).max(0.0);
+            *value += mask * (blacks / 100.0 * 50.0);
+        }
+    }
+    for value in &mut curve {
+        *value = value.max(0.0).min(255.0);
+    }
+    Some(curve)
+}
+
 fn generate_matched_curves(
     ref_img: &DynamicImage,
     cur_img: &DynamicImage,
+    current_adjustments: &Value,
     strength: f64,
 ) -> serde_json::Value {
     let mut curves = serde_json::Map::new();
 
-    let identity = (0..16)
-        .map(|step| {
-            let x = if step == 15 { 255 } else { step * 17 };
-            serde_json::json!({ "x": x as f64, "y": x as f64 })
-        })
-        .collect::<Vec<_>>();
+    let identity_lut = identity_curve_lut();
+    let identity = lut_to_curve_points(&identity_lut);
     curves.insert("red".to_string(), serde_json::json!(identity));
     curves.insert("green".to_string(), serde_json::json!(identity));
     curves.insert("blue".to_string(), serde_json::json!(identity));
 
-    let s = (strength.max(0.0).min(1.0)) * 0.15;
+    let s = strength.max(0.0).min(1.0);
     if s <= 1e-6 {
-        curves.insert("luma".to_string(), serde_json::json!(identity));
+        curves.insert("luma".to_string(), serde_json::json!(lut_to_curve_points(&identity_lut)));
         return serde_json::Value::Object(curves);
     }
 
     let mut ref_hist = [0u32; 256];
     let mut cur_hist = [0u32; 256];
+    let mut ref_r = [0u32; 256];
+    let mut ref_g = [0u32; 256];
+    let mut ref_b = [0u32; 256];
+    let mut cur_r = [0u32; 256];
+    let mut cur_g = [0u32; 256];
+    let mut cur_b = [0u32; 256];
+
     for p in ref_img.to_rgb8().pixels() {
+        ref_r[p[0] as usize] += 1;
+        ref_g[p[1] as usize] += 1;
+        ref_b[p[2] as usize] += 1;
         let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
             .round()
             .max(0.0)
@@ -2866,6 +3078,9 @@ fn generate_matched_curves(
         ref_hist[luma] += 1;
     }
     for p in cur_img.to_rgb8().pixels() {
+        cur_r[p[0] as usize] += 1;
+        cur_g[p[1] as usize] += 1;
+        cur_b[p[2] as usize] += 1;
         let luma = (p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
             .round()
             .max(0.0)
@@ -2873,46 +3088,48 @@ fn generate_matched_curves(
         cur_hist[luma] += 1;
     }
 
-    let ref_total: u32 = ref_hist.iter().sum();
-    let cur_total: u32 = cur_hist.iter().sum();
-    let clip_limit_ref = (ref_total as f64 * 0.015).max(1.0) as u32;
-    let clip_limit_cur = (cur_total as f64 * 0.015).max(1.0) as u32;
-    for i in 0..256 {
-        ref_hist[i] = ref_hist[i].min(clip_limit_ref);
-        cur_hist[i] = cur_hist[i].min(clip_limit_cur);
+    let weak_match_luma = histogram_match_lut(&ref_hist, &cur_hist, s * 0.18);
+    let range_preserve_luma = build_range_preserve_lut(&ref_hist, &cur_hist, 0.35);
+    let contrast_micro = build_contrast_micro_curve_lut(&ref_hist, &cur_hist, s * 0.45);
+    let mut luma_lut = blend_lut(&identity_lut, &weak_match_luma, 0.75);
+    luma_lut = blend_lut(&luma_lut, &range_preserve_luma, 0.35);
+    luma_lut = blend_lut(&luma_lut, &contrast_micro, 0.25);
+    if let Some(raw_tone_curve) = extract_tone_curve_lut_from_adjustments(current_adjustments) {
+        luma_lut = blend_lut(&luma_lut, &raw_tone_curve, 0.22);
     }
 
-    let mut ref_cdf = [0.0; 256];
-    let mut cur_cdf = [0.0; 256];
-    let mut ref_sum = 0u32;
-    let mut cur_sum = 0u32;
-    let ref_total: u32 = ref_hist.iter().sum();
-    let cur_total: u32 = cur_hist.iter().sum();
-    for i in 0..256 {
-        ref_sum += ref_hist[i];
-        cur_sum += cur_hist[i];
-        ref_cdf[i] = ref_sum as f64 / (ref_total.max(1) as f64);
-        cur_cdf[i] = cur_sum as f64 / (cur_total.max(1) as f64);
-    }
+    let red_lut = blend_lut(
+        &blend_lut(
+            &identity_lut,
+            &histogram_match_lut(&ref_r, &cur_r, s * 0.10),
+            0.70,
+        ),
+        &build_range_preserve_lut(&ref_r, &cur_r, 0.40),
+        0.25,
+    );
+    let green_lut = blend_lut(
+        &blend_lut(
+            &identity_lut,
+            &histogram_match_lut(&ref_g, &cur_g, s * 0.10),
+            0.70,
+        ),
+        &build_range_preserve_lut(&ref_g, &cur_g, 0.40),
+        0.25,
+    );
+    let blue_lut = blend_lut(
+        &blend_lut(
+            &identity_lut,
+            &histogram_match_lut(&ref_b, &cur_b, s * 0.10),
+            0.70,
+        ),
+        &build_range_preserve_lut(&ref_b, &cur_b, 0.40),
+        0.25,
+    );
 
-    let mut points = Vec::with_capacity(16);
-    let mut prev_y = 0.0;
-    for step in 0..16 {
-        let x = if step == 15 { 255 } else { step * 17 };
-        let target_prob = cur_cdf[x];
-        let mut y = 255;
-        for j in 0..256 {
-            if ref_cdf[j] >= target_prob {
-                y = j;
-                break;
-            }
-        }
-        let mut final_y = (x as f64) * (1.0 - s) + (y as f64) * s;
-        final_y = final_y.max(prev_y).min(255.0);
-        prev_y = final_y;
-        points.push(serde_json::json!({ "x": x as f64, "y": final_y.round() }));
-    }
-    curves.insert("luma".to_string(), serde_json::json!(points));
+    curves.insert("red".to_string(), json!(lut_to_curve_points(&red_lut)));
+    curves.insert("green".to_string(), json!(lut_to_curve_points(&green_lut)));
+    curves.insert("blue".to_string(), json!(lut_to_curve_points(&blue_lut)));
+    curves.insert("luma".to_string(), json!(lut_to_curve_points(&luma_lut)));
 
     serde_json::Value::Object(curves)
 }

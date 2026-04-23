@@ -367,15 +367,11 @@ export default function ChatPanel({
     setError(null);
   };
   const {
-    checkingStyleTransferService,
-    checkStyleTransferService,
-    commitStyleTransferServiceUrl,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,
     enableStyleTransferLut,
     enableStyleTransferVlm,
-    handleGenerativeExport,
     handleStyleTransfer,
     highlightGuardInput,
     pureStyleTransfer,
@@ -389,20 +385,9 @@ export default function ChatPanel({
     setPureStyleTransfer,
     setSkinProtectInput,
     setStyleStrengthInput,
-    setStyleTransferServiceUrl,
     skinProtectInput,
     styleStrengthInput,
-    styleTransferAllowFallback,
-    styleTransferEnableRefiner,
-    styleTransferExportFormat,
-    styleTransferMode,
     styleTransferPreset,
-    styleTransferServiceStatus,
-    styleTransferServiceUrl,
-    updateStyleTransferAllowFallback,
-    updateStyleTransferEnableRefiner,
-    updateStyleTransferExportFormat,
-    updateStyleTransferMode,
     updateStyleTransferPreset,
   } = useStyleTransfer({
     activeModel,
@@ -501,9 +486,6 @@ export default function ChatPanel({
             )}
           </div>
           <StyleTransferSettings
-            checkingStyleTransferService={checkingStyleTransferService}
-            checkStyleTransferService={checkStyleTransferService}
-            commitStyleTransferServiceUrl={commitStyleTransferServiceUrl}
             enableStyleTransferAutoRefine={enableStyleTransferAutoRefine}
             enableStyleTransferExpertPreset={enableStyleTransferExpertPreset}
             enableStyleTransferFeatureMapping={enableStyleTransferFeatureMapping}
@@ -524,20 +506,9 @@ export default function ChatPanel({
             setPureStyleTransfer={setPureStyleTransfer}
             setSkinProtectInput={setSkinProtectInput}
             setStyleStrengthInput={setStyleStrengthInput}
-            setStyleTransferServiceUrl={setStyleTransferServiceUrl}
             skinProtectInput={skinProtectInput}
             styleStrengthInput={styleStrengthInput}
-            styleTransferAllowFallback={styleTransferAllowFallback}
-            styleTransferEnableRefiner={styleTransferEnableRefiner}
-            styleTransferExportFormat={styleTransferExportFormat}
-            styleTransferMode={styleTransferMode}
             styleTransferPreset={styleTransferPreset}
-            styleTransferServiceStatus={styleTransferServiceStatus}
-            styleTransferServiceUrl={styleTransferServiceUrl}
-            updateStyleTransferAllowFallback={updateStyleTransferAllowFallback}
-            updateStyleTransferEnableRefiner={updateStyleTransferEnableRefiner}
-            updateStyleTransferExportFormat={updateStyleTransferExportFormat}
-            updateStyleTransferMode={updateStyleTransferMode}
             updateStyleTransferPreset={updateStyleTransferPreset}
           />
           {messages.length > 0 && (
@@ -579,27 +550,15 @@ export default function ChatPanel({
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
             <Bot size={28} className="text-text-secondary opacity-50" />
             <p className="text-xs text-text-secondary opacity-70 max-w-[180px]">{t('chat.placeholder')}</p>
-            <p className="text-[10px] text-text-secondary/60 max-w-[220px]">
-              {styleTransferMode === 'generativePreview' ? t('chat.generativeModeHint') : t('chat.analysisModeHint')}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleStyleTransfer('analysis')}
-                disabled={isLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 text-[11px] transition-colors disabled:opacity-40"
-              >
-                <ImagePlus size={12} />
-                {t('chat.styleTransferModeAnalysis')}
-              </button>
-              <button
-                onClick={() => handleStyleTransfer('generativePreview')}
-                disabled={isLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-400 text-[11px] transition-colors disabled:opacity-40"
-              >
-                <ImagePlus size={12} />
-                {t('chat.styleTransferModeGenerative')}
-              </button>
-            </div>
+            <p className="text-[10px] text-text-secondary/60 max-w-[220px]">{t('chat.analysisModeHint')}</p>
+            <button
+              onClick={() => handleStyleTransfer()}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 text-[11px] transition-colors disabled:opacity-40"
+            >
+              <ImagePlus size={12} />
+              {t('chat.importReference')}
+            </button>
           </div>
         )}
 
@@ -639,7 +598,6 @@ export default function ChatPanel({
                   onDiscardPreview={discardStyleTransferPreview}
                   isLoading={isLoading}
                   message={msg}
-                  onExport={handleGenerativeExport}
                   onShowPreview={showStyleTransferPreview}
                   onShowSource={showStyleTransferSource}
                   onToggleCompare={toggleStyleTransferCompare}
@@ -670,11 +628,7 @@ export default function ChatPanel({
             onClick={() => handleStyleTransfer()}
             disabled={isLoading}
             className="shrink-0 w-8 h-8 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-            title={`${t('chat.importReference')} · ${
-              styleTransferMode === 'generativePreview'
-                ? t('chat.styleTransferPreviewCost')
-                : t('chat.styleTransferAnalysisCost')
-            }`}
+            title={`${t('chat.importReference')} · ${t('chat.styleTransferAnalysisCost')}`}
           >
             <ImagePlus size={13} className="text-purple-400" />
           </button>

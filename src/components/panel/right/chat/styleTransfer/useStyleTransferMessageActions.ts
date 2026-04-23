@@ -228,20 +228,15 @@ export function useStyleTransferMessageActions({
         setAdjustments((prev) => mergeAdjustments(prev, updates));
       }
 
-      if (result.previewImagePath && result.executionMeta?.resolvedMode === 'generativePreview') {
-        onOpenImage?.(result.previewImagePath, {
+      const previewPath = result.previewImagePath || result.outputImagePath;
+
+      if (previewPath) {
+        onOpenImage?.(previewPath, {
           styleTransferSession: {
             mode: 'styleTransferPreview',
             sourcePath: context?.sourceImagePath || '',
-            previewPath: result.previewImagePath,
+            previewPath,
           },
-        });
-      }
-
-      if (result.outputImagePath && result.executionMeta?.resolvedMode === 'generativeExport') {
-        onOpenImage?.(result.outputImagePath, {
-          activatePanel: 'export',
-          preserveAdjustments: false,
         });
       }
 
@@ -252,27 +247,20 @@ export function useStyleTransferMessageActions({
                 ...msg,
                 content: result.understanding,
                 adjustments: result.adjustments,
-                appliedValues: Object.fromEntries(
-                  result.adjustments.map((suggestion) => [
-                    suggestion.key,
-                    suggestion.complex_value !== undefined ? suggestion.complex_value : suggestion.value,
-                  ]),
-                ),
+                appliedValues: result.adjustments.reduce<Record<string, unknown>>((acc, suggestion) => {
+                  acc[suggestion.key] =
+                    suggestion.complex_value !== undefined ? suggestion.complex_value : suggestion.value;
+                  return acc;
+                }, {}),
                 styleDebug: result.style_debug,
                 constraintDebug: result.constraint_debug ?? result.style_debug?.constraint_debug,
                 executionMeta: result.executionMeta,
-                serviceStatus: result.serviceStatus,
                 outputImagePath: result.outputImagePath,
                 previewImagePath: result.previewImagePath,
                 pureGenerationImagePath: result.pureGenerationImagePath,
                 postProcessedImagePath: result.postProcessedImagePath,
                 styleTransferProgress: undefined,
-                previewWorkflowState:
-                  result.executionMeta?.resolvedMode === 'generativePreview'
-                    ? 'preview'
-                    : result.executionMeta?.resolvedMode === 'generativeExport'
-                      ? 'exported'
-                      : msg.previewWorkflowState,
+                previewWorkflowState: previewPath ? 'preview' : msg.previewWorkflowState,
                 qualityGuardPassed: Boolean(result.previewImagePath || result.outputImagePath),
               }
             : msg,

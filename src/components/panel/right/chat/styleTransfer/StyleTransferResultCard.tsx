@@ -6,7 +6,6 @@ interface StyleTransferResultCardProps {
   onDiscardPreview(message: ChatMessage): void;
   isLoading: boolean;
   message: ChatMessage;
-  onExport(message: ChatMessage): void;
   onShowPreview(message: ChatMessage): void;
   onShowSource(message: ChatMessage): void;
   onToggleCompare(message: ChatMessage): void;
@@ -15,9 +14,8 @@ interface StyleTransferResultCardProps {
 export function StyleTransferResultCard({
   onApplyPreview,
   onDiscardPreview,
-  isLoading,
+  isLoading: _isLoading,
   message,
-  onExport,
   onShowPreview,
   onShowSource,
   onToggleCompare,
@@ -25,7 +23,7 @@ export function StyleTransferResultCard({
   const { t } = useTranslation();
   const canCompareVariants = Boolean(
     (message.pureGenerationImagePath || message.sourceImagePath) &&
-      (message.postProcessedImagePath || message.previewImagePath),
+    (message.postProcessedImagePath || message.previewImagePath),
   );
 
   if (!message.previewImagePath && !message.outputImagePath) {
@@ -35,11 +33,7 @@ export function StyleTransferResultCard({
   return (
     <div className="w-full rounded-lg border border-surface bg-surface/40 px-2 py-1.5 space-y-1">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-text-secondary">
-          {message.executionMeta?.resolvedMode === 'generativePreview'
-            ? t('chat.styleTransferPreviewReady')
-            : t('chat.styleTransferGenerated')}
-        </span>
+        <span className="text-[10px] text-text-secondary">{t('chat.styleTransferGenerated')}</span>
         <div className="flex items-center gap-3">
           {message.previewImagePath && message.sourceImagePath && (
             <>
@@ -85,17 +79,6 @@ export function StyleTransferResultCard({
               {t('chat.styleTransferEnterExportWorkflow')}
             </button>
           )}
-          {message.executionMeta?.resolvedMode === 'generativePreview' &&
-            message.referencePath &&
-            message.sourceImagePath && (
-              <button
-                onClick={() => onExport(message)}
-                disabled={isLoading}
-                className="text-[10px] text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40"
-              >
-                {t('chat.styleTransferExportAction')}
-              </button>
-            )}
         </div>
       </div>
       {message.executionMeta && (
@@ -107,16 +90,6 @@ export function StyleTransferResultCard({
               ? t('chat.styleTransferStageExport')
               : t('chat.styleTransferStageAnalysis')}{' '}
           · {t('chat.styleTransferEtaLabel')}: {message.executionMeta.expectedWaitRange}
-          {message.executionMeta.outputFormat ? ` · ${message.executionMeta.outputFormat.toUpperCase()}` : ''}
-        </div>
-      )}
-      {message.executionMeta?.usedFallback && (
-        <div className="text-[9px] text-amber-300/90">{t('chat.styleTransferFallbackUsed')}</div>
-      )}
-      {message.serviceStatus?.status && (
-        <div className="text-[9px] text-text-secondary/70">
-          {t('chat.styleTransferServiceStatusLabel')}: {message.serviceStatus.status}
-          {message.serviceStatus.detail ? ` · ${message.serviceStatus.detail}` : ''}
         </div>
       )}
       {(message.previewWorkflowState || message.qualityGuardPassed) && (

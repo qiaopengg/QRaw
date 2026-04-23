@@ -1,5 +1,5 @@
 import { Adjustments } from '../../../../../utils/adjustments';
-import { DEFAULT_STYLE_TRANSFER_SERVICE_URL, HslPatch, StyleTransferRequestMode } from '../types';
+import { HslPatch, StyleTransferRequestMode } from '../types';
 
 export function clampStyleTransferConfig(value: number): number {
   return Math.max(0.5, Math.min(2.0, value));
@@ -7,17 +7,6 @@ export function clampStyleTransferConfig(value: number): number {
 
 export function formatStyleTransferConfig(value: number): string {
   return value.toFixed(2).replace(/\.00$/, '');
-}
-
-export function normalizeServiceUrl(raw: string): string {
-  const trimmed = raw.trim().replace(/\/+$/, '');
-  if (!trimmed) {
-    return DEFAULT_STYLE_TRANSFER_SERVICE_URL;
-  }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  return `http://${trimmed}`;
 }
 
 export function getSimpleAdjustments(adj: Adjustments): Record<string, unknown> {
@@ -48,23 +37,15 @@ export function mergeAdjustments(prev: Adjustments, patch: Partial<Adjustments>)
   if (!patchHsl || typeof patchHsl !== 'object') return next;
   const prevHsl = prev.hsl;
   const mergedHsl: Adjustments['hsl'] = { ...prevHsl };
-  Object.entries(patchHsl).forEach(([color, values]) => {
-    if (!values || typeof values !== 'object') return;
+  for (const color in patchHsl) {
+    const values = patchHsl[color];
+    if (!values || typeof values !== 'object') continue;
     mergedHsl[color] = { ...(prevHsl[color] || { hue: 0, saturation: 0, luminance: 0 }), ...values };
-  });
+  }
   next.hsl = mergedHsl;
   return next;
 }
 
-export function getStyleTransferRequestLabel(
-  mode: StyleTransferRequestMode,
-  t: (key: string) => string,
-): string {
-  if (mode === 'analysis') {
-    return t('chat.styleTransferRequest');
-  }
-  if (mode === 'generativePreview') {
-    return t('chat.styleTransferRequestGenerative');
-  }
-  return t('chat.styleTransferRequestExport');
+export function getStyleTransferRequestLabel(_mode: StyleTransferRequestMode, t: (key: string) => string): string {
+  return t('chat.styleTransferRequest');
 }

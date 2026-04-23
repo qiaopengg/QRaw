@@ -1,26 +1,15 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { confirm as confirmDialog, open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { AppSettings, Invokes } from '../../../../ui/AppProperties';
 import { Adjustments } from '../../../../../utils/adjustments';
-import {
-  ChatAdjustResponse,
-  ChatMessage,
-  DEFAULT_STYLE_TRANSFER_SERVICE_URL,
-  StreamChunkPayload,
-  StyleTransferExportFormat,
-  StyleTransferModeSetting,
-  StyleTransferPreset,
-  StyleTransferRequestMode,
-  StyleTransferServiceStatus,
-} from '../types';
+import { ChatAdjustResponse, ChatMessage, StreamChunkPayload, StyleTransferPreset } from '../types';
 import {
   clampStyleTransferConfig,
   formatStyleTransferConfig,
   getSimpleAdjustments,
   getStyleTransferRequestLabel,
-  normalizeServiceUrl,
 } from './utils';
 
 interface StyleTransferTuningValues {
@@ -60,26 +49,9 @@ export function useStyleTransfer({
   applyAssistantResult,
   t,
 }: UseStyleTransferParams) {
-  const [styleTransferMode, setStyleTransferMode] = useState<StyleTransferModeSetting>(
-    appSettings?.styleTransferMode || 'analysis',
-  );
   const [styleTransferPreset, setStyleTransferPreset] = useState<StyleTransferPreset>(
     appSettings?.styleTransferPreset || 'artistic',
   );
-  const [styleTransferExportFormat, setStyleTransferExportFormat] = useState<StyleTransferExportFormat>(
-    appSettings?.styleTransferExportFormat || 'tiff',
-  );
-  const [styleTransferServiceUrl, setStyleTransferServiceUrl] = useState(
-    appSettings?.styleTransferServiceUrl || DEFAULT_STYLE_TRANSFER_SERVICE_URL,
-  );
-  const [styleTransferEnableRefiner, setStyleTransferEnableRefiner] = useState(
-    appSettings?.styleTransferEnableRefiner ?? false,
-  );
-  const [styleTransferAllowFallback, setStyleTransferAllowFallback] = useState(
-    appSettings?.styleTransferAllowFallback ?? false,
-  );
-  const [styleTransferServiceStatus, setStyleTransferServiceStatus] = useState<StyleTransferServiceStatus | null>(null);
-  const [checkingStyleTransferService, setCheckingStyleTransferService] = useState(false);
   const [styleStrengthInput, setStyleStrengthInput] = useState(
     formatStyleTransferConfig(appSettings?.styleTransferStrength ?? 1.0),
   );
@@ -98,12 +70,17 @@ export function useStyleTransfer({
   const activeRunTokenRef = useRef<string | null>(null);
 
   const parseStyleTransferProgress = useCallback((rawText: string) => {
-    const matches = Array.from(rawText.matchAll(/\[PROGRESS\][^\n]*\((\d+)%\)\s*-\s*([^\n]+)/g));
-    const lastMatch = matches.at(-1);
+    const progressPattern = /\[PROGRESS\][^\n]*\((\d+)%\)\s*-\s*([^\n]+)/g;
+    let lastMatch: RegExpExecArray | null = null;
+    let nextMatch: RegExpExecArray | null = progressPattern.exec(rawText);
+    while (nextMatch) {
+      lastMatch = nextMatch;
+      nextMatch = progressPattern.exec(rawText);
+    }
     if (!lastMatch) return null;
 
-    const percentage = Number.parseInt(lastMatch[1], 10);
-    if (!Number.isFinite(percentage)) return null;
+    const percentage = parseInt(lastMatch[1], 10);
+    if (!isFinite(percentage)) return null;
 
     return {
       percentage: Math.max(0, Math.min(100, percentage)),
@@ -131,8 +108,8 @@ export function useStyleTransfer({
 
   const saveStyleTransferConfig = useCallback(
     (key: 'styleTransferStrength' | 'styleTransferHighlightGuard' | 'styleTransferSkinProtect', raw: string) => {
-      const parsed = Number.parseFloat(raw);
-      const clamped = Number.isFinite(parsed) ? clampStyleTransferConfig(parsed) : 1.0;
+      const parsed = parseFloat(raw);
+      const clamped = isFinite(parsed) ? clampStyleTransferConfig(parsed) : 1.0;
       persistAppSettings({ [key]: clamped } as Partial<AppSettings>);
       return formatStyleTransferConfig(clamped);
     },
@@ -141,8 +118,8 @@ export function useStyleTransfer({
 
   const getEffectiveStyleTransferTuning = useCallback((): StyleTransferTuningValues => {
     const parseOrDefault = (raw: string, fallback: number) => {
-      const parsed = Number.parseFloat(raw);
-      if (Number.isFinite(parsed)) {
+      const parsed = parseFloat(raw);
+      if (isFinite(parsed)) {
         return clampStyleTransferConfig(parsed);
       }
       return clampStyleTransferConfig(fallback);
@@ -175,73 +152,8 @@ export function useStyleTransfer({
   }, [appSettings?.styleTransferSkinProtect]);
 
   useEffect(() => {
-    setStyleTransferMode(appSettings?.styleTransferMode || 'analysis');
-  }, [appSettings?.styleTransferMode]);
-
-  useEffect(() => {
     setStyleTransferPreset(appSettings?.styleTransferPreset || 'artistic');
   }, [appSettings?.styleTransferPreset]);
-
-  useEffect(() => {
-    setStyleTransferExportFormat(appSettings?.styleTransferExportFormat || 'tiff');
-  }, [appSettings?.styleTransferExportFormat]);
-
-  useEffect(() => {
-    setStyleTransferServiceUrl(appSettings?.styleTransferServiceUrl || DEFAULT_STYLE_TRANSFER_SERVICE_URL);
-  }, [appSettings?.styleTransferServiceUrl]);
-
-  useEffect(() => {
-    setStyleTransferEnableRefiner(appSettings?.styleTransferEnableRefiner ?? false);
-  }, [appSettings?.styleTransferEnableRefiner]);
-
-  useEffect(() => {
-    setStyleTransferAllowFallback(appSettings?.styleTransferAllowFallback ?? false);
-  }, [appSettings?.styleTransferAllowFallback]);
-
-  const checkStyleTransferService = useCallback(
-    async (rawUrl?: string) => {
-      const serviceUrl = normalizeServiceUrl(rawUrl ?? styleTransferServiceUrl);
-      setCheckingStyleTransferService(true);
-      try {
-        const status = await invoke<StyleTransferServiceStatus>(Invokes.CheckStyleTransferService, {
-          serviceUrl,
-        });
-        setStyleTransferServiceStatus(status);
-        return status;
-      } catch (error) {
-        const status: StyleTransferServiceStatus = {
-          serviceUrl,
-          reachable: false,
-          ready: false,
-          status: 'error',
-          capabilities: [],
-          detail: String(error),
-        };
-        setStyleTransferServiceStatus(status);
-        return status;
-      } finally {
-        setCheckingStyleTransferService(false);
-      }
-    },
-    [styleTransferServiceUrl],
-  );
-
-  useEffect(() => {
-    if (styleTransferMode === 'generativePreview') {
-      void checkStyleTransferService();
-    }
-  }, [checkStyleTransferService, styleTransferMode]);
-
-  const updateStyleTransferMode = useCallback(
-    (mode: StyleTransferModeSetting) => {
-      setStyleTransferMode(mode);
-      persistAppSettings({ styleTransferMode: mode });
-      if (mode === 'generativePreview') {
-        void checkStyleTransferService();
-      }
-    },
-    [checkStyleTransferService, persistAppSettings],
-  );
 
   const updateStyleTransferPreset = useCallback(
     (preset: StyleTransferPreset) => {
@@ -251,47 +163,8 @@ export function useStyleTransfer({
     [persistAppSettings],
   );
 
-  const updateStyleTransferExportFormat = useCallback(
-    (format: StyleTransferExportFormat) => {
-      setStyleTransferExportFormat(format);
-      persistAppSettings({ styleTransferExportFormat: format });
-    },
-    [persistAppSettings],
-  );
-
-  const commitStyleTransferServiceUrl = useCallback(() => {
-    const normalized = normalizeServiceUrl(styleTransferServiceUrl);
-    setStyleTransferServiceUrl(normalized);
-    persistAppSettings({ styleTransferServiceUrl: normalized });
-    void checkStyleTransferService(normalized);
-  }, [checkStyleTransferService, persistAppSettings, styleTransferServiceUrl]);
-
-  const updateStyleTransferEnableRefiner = useCallback(
-    (enabled: boolean) => {
-      setStyleTransferEnableRefiner(enabled);
-      persistAppSettings({ styleTransferEnableRefiner: enabled });
-    },
-    [persistAppSettings],
-  );
-
-  const updateStyleTransferAllowFallback = useCallback(
-    (enabled: boolean) => {
-      setStyleTransferAllowFallback(enabled);
-      persistAppSettings({ styleTransferAllowFallback: enabled });
-    },
-    [persistAppSettings],
-  );
-
   const runStyleTransfer = useCallback(
-    async ({
-      mode,
-      referencePath,
-      sourceImagePath,
-    }: {
-      mode: StyleTransferRequestMode;
-      referencePath: string;
-      sourceImagePath: string;
-    }) => {
+    ({ referencePath, sourceImagePath }: { referencePath: string; sourceImagePath: string }) => {
       let streamMsgId: string | null = null;
 
       setError(null);
@@ -300,7 +173,7 @@ export function useStyleTransfer({
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: getStyleTransferRequestLabel(mode, t),
+        content: getStyleTransferRequestLabel('analysis', t),
       };
 
       streamMsgId = crypto.randomUUID();
@@ -314,20 +187,20 @@ export function useStyleTransfer({
         thinkingContent: '',
         referencePath,
         sourceImagePath,
-        requestedMode: mode,
+        requestedMode: 'analysis',
       };
       setMessages((prev) => [...prev, userMsg, streamMsg]);
 
       const simpleAdj = getSimpleAdjustments(adjustments);
       const tuning = getEffectiveStyleTransferTuning();
-      const isGenerativeRun = mode === 'generativePreview' || mode === 'generativeExport';
       const appendRunNote = (note: string) => {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === currentStreamMsgId
               ? {
                   ...msg,
-                  content: msg.content.includes(note) ? msg.content : `${msg.content}${msg.content ? '\n' : ''}${note}`,
+                  content:
+                    msg.content.indexOf(note) >= 0 ? msg.content : `${msg.content}${msg.content ? '\n' : ''}${note}`,
                 }
               : msg,
           ),
@@ -340,56 +213,23 @@ export function useStyleTransfer({
         if (cleanedUp) return;
         cleanedUp = true;
         window.clearTimeout(slowWarningTimer);
-        window.clearTimeout(timeoutConfirmTimer);
         unlisten();
       };
 
       const slowWarningTimer = window.setTimeout(() => {
-        if (activeRunTokenRef.current !== runToken || !isGenerativeRun) return;
+        if (activeRunTokenRef.current !== runToken) return;
         appendRunNote(t('chat.styleTransferSlowWarning'));
       }, 30_000);
 
-      const timeoutConfirmTimer = window.setTimeout(async () => {
-        if (activeRunTokenRef.current !== runToken || !isGenerativeRun) return;
-        appendRunNote(t('chat.styleTransferTimeoutConfirmPending'));
-
-        let shouldContinue = false;
-        try {
-          shouldContinue = await confirmDialog(
-            mode === 'generativeExport'
-              ? t('chat.styleTransferRuntimeExportTimeoutPrompt')
-              : t('chat.styleTransferRuntimePreviewTimeoutPrompt'),
-            {
-              title: t('chat.styleTransferTimeoutConfirmTitle'),
-              kind: 'warning',
-            },
-          );
-        } catch (dialogError) {
-          console.error('Failed to open timeout confirm dialog:', dialogError);
-          shouldContinue = window.confirm(
-            mode === 'generativeExport'
-              ? t('chat.styleTransferRuntimeExportTimeoutPrompt')
-              : t('chat.styleTransferRuntimePreviewTimeoutPrompt'),
-          );
+      const finalizeRun = () => {
+        if (activeRunTokenRef.current === runToken) {
+          activeRunTokenRef.current = null;
+          setIsLoading(false);
         }
-
-        if (activeRunTokenRef.current !== runToken) return;
-        if (shouldContinue) {
-          appendRunNote(t('chat.styleTransferContinueConfirmed'));
-          return;
-        }
-
-        activeRunTokenRef.current = null;
-        void invoke(Invokes.CancelStyleTransfer).catch((cancelError) => {
-          console.error('Failed to cancel style transfer task:', cancelError);
-        });
         cleanupRun();
-        setIsLoading(false);
-        setError(t('chat.styleTransferRuntimeStopped'));
-        appendRunNote(t('chat.styleTransferRuntimeStopped'));
-      }, 120_000);
+      };
 
-      unlisten = await listen<StreamChunkPayload>('style-transfer-stream', (event) => {
+      return listen<StreamChunkPayload>('style-transfer-stream', (event) => {
         const { chunk_type, text: chunkText, result } = event.payload;
         if (activeRunTokenRef.current !== runToken) return;
 
@@ -415,53 +255,49 @@ export function useStyleTransfer({
         } else if (chunk_type === 'done' && result) {
           applyAssistantResult(currentStreamMsgId, result, { sourceImagePath });
         }
-      });
-
-      try {
-        const result = await invoke<ChatAdjustResponse>(Invokes.RunStyleTransfer, {
-          request: {
-            referencePath,
-            currentImagePath: sourceImagePath,
-            currentAdjustments: simpleAdj,
-            mode,
-            preset: styleTransferPreset,
-            serviceUrl: normalizeServiceUrl(styleTransferServiceUrl),
-            enableRefiner: styleTransferEnableRefiner,
-            allowFallbackToAnalysis: styleTransferAllowFallback,
-            outputFormat: styleTransferExportFormat,
-            styleStrength: tuning.styleStrength,
-            highlightGuardStrength: tuning.highlightGuardStrength,
-            skinProtectStrength: tuning.skinProtectStrength,
-            pureAlgorithm: pureStyleTransfer,
-            enableExpertPreset: enableStyleTransferExpertPreset,
-            enableFeatureMapping: enableStyleTransferFeatureMapping,
-            enableAutoRefine: enableStyleTransferAutoRefine,
-            enableLut: enableStyleTransferLut,
-            enableVlm: enableStyleTransferVlm,
-            llmEndpoint: endpoint,
-            llmApiKey: llmApiKey || null,
-            llmModel: activeModel || null,
-          },
+      })
+        .then((stopListening) => {
+          unlisten = stopListening;
+          return invoke<ChatAdjustResponse>(Invokes.RunStyleTransfer, {
+            request: {
+              referencePath,
+              currentImagePath: sourceImagePath,
+              currentAdjustments: simpleAdj,
+              mode: 'analysis',
+              preset: styleTransferPreset,
+              styleStrength: tuning.styleStrength,
+              highlightGuardStrength: tuning.highlightGuardStrength,
+              skinProtectStrength: tuning.skinProtectStrength,
+              pureAlgorithm: pureStyleTransfer,
+              enableExpertPreset: enableStyleTransferExpertPreset,
+              enableFeatureMapping: enableStyleTransferFeatureMapping,
+              enableAutoRefine: enableStyleTransferAutoRefine,
+              enableLut: enableStyleTransferLut,
+              enableVlm: enableStyleTransferVlm,
+              llmEndpoint: endpoint,
+              llmApiKey: llmApiKey || null,
+              llmModel: activeModel || null,
+            },
+          });
+        })
+        .then((result) => {
+          if (activeRunTokenRef.current === runToken) {
+            applyAssistantResult(currentStreamMsgId, result, { sourceImagePath });
+          }
+        })
+        .catch((error) => {
+          const errorText = String(error);
+          if (activeRunTokenRef.current === runToken) {
+            setError(errorText);
+          }
+          if (streamMsgId && activeRunTokenRef.current === runToken) {
+            appendStreamError(streamMsgId, errorText);
+          }
+          finalizeRun();
+        })
+        .then(() => {
+          finalizeRun();
         });
-
-        if (activeRunTokenRef.current === runToken) {
-          applyAssistantResult(currentStreamMsgId, result, { sourceImagePath });
-        }
-      } catch (error) {
-        const errorText = String(error);
-        if (activeRunTokenRef.current === runToken) {
-          setError(errorText);
-        }
-        if (streamMsgId && activeRunTokenRef.current === runToken) {
-          appendStreamError(streamMsgId, errorText);
-        }
-      } finally {
-        if (activeRunTokenRef.current === runToken) {
-          activeRunTokenRef.current = null;
-          setIsLoading(false);
-        }
-        cleanupRun();
-      }
     },
     [
       activeModel,
@@ -481,99 +317,65 @@ export function useStyleTransfer({
       setError,
       setIsLoading,
       setMessages,
-      styleTransferAllowFallback,
-      styleTransferEnableRefiner,
-      styleTransferExportFormat,
       styleTransferPreset,
-      styleTransferServiceUrl,
       t,
     ],
   );
 
-  const handleStyleTransfer = useCallback(
-    async (modeOverride?: StyleTransferModeSetting) => {
-      if (isLoading) return;
-      if (!currentImagePath) {
-        setError(t('chat.noImageOpen'));
-        return;
-      }
+  const handleStyleTransfer = useCallback(() => {
+    if (isLoading) return;
+    if (!currentImagePath) {
+      setError(t('chat.noImageOpen'));
+      return;
+    }
 
-      try {
-        const selected = await openFileDialog({
-          multiple: false,
-          filters: [
-            {
-              name: t('chat.imageFiles'),
-              extensions: [
-                'jpg',
-                'jpeg',
-                'png',
-                'tiff',
-                'tif',
-                'webp',
-                'bmp',
-                'dng',
-                'nef',
-                'cr2',
-                'cr3',
-                'arw',
-                'raf',
-                'orf',
-                'rw2',
-              ],
-            },
+    return openFileDialog({
+      multiple: false,
+      filters: [
+        {
+          name: t('chat.imageFiles'),
+          extensions: [
+            'jpg',
+            'jpeg',
+            'png',
+            'tiff',
+            'tif',
+            'webp',
+            'bmp',
+            'dng',
+            'nef',
+            'cr2',
+            'cr3',
+            'arw',
+            'raf',
+            'orf',
+            'rw2',
           ],
-        });
+        },
+      ],
+    })
+      .then((selected) => {
         if (!selected) return;
 
         const referencePath = typeof selected === 'string' ? selected : selected;
         if (!referencePath) return;
 
-        await runStyleTransfer({
-          mode: modeOverride || styleTransferMode,
+        return runStyleTransfer({
           referencePath,
           sourceImagePath: currentImagePath,
         });
-      } catch (error) {
+      })
+      .catch((error) => {
         setError(String(error));
-      }
-    },
-    [currentImagePath, isLoading, runStyleTransfer, setError, styleTransferMode, t],
-  );
-
-  const handleGenerativeExport = useCallback(
-    async (msg: ChatMessage) => {
-      if (isLoading || !msg.referencePath || !msg.sourceImagePath) return;
-      let confirmed = false;
-      try {
-        confirmed = await confirmDialog(t('chat.styleTransferExportConfirmPrompt'), {
-          title: t('chat.styleTransferTimeoutConfirmTitle'),
-          kind: 'warning',
-        });
-      } catch (dialogError) {
-        console.error('Failed to open export confirm dialog:', dialogError);
-        confirmed = window.confirm(t('chat.styleTransferExportConfirmPrompt'));
-      }
-      if (!confirmed) return;
-      await runStyleTransfer({
-        mode: 'generativeExport',
-        referencePath: msg.referencePath,
-        sourceImagePath: msg.sourceImagePath,
       });
-    },
-    [isLoading, runStyleTransfer, t],
-  );
+  }, [currentImagePath, isLoading, runStyleTransfer, setError, t]);
 
   return {
-    checkingStyleTransferService,
-    checkStyleTransferService,
-    commitStyleTransferServiceUrl,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,
     enableStyleTransferLut,
     enableStyleTransferVlm,
-    handleGenerativeExport,
     handleStyleTransfer,
     highlightGuardInput,
     pureStyleTransfer,
@@ -587,20 +389,9 @@ export function useStyleTransfer({
     setPureStyleTransfer,
     setSkinProtectInput,
     setStyleStrengthInput,
-    setStyleTransferServiceUrl,
     skinProtectInput,
     styleStrengthInput,
-    styleTransferAllowFallback,
-    styleTransferEnableRefiner,
-    styleTransferExportFormat,
-    styleTransferMode,
     styleTransferPreset,
-    styleTransferServiceStatus,
-    styleTransferServiceUrl,
-    updateStyleTransferAllowFallback,
-    updateStyleTransferEnableRefiner,
-    updateStyleTransferExportFormat,
-    updateStyleTransferMode,
     updateStyleTransferPreset,
   };
 }

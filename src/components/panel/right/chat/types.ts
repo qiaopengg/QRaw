@@ -1,23 +1,13 @@
 import { Adjustments } from '../../../../utils/adjustments';
 
-export const DEFAULT_STYLE_TRANSFER_SERVICE_URL = 'http://127.0.0.1:7860';
-
 export const STYLE_TRANSFER_PRESET_OPTIONS = [
   { label: 'Realistic', value: 'realistic' },
   { label: 'Artistic', value: 'artistic' },
   { label: 'Creative', value: 'creative' },
 ] as const;
 
-export const STYLE_TRANSFER_EXPORT_FORMAT_OPTIONS = [
-  { label: 'TIFF', value: 'tiff' },
-  { label: 'PNG', value: 'png' },
-  { label: 'JPG', value: 'jpg' },
-] as const;
-
-export type StyleTransferModeSetting = 'analysis' | 'generativePreview';
-export type StyleTransferRequestMode = StyleTransferModeSetting | 'generativeExport';
+export type StyleTransferRequestMode = 'analysis';
 export type StyleTransferPreset = (typeof STYLE_TRANSFER_PRESET_OPTIONS)[number]['value'];
-export type StyleTransferExportFormat = (typeof STYLE_TRANSFER_EXPORT_FORMAT_OPTIONS)[number]['value'];
 
 export interface AdjustmentSuggestion {
   key: string;
@@ -38,11 +28,8 @@ export interface StyleTransferExecutionMeta {
   resolvedMode: string;
   engine: string;
   preset: string;
-  refineEnabled: boolean;
-  usedFallback: boolean;
   stage: string;
   expectedWaitRange: string;
-  outputFormat?: string | null;
 }
 
 export interface StyleTransferProgressState {
@@ -78,17 +65,6 @@ export interface ChatOpenImageOptions {
     compareBasePath?: string | null;
     compareTargetPath?: string | null;
   };
-}
-
-export interface StyleTransferServiceStatus {
-  serviceUrl: string;
-  reachable: boolean;
-  ready: boolean;
-  status: string;
-  version?: string | null;
-  pipeline?: string | null;
-  capabilities?: string[];
-  detail?: string | null;
 }
 
 export interface StyleErrorBreakdown {
@@ -191,7 +167,6 @@ export interface ChatAdjustResponse {
   style_debug?: StyleDebugInfo;
   constraint_debug?: ConstraintDebugInfo;
   executionMeta?: StyleTransferExecutionMeta;
-  serviceStatus?: StyleTransferServiceStatus;
   outputImagePath?: string;
   previewImagePath?: string;
   pureGenerationImagePath?: string;
@@ -208,7 +183,6 @@ export interface ChatMessage {
   styleDebug?: StyleDebugInfo;
   constraintDebug?: ConstraintDebugInfo;
   executionMeta?: StyleTransferExecutionMeta;
-  serviceStatus?: StyleTransferServiceStatus;
   outputImagePath?: string;
   previewImagePath?: string;
   pureGenerationImagePath?: string;
