@@ -17,6 +17,7 @@ import {
 import { AppSettings, Invokes } from '../../ui/AppProperties';
 import { Adjustments } from '../../../utils/adjustments';
 import { usePresets } from '../../../hooks/usePresets';
+import { useChatPersistence } from '../../../hooks/useChatPersistence';
 import {
   ChatAdjustResponse,
   ChatMessage,
@@ -75,10 +76,52 @@ async function checkOllamaStatus(endpoint: string): Promise<boolean> {
 }
 
 // 思考过程折叠块（类似 ChatGPT）
-function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+function ThinkingBlock({
+  content,
+  isStreaming,
+  progress,
+  startTime,
+}: {
+  content: string;
+  isStreaming: boolean;
+  progress?: { description: string; percentage: number } | null;
+  startTime?: number;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [frozenTime, setFrozenTime] = useState<number | null>(null); // 冻结的时间
+
+  // 计时器：只在思考中更新，思考完成后冻结
+  useEffect(() => {
+    if (!startTime) return;
+
+    // 如果已经冻结，不再更新
+    if (frozenTime !== null) {
+      setElapsedTime(frozenTime);
+      return;
+    }
+
+    const updateElapsed = () => {
+      const elapsed = Date.now() - startTime;
+      setElapsedTime(elapsed);
+    };
+
+    // 立即更新一次
+    updateElapsed();
+
+    // 如果还在思考中，每 100ms 更新一次
+    if (isStreaming) {
+      const interval = setInterval(updateElapsed, 100);
+      return () => clearInterval(interval);
+    } else {
+      // 思考完成，冻结当前时间
+      const finalTime = Date.now() - startTime;
+      setFrozenTime(finalTime);
+      setElapsedTime(finalTime);
+    }
+  }, [startTime, isStreaming, frozenTime]);
 
   // 流式结束后自动折叠
   useEffect(() => {
@@ -99,6 +142,18 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
     }
   };
 
+  // 格式化时间显示
+  const formatElapsedTime = (ms: number) => {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+
+    if (minutes > 0) {
+      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+    return `${seconds}s`;
+  };
+
   return (
     <div className="w-full rounded-lg border border-surface overflow-hidden">
       <button
@@ -107,6 +162,12 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
       >
         <Brain size={11} className={isStreaming ? 'animate-pulse text-purple-400' : 'text-text-secondary'} />
         <span>{isStreaming ? t('chat.thinking') : t('chat.thoughtComplete')}</span>
+
+        {/* 思考时间显示 */}
+        {startTime && (
+          <span className="text-[9px] text-text-secondary/60 tabular-nums">{formatElapsedTime(elapsedTime)}</span>
+        )}
+
         <ChevronRight
           size={10}
           className={`ml-auto transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
@@ -141,30 +202,33 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
         </button>
       </button>
       {expanded && (
-        <div className="px-2 pb-1.5 text-[10px] text-text-secondary/70 leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">
-          {content}
-          {isStreaming && <span className="inline-block w-1 h-3 bg-purple-400/60 animate-pulse ml-0.5 align-middle" />}
+        <div className="text-[10px] text-text-secondary/70">
+          <div className="px-2 pb-1.5 leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">
+            {content}
+            {isStreaming && (
+              <span className="inline-block w-1 h-3 bg-purple-400/60 animate-pulse ml-0.5 align-middle" />
+            )}
+          </div>
+
+          {/* 进度条（如果有） */}
+          {progress && (
+            <div className="px-2 pb-2 pt-1">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-[10px] text-purple-200/90 truncate">{progress.description}</span>
+                <span className="text-[10px] text-purple-300 tabular-nums">
+                  {Math.max(0, Math.min(100, progress.percentage))}%
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-surface overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400 transition-[width] duration-300"
+                  style={{ width: `${Math.max(0, Math.min(100, progress.percentage))}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
-  );
-}
-
-function StyleTransferProgressBlock({ description, percentage }: { description: string; percentage: number }) {
-  const safePercentage = Math.max(0, Math.min(100, percentage));
-
-  return (
-    <div className="w-full rounded-lg border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] text-purple-200/90 truncate">{description}</span>
-        <span className="text-[10px] text-purple-300 tabular-nums">{safePercentage}%</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-surface overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-purple-500 to-blue-400 transition-[width] duration-300"
-          style={{ width: `${safePercentage}%` }}
-        />
-      </div>
     </div>
   );
 }
@@ -193,7 +257,15 @@ export default function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const endpoint = llmEndpoint || 'http://localhost:11434';
-  const [activeModel, setActiveModel] = useState(llmModel || DEFAULT_MODEL);
+
+  // 持久化管理
+  const { saveChatHistory, loadChatHistory, clearChatHistory, saveConfig, loadConfig, hasHistory } =
+    useChatPersistence(currentImagePath);
+
+  // 从持久化存储加载模型配置
+  const persistedConfig = loadConfig();
+  const [activeModel, setActiveModel] = useState(persistedConfig.llmModel || llmModel || DEFAULT_MODEL);
+
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [tuningMenuOpen, setTuningMenuOpen] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
@@ -201,6 +273,39 @@ export default function ChatPanel({
   const tuningMenuRef = useRef<HTMLDivElement>(null);
 
   const { addPreset } = usePresets(adjustments);
+
+  // 保存模型选择到持久化存储
+  useEffect(() => {
+    saveConfig({ llmModel: activeModel });
+  }, [activeModel, saveConfig]);
+
+  // 图片切换时加载/重置对话历史
+  const previousImagePathRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previousPath = previousImagePathRef.current;
+    const currentPath = currentImagePath || null;
+
+    // 保存上一张图片的对话历史
+    if (previousPath && messages.length > 0) {
+      saveChatHistory(previousPath, messages);
+    }
+
+    // 加载新图片的对话历史
+    if (currentPath && currentPath !== previousPath) {
+      const history = loadChatHistory(currentPath);
+      setMessages(history);
+    }
+
+    // 更新引用
+    previousImagePathRef.current = currentPath;
+  }, [currentImagePath, loadChatHistory, saveChatHistory, messages]);
+
+  // 实时保存当前图片的对话历史
+  useEffect(() => {
+    if (currentImagePath && messages.length > 0) {
+      saveChatHistory(currentImagePath, messages);
+    }
+  }, [messages, currentImagePath, saveChatHistory]);
 
   const persistAppSettings = useCallback(
     (patch: Partial<AppSettings>) => {
@@ -280,11 +385,13 @@ export default function ChatPanel({
     setIsLoading(true);
 
     // 创建一个流式占位消息
+    const thinkingStartTime = Date.now(); // 记录思考开始时间
     const streamMsg: ChatMessage = {
       id: streamMsgId,
       role: 'assistant',
       content: '',
       thinkingContent: '',
+      thinkingStartTime, // 添加思考开始时间
     };
     setMessages((prev) => [...prev, streamMsg]);
 
@@ -366,6 +473,8 @@ export default function ChatPanel({
   const {
     cancelPendingStyleTransferSelection,
     confirmPendingStyleTransferSelection,
+    updateMainReference,
+    updateAuxReferences,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,
@@ -572,15 +681,6 @@ export default function ChatPanel({
           </div>
         )}
 
-        {pendingStyleTransferSelection && (
-          <StyleTransferReferenceSelectionCard
-            auxReferencePaths={pendingStyleTransferSelection.auxReferencePaths}
-            mainReferencePath={pendingStyleTransferSelection.mainReferencePath}
-            onCancel={cancelPendingStyleTransferSelection}
-            onConfirm={(styleTransferType) => void confirmPendingStyleTransferSelection(styleTransferType)}
-          />
-        )}
-
         {messages.map((msg) => (
           <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
             <div
@@ -593,24 +693,38 @@ export default function ChatPanel({
               )}
             </div>
             <div className={`flex flex-col gap-1.5 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              {/* 思考过程（可折叠） */}
+              {/* 参考图设置模块 */}
+              {msg.role === 'assistant' &&
+                msg.isStyleTransferSetup &&
+                pendingStyleTransferSelection?.messageId === msg.id && (
+                  <StyleTransferReferenceSelectionCard
+                    auxReferencePaths={pendingStyleTransferSelection.auxReferencePaths}
+                    mainReferencePath={pendingStyleTransferSelection.mainReferencePath}
+                    onCancel={cancelPendingStyleTransferSelection}
+                    onConfirm={(styleTransferType) => void confirmPendingStyleTransferSelection(styleTransferType)}
+                    onUpdateMainReference={updateMainReference}
+                    onUpdateAuxReferences={updateAuxReferences}
+                  />
+                )}
+              {/* 思考过程（可折叠，包含进度条） */}
               {msg.role === 'assistant' && msg.thinkingContent && (
-                <ThinkingBlock content={msg.thinkingContent} isStreaming={isLoading && !msg.adjustments} />
-              )}
-              {msg.role === 'assistant' && msg.styleTransferProgress && (
-                <StyleTransferProgressBlock
-                  description={msg.styleTransferProgress.description}
-                  percentage={msg.styleTransferProgress.percentage}
+                <ThinkingBlock
+                  content={msg.thinkingContent}
+                  isStreaming={isLoading && !msg.adjustments}
+                  progress={msg.styleTransferProgress}
+                  startTime={msg.thinkingStartTime}
                 />
               )}
-              <div
-                className={`px-2.5 py-1.5 rounded-lg text-xs leading-relaxed ${msg.role === 'user' ? 'bg-blue-500/20 text-text-primary' : 'bg-surface text-text-primary'}`}
-              >
-                {msg.content ||
-                  (isLoading && !msg.adjustments ? (
-                    <Loader2 size={12} className="animate-spin text-text-secondary" />
-                  ) : null)}
-              </div>
+              {!msg.isStyleTransferSetup && (
+                <div
+                  className={`px-2.5 py-1.5 rounded-lg text-xs leading-relaxed ${msg.role === 'user' ? 'bg-blue-500/20 text-text-primary' : 'bg-surface text-text-primary'}`}
+                >
+                  {msg.content ||
+                    (isLoading && !msg.adjustments ? (
+                      <Loader2 size={12} className="animate-spin text-text-secondary" />
+                    ) : null)}
+                </div>
+              )}
               {msg.role === 'assistant' && (
                 <StyleTransferResultCard
                   onApplyPreview={applyStyleTransferPreview}

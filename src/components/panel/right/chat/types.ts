@@ -263,6 +263,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   thinkingContent?: string;
+  thinkingStartTime?: number; // 思考开始时间（毫秒时间戳）
   adjustments?: AdjustmentSuggestion[];
   appliedValues?: AppliedValueMap;
   styleDebug?: StyleDebugInfo;
@@ -294,6 +295,7 @@ export interface ChatMessage {
   styleTransferProgress?: StyleTransferProgressState;
   previewWorkflowState?: StyleTransferPreviewWorkflowState;
   qualityGuardPassed?: boolean;
+  isStyleTransferSetup?: boolean; // 标记为参考图设置消息
 }
 
 export interface StreamChunkPayload {

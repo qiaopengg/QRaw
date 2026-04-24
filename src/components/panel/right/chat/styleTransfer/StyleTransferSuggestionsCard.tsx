@@ -51,14 +51,27 @@ export function StyleTransferSuggestionsCard({
 }: StyleTransferSuggestionsCardProps) {
   const [copied, setCopied] = useState(false);
   const [isInteractingWithSlider, setIsInteractingWithSlider] = useState(false);
+  const [activeHslColor, setActiveHslColor] = useState<string>('reds'); // 当前选中的 HSL 颜色
+
   const hasAdjustments = Boolean(message.adjustments && message.adjustments.length > 0);
   const hasDebugContent = Boolean(message.processingDebug || message.styleDebug || message.constraintDebug);
+
+  // 初始化 activeHslColor 为第一个可用的颜色
+  React.useEffect(() => {
+    const hslSuggestion = message.adjustments?.find((s) => s.key === 'hsl');
+    if (hslSuggestion && hslSuggestion.complex_value && typeof hslSuggestion.complex_value === 'object') {
+      const colors = Object.keys(hslSuggestion.complex_value);
+      if (colors.length > 0 && !colors.includes(activeHslColor)) {
+        setActiveHslColor(colors[0]);
+      }
+    }
+  }, [message.adjustments, activeHslColor]);
 
   // 阻止滑块交互时的滚动
   React.useEffect(() => {
     if (isInteractingWithSlider) {
       // 禁用自动滚动
-      const messagesContainer = document.querySelector('.overflow-y-auto');
+      const messagesContainer = document.querySelector('.overflow-y-auto') as HTMLElement;
       if (messagesContainer) {
         const originalOverflow = messagesContainer.style.overflow;
         messagesContainer.style.overflow = 'hidden';
@@ -323,54 +336,104 @@ export function StyleTransferSuggestionsCard({
               {suggestion.key === 'hsl' &&
               suggestion.complex_value !== undefined &&
               typeof suggestion.complex_value === 'object' ? (
-                <div className="rounded border border-surface bg-surface/30 px-2 py-1.5 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-text-primary">{suggestion.label || '颜色混合器'}</span>
+                <div className="rounded border border-surface bg-bg-tertiary px-2 py-2 space-y-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-medium text-text-primary">
+                      {suggestion.label || '颜色混合器'}
+                    </span>
                     <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">HSL</span>
                   </div>
-                  {Object.entries(
-                    suggestion.complex_value as Record<string, Partial<Adjustments['hsl'][keyof Adjustments['hsl']]>>,
-                  ).map(([color]) => (
-                    <div key={color} className="space-y-0.5">
-                      <div className="text-[9px] text-text-secondary/80">{HSL_COLOR_LABELS[color] || color}</div>
+
+                  {/* 颜色选择器（使用项目基建样式） */}
+                  <div className="flex justify-between mb-3 px-1">
+                    {Object.entries(
+                      suggestion.complex_value as Record<string, Partial<Adjustments['hsl'][keyof Adjustments['hsl']]>>,
+                    ).map(([color]) => {
+                      const colorMap: Record<string, string> = {
+                        reds: '#f87171',
+                        oranges: '#fb923c',
+                        yellows: '#facc15',
+                        greens: '#4ade80',
+                        aquas: '#2dd4bf',
+                        blues: '#60a5fa',
+                        purples: '#a78bfa',
+                        magentas: '#f472b6',
+                      };
+                      const bgColor = colorMap[color] || '#888';
+                      const isActive = activeHslColor === color;
+
+                      return (
+                        <button
+                          key={color}
+                          onClick={() => setActiveHslColor(color)}
+                          className="relative w-6 h-6 focus:outline-hidden group"
+                          aria-label={`Select ${HSL_COLOR_LABELS[color] || color}`}
+                        >
+                          {/* 外圈（激活状态） */}
+                          <div
+                            className={`absolute inset-0 rounded-full border-2 transition-all duration-200 ease-out ${
+                              isActive ? 'border-white opacity-100 scale-125' : 'border-transparent opacity-0'
+                            }`}
+                          />
+                          {/* 颜色圆点 */}
+                          <div
+                            className={`absolute inset-0 rounded-full transition-all duration-150 ease-out ${
+                              isActive ? 'shadow-lg scale-110' : 'shadow-md scale-100 hover:scale-105'
+                            }`}
+                            style={{ backgroundColor: bgColor }}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 当前选中颜色的滑块 */}
+                  {activeHslColor && (
+                    <div className="space-y-1">
+                      <div className="text-[9px] text-text-secondary/80 mb-1.5">
+                        {HSL_COLOR_LABELS[activeHslColor] || activeHslColor}
+                      </div>
                       <Slider
                         label="色相"
                         min={-100}
                         max={100}
                         step={1}
-                        value={adjustments.hsl[color]?.hue ?? 0}
-                        onChange={(event) => handleHslSliderChange(message.id, color, 'hue', event)}
+                        value={adjustments.hsl[activeHslColor]?.hue ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, activeHslColor, 'hue', event)}
                         onMouseDown={() => setIsInteractingWithSlider(true)}
                         onMouseUp={() => setIsInteractingWithSlider(false)}
                         onTouchStart={() => setIsInteractingWithSlider(true)}
                         onTouchEnd={() => setIsInteractingWithSlider(false)}
+                        trackClassName={`hue-slider-${activeHslColor}`}
                       />
                       <Slider
                         label="饱和度"
                         min={-100}
                         max={100}
                         step={1}
-                        value={adjustments.hsl[color]?.saturation ?? 0}
-                        onChange={(event) => handleHslSliderChange(message.id, color, 'saturation', event)}
+                        value={adjustments.hsl[activeHslColor]?.saturation ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, activeHslColor, 'saturation', event)}
                         onMouseDown={() => setIsInteractingWithSlider(true)}
                         onMouseUp={() => setIsInteractingWithSlider(false)}
                         onTouchStart={() => setIsInteractingWithSlider(true)}
                         onTouchEnd={() => setIsInteractingWithSlider(false)}
+                        trackClassName={`sat-slider-${activeHslColor}`}
                       />
                       <Slider
                         label="明度"
                         min={-100}
                         max={100}
                         step={1}
-                        value={adjustments.hsl[color]?.luminance ?? 0}
-                        onChange={(event) => handleHslSliderChange(message.id, color, 'luminance', event)}
+                        value={adjustments.hsl[activeHslColor]?.luminance ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, activeHslColor, 'luminance', event)}
                         onMouseDown={() => setIsInteractingWithSlider(true)}
                         onMouseUp={() => setIsInteractingWithSlider(false)}
                         onTouchStart={() => setIsInteractingWithSlider(true)}
                         onTouchEnd={() => setIsInteractingWithSlider(false)}
+                        trackClassName={`lum-slider-${activeHslColor}`}
                       />
                     </div>
-                  ))}
+                  )}
                 </div>
               ) : suggestion.complex_value !== undefined ? (
                 <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">

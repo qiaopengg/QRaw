@@ -8,6 +8,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import debounce from 'lodash.debounce';
 import { ImageLRUCache, ImageCacheEntry } from './utils/ImageLRUCache';
+import { clearAllPersistenceData } from './hooks/useChatPersistence';
 import { ToastContainer, toast, Slide } from 'react-toastify';
 import clsx from 'clsx';
 import {
@@ -492,6 +493,25 @@ function App() {
   const previewJobIdRef = useRef<number>(0);
   const latestRenderedJobIdRef = useRef<number>(0);
   const isAndroid = osPlatform === 'android';
+
+  // 监听应用退出，清空持久化数据
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+
+    const cleanup = () => {
+      clearAllPersistenceData();
+    };
+
+    // 监听窗口关闭事件
+    const unlistenClose = appWindow.onCloseRequested(() => {
+      cleanup();
+    });
+
+    // 组件卸载时清理
+    return () => {
+      unlistenClose.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     if (currentFolderPath) {
@@ -2588,7 +2608,10 @@ function App() {
               resetAdjustmentsHistory(nextSession.sourceAdjustments);
               return;
             }
-            pendingOpenImageOverrideRef.current = { path: session.sourcePath, adjustments: nextSession.sourceAdjustments };
+            pendingOpenImageOverrideRef.current = {
+              path: session.sourcePath,
+              adjustments: nextSession.sourceAdjustments,
+            };
             handleImageSelect(session.sourcePath);
             return;
           case 'styleTransferDiscard':
@@ -2600,7 +2623,10 @@ function App() {
               resetAdjustmentsHistory(nextSession.sourceAdjustments);
               return;
             }
-            pendingOpenImageOverrideRef.current = { path: session.sourcePath, adjustments: nextSession.sourceAdjustments };
+            pendingOpenImageOverrideRef.current = {
+              path: session.sourcePath,
+              adjustments: nextSession.sourceAdjustments,
+            };
             handleImageSelect(session.sourcePath);
             return;
           case 'styleTransferApply':

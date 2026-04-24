@@ -4868,6 +4868,16 @@ pub async fn analyze_style_transfer(
     llm_model: Option<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<StyleTransferResponse, String> {
+    // 发送初始进度
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        serde_json::json!({
+            "chunk_type": "thinking",
+            "text": "[PROGRESS] (0%) - 开始风格迁移分析...\n",
+            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+        }),
+    );
+    
     let tuning = StyleTransferTuning::from_options(
         style_strength,
         highlight_guard_strength,
@@ -4934,6 +4944,17 @@ pub async fn analyze_style_transfer(
         .await
         .map_err(|e| format!("风格理解模型未就绪: {}", e))?;
     validate_style_transfer_paths(&reference_path, &current_image_path, &aux_reference_paths)?;
+    
+    // 发送加载图片进度
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        serde_json::json!({
+            "chunk_type": "thinking",
+            "text": "[PROGRESS] (10%) - 正在加载图片...\n",
+            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+        }),
+    );
+    
     let (ref_img, cur_img, aux_imgs) = load_style_transfer_images(
         &reference_path,
         &current_image_path,
@@ -4941,6 +4962,16 @@ pub async fn analyze_style_transfer(
         &app_handle,
     )
     .await?;
+
+    // 发送分析进度
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        serde_json::json!({
+            "chunk_type": "thinking",
+            "text": "[PROGRESS] (30%) - 正在分析风格特征...\n",
+            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+        }),
+    );
 
     let endpoint_for_check = llm_endpoint.clone();
     let current_adjustments_for_vlm = current_adjustments.clone();
@@ -5013,6 +5044,16 @@ pub async fn analyze_style_transfer(
         .await
         .map_err(|e| format!("分析任务失败: {}", e))??;
 
+    // 发送算法完成进度
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        serde_json::json!({
+            "chunk_type": "thinking",
+            "text": "[PROGRESS] (70%) - 算法分析完成，正在生成建议...\n",
+            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+        }),
+    );
+
     if let Some(res) = early_exit_res {
         return Ok(res);
     }
@@ -5039,7 +5080,23 @@ pub async fn analyze_style_transfer(
                 "style-transfer-stream",
                 serde_json::json!({
                     "chunk_type": "thinking",
-                    "text": "\n\n正在启动视觉大模型进行深度风格匹配...\n",
+                    "text": "[PROGRESS] (75%) - 正在生成预览图供视觉模型检查...\n",
+                    "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                }),
+            );
+
+            // 生成预览图：应用算法建议到当前图
+            let preview_img = generate_preview_with_adjustments(
+                &cur_img,
+                &current_adjustments_for_vlm,
+                &algorithm_result.adjustments,
+            );
+
+            let _ = app_handle.emit(
+                "style-transfer-stream",
+                serde_json::json!({
+                    "chunk_type": "thinking",
+                    "text": "[PROGRESS] (80%) - 正在启动视觉大模型进行质量检查...\n",
                     "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                 }),
             );
@@ -5050,6 +5107,7 @@ pub async fn analyze_style_transfer(
                 llm_model.as_deref(),
                 &ref_img,
                 &cur_img,
+                &preview_img,
                 &current_adjustments_for_vlm,
                 &algorithm_result.adjustments,
                 &app_handle,
@@ -5057,10 +5115,44 @@ pub async fn analyze_style_transfer(
             .await
             {
                 Ok(vlm_res) => {
+                    // VLM 完成进度
+                    let _ = app_handle.emit(
+                        "style-transfer-stream",
+                        serde_json::json!({
+                            "chunk_type": "thinking",
+                            "text": "[PROGRESS] (95%) - 视觉模型微调完成\n",
+                            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                        }),
+                    );
+                    
+                    // 记录 VLM 的决策
+                    if vlm_res.adjustments.is_empty() {
+                        eprintln!("[VLM] 质检结果：放行（无调整）");
+                        eprintln!("[VLM] 理由：{}", vlm_res.understanding);
+                        
+                        // 在前端显示 VLM 的质检报告
+                        let _ = app_handle.emit(
+                            "style-transfer-stream",
+                            serde_json::json!({
+                                "chunk_type": "thinking",
+                                "text": format!("\n[视觉模型质检]\n{}\n", vlm_res.understanding),
+                                "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+                            }),
+                        );
+                    } else {
+                        eprintln!("[VLM] 质检结果：提供了 {} 项调整", vlm_res.adjustments.len());
+                        eprintln!("[VLM] 理由：{}", vlm_res.understanding);
+                        
+                        // 记录每个调整项
+                        for adj in &vlm_res.adjustments {
+                            eprintln!("[VLM]   - {}: {} ({})", adj.key, adj.get_f64_value(), adj.reason);
+                        }
+                    }
+                    
                     // 合并VLM的理解说明
                     if !vlm_res.understanding.is_empty() {
                         final_res.understanding = format!(
-                            "{}\n\n[视觉模型微调]\n{}",
+                            "{}\n\n[视觉模型质检报告]\n{}",
                             final_res.understanding, vlm_res.understanding
                         );
                     }
@@ -5081,19 +5173,19 @@ pub async fn analyze_style_transfer(
                                 reason: s.reason,
                             };
                             if let Some(idx) = keyed.get(&candidate.key).copied() {
+                                eprintln!("[VLM] 覆盖算法建议：{} = {} -> {}", 
+                                    candidate.key, 
+                                    final_res.adjustments[idx].value, 
+                                    candidate.value
+                                );
                                 final_res.adjustments[idx] = candidate;
                             } else {
+                                eprintln!("[VLM] 新增建议：{} = {}", candidate.key, candidate.value);
                                 keyed.insert(candidate.key.clone(), final_res.adjustments.len());
                                 final_res.adjustments.push(candidate);
                             }
                         }
                     }
-                    // VLM成功完成，发送完成通知
-                    let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
-                        "chunk_type": "thinking",
-                        "text": "\n✓ 视觉模型微调完成\n",
-                        "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
-                    }));
                 }
                 Err(e) => {
                     // VLM失败，发送错误通知但继续使用算法结果
@@ -5110,6 +5202,16 @@ pub async fn analyze_style_transfer(
         }
     }
 
+    // 发送完成进度
+    let _ = app_handle.emit(
+        "style-transfer-stream",
+        serde_json::json!({
+            "chunk_type": "thinking",
+            "text": "[PROGRESS] (100%) - 分析完成\n",
+            "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
+        }),
+    );
+    
     // 不再发送done事件，让前端通过invoke的返回值来获取最终结果
     // 这样可以确保VLM完成后才显示结果
     Ok(final_res)
@@ -5129,12 +5231,113 @@ fn image_to_base64_jpeg(img: &DynamicImage) -> String {
     general_purpose::STANDARD.encode(buf.get_ref())
 }
 
+/// 生成预览图：应用算法建议到当前图
+/// 这样 VLM 可以直接"看到"调整后的效果，而不是猜测
+fn generate_preview_with_adjustments(
+    cur_img: &DynamicImage,
+    current_adjustments: &Value,
+    suggested_adjustments: &[StyleTransferSuggestion],
+) -> DynamicImage {
+    // 合并当前参数和建议参数
+    let mut merged_adjustments = current_adjustments.clone();
+    
+    if let Some(obj) = merged_adjustments.as_object_mut() {
+        for suggestion in suggested_adjustments {
+            match suggestion.key.as_str() {
+                "curves" | "hsl" => {
+                    // 复杂值直接使用
+                    if let Some(complex_val) = &suggestion.complex_value {
+                        obj.insert(suggestion.key.clone(), complex_val.clone());
+                    }
+                }
+                "lutData" | "lutIntensity" | "lutSize" | "lutPath" | "lutName" => {
+                    // LUT 相关参数
+                    if let Some(complex_val) = &suggestion.complex_value {
+                        obj.insert(suggestion.key.clone(), complex_val.clone());
+                    } else {
+                        obj.insert(suggestion.key.clone(), json!(suggestion.value));
+                    }
+                }
+                _ => {
+                    // 普通参数
+                    obj.insert(suggestion.key.clone(), json!(suggestion.value));
+                }
+            }
+        }
+    }
+    
+    // 应用参数到图片（简化版，只应用基础调整）
+    // 注意：这里不使用 GPU，因为我们在后台线程中
+    apply_cpu_adjustments_for_preview(cur_img, &merged_adjustments)
+}
+
+/// CPU 版本的参数应用（用于生成预览图）
+fn apply_cpu_adjustments_for_preview(img: &DynamicImage, adjustments: &Value) -> DynamicImage {
+    let mut result = img.clone();
+    
+    // 提取基础参数
+    let exposure = adjustments.get("exposure").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let contrast = adjustments.get("contrast").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _highlights = adjustments.get("highlights").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _shadows = adjustments.get("shadows").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _whites = adjustments.get("whites").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _blacks = adjustments.get("blacks").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let saturation = adjustments.get("saturation").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _vibrance = adjustments.get("vibrance").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let _temperature = adjustments.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    
+    // 应用基础调整（简化版）
+    let rgb = result.to_rgb32f();
+    let (width, height) = rgb.dimensions();
+    let mut pixels: Vec<f32> = rgb.into_raw();
+    
+    // 曝光调整
+    let exp_factor = 2.0_f32.powf(exposure / 100.0);
+    
+    // 对比度调整
+    let contrast_factor = 1.0 + (contrast / 100.0);
+    
+    // 饱和度调整
+    let sat_factor = 1.0 + (saturation / 100.0);
+    
+    for i in (0..pixels.len()).step_by(3) {
+        let mut r = pixels[i];
+        let mut g = pixels[i + 1];
+        let mut b = pixels[i + 2];
+        
+        // 曝光
+        r *= exp_factor;
+        g *= exp_factor;
+        b *= exp_factor;
+        
+        // 对比度（围绕 0.5 中心点）
+        r = ((r - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
+        g = ((g - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
+        b = ((b - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
+        
+        // 饱和度（简化版：基于亮度）
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        r = (lum + (r - lum) * sat_factor).clamp(0.0, 1.0);
+        g = (lum + (g - lum) * sat_factor).clamp(0.0, 1.0);
+        b = (lum + (b - lum) * sat_factor).clamp(0.0, 1.0);
+        
+        pixels[i] = r;
+        pixels[i + 1] = g;
+        pixels[i + 2] = b;
+    }
+    
+    // 转换回 DynamicImage
+    let rgb_img = image::Rgb32FImage::from_raw(width, height, pixels).unwrap();
+    DynamicImage::ImageRgb32F(rgb_img)
+}
+
 async fn run_vlm_refinement(
     endpoint: &str,
     api_key: Option<&str>,
     model: Option<&str>,
     ref_img: &DynamicImage,
     cur_img: &DynamicImage,
+    preview_img: &DynamicImage,
     current_adjustments: &Value,
     suggested_adjustments: &[StyleTransferSuggestion],
     app_handle: &tauri::AppHandle,
@@ -5153,43 +5356,162 @@ async fn run_vlm_refinement(
 
     let ref_b64 = image_to_base64_jpeg(ref_img);
     let cur_b64 = image_to_base64_jpeg(cur_img);
+    let preview_b64 = image_to_base64_jpeg(preview_img);
     
     // 记录图片大小用于调试
     eprintln!("[VLM] 参考图 base64 大小: {} bytes", ref_b64.len());
     eprintln!("[VLM] 当前图 base64 大小: {} bytes", cur_b64.len());
+    eprintln!("[VLM] 预览图 base64 大小: {} bytes", preview_b64.len());
 
-    let system_prompt = r#"你是一位专业摄影师和调色专家。请观察参考图(第一张)和当前图(第二张)，以及初步的参数调整建议。
+    let system_prompt = r#"你是整个风格迁移流程的最终质量把关者和审美优化专家。算法团队已经完成了初步分析，现在你需要：
 
-你的任务：
-1. 分析参考图和当前图的风格差异
-2. 评估初步建议是否合理
-3. 如果需要微调，提供具体的参数调整
+## 核心职责
 
-返回格式（严格JSON）：
+### 1. 纠错（Error Correction）- 必须执行
+作为专业摄影师，你必须检查并修正以下常见调色异常：
+
+**人像类异常：**
+- 肤色偏色（过黄/过红/过绿/过灰/死白）
+- 肤色不均匀（脸部色块、色斑）
+- 肤色过饱和或过灰
+- 人物轮廓光晕或边缘异常
+
+**曝光类异常：**
+- 整体过曝（高光溢出、细节丢失）
+- 整体欠曝（暗部死黑、噪点严重）
+- 曝光不均（局部过亮或过暗）
+- 对比度过强（黑白分离、中间调缺失）
+- 对比度过弱（灰蒙蒙、发雾）
+
+**色彩类异常：**
+- 色彩偏移（整体偏色：偏蓝/偏黄/偏绿/偏洋红）
+- 饱和度异常（过饱和导致失真、过灰导致无生气）
+- 色彩断层（渐变不自然、色彩分离）
+- 色温异常（冷暖失衡、不符合场景氛围）
+
+**细节类异常：**
+- 高光死白（天空、反光等区域无细节）
+- 阴影死黑（暗部完全黑、无层次）
+- 锐化过度（边缘发白、噪点明显）
+- 降噪过度（细节模糊、塑料感）
+
+**风格类异常：**
+- 色调不统一（冷暖混乱）
+- 氛围不符（人像用了风光调色、风光用了人像调色）
+- 过度HDR效果（不自然的光晕）
+- 暗角过重或不自然
+
+### 2. 审美微调（Aesthetic Refinement）- 谨慎执行
+在确保没有异常后，可以进行**轻微的审美优化**：
+- 微调色彩平衡，使画面更和谐
+- 轻微调整对比度，增强视觉冲击力
+- 优化局部细节，突出主体
+- 注意：**禁止大刀阔斧修改**，保持算法团队的整体风格方向
+
+## 工作流程
+
+1. **异常检测**：仔细观察当前图，识别上述任何异常
+2. **评估算法建议**：检查算法团队的建议是否会加重或引入新的异常
+3. **纠错优先**：如果发现异常，必须提供纠错参数（不能返回空数组）
+4. **审美微调**：如果无异常，可以提供轻微的审美优化（可选）
+5. **放行**：如果算法结果已经很好且无异常，返回空数组并说明原因
+
+## 返回格式（严格JSON）
+
 {
-  "understanding": "你对两张图片风格差异的分析（字符串）",
+  "understanding": "你的质检报告：\n1. 异常检测结果（发现了哪些问题）\n2. 算法建议评估（是否合理）\n3. 你的处理方案（纠错/微调/放行）",
   "adjustments": [
     {
-      "key": "参数名（如exposure、contrast等）",
+      "key": "参数名（如exposure、contrast、saturation、temperature等）",
       "value": 数值,
       "label": "参数中文名",
       "min": -100.0,
       "max": 100.0,
-      "reason": "调整理由"
+      "reason": "调整理由（必须说明：纠错/微调，解决什么问题）"
     }
   ]
 }
 
-重要规则：
-- adjustments必须是数组格式，即使为空也要返回[]
-- 如果初步建议已经很好，可以返回空数组[]，表示使用算法结果
-- 不要返回文本描述如"将使用算法结果继续"，而是直接返回[]
-- 每个adjustment对象必须包含key、value、label、min、max、reason字段
+## 重要规则
+
+1. **纠错优先**：发现异常必须修正，不能返回空数组
+2. **说明原因**：understanding 必须详细说明你的判断依据
+3. **谨慎微调**：审美优化要克制，单个参数调整幅度不超过±15
+4. **放行标准**：只有在"无异常 + 算法建议合理 + 无明显审美提升空间"时才返回空数组
+5. **数组格式**：adjustments 必须是数组，空数组用 []
+6. **完整字段**：每个 adjustment 必须包含 key、value、label、min、max、reason
+
+## 示例
+
+**发现异常（必须纠错）：**
+```json
+{
+  "understanding": "质检报告：\n1. 异常检测：发现人像肤色偏黄（色温过暖），整体曝光偏高导致高光溢出\n2. 算法建议评估：算法建议的曝光+0.8会加重高光溢出问题\n3. 处理方案：纠错 - 降低色温修正肤色，降低曝光和高光保护细节",
+  "adjustments": [
+    {"key": "temperature", "value": -12, "label": "色温", "min": -100, "max": 100, "reason": "纠错：修正肤色偏黄问题"},
+    {"key": "exposure", "value": -0.5, "label": "曝光度", "min": -2.5, "max": 2.5, "reason": "纠错：防止高光溢出"},
+    {"key": "highlights", "value": -25, "label": "高光", "min": -100, "max": 100, "reason": "纠错：拉回高光细节"}
+  ]
+}
+```
+
+**无异常但可微调：**
+```json
+{
+  "understanding": "质检报告：\n1. 异常检测：未发现明显异常\n2. 算法建议评估：整体合理，但对比度可以轻微增强\n3. 处理方案：审美微调 - 轻微增强对比度和饱和度",
+  "adjustments": [
+    {"key": "contrast", "value": 8, "label": "对比度", "min": -100, "max": 100, "reason": "审美微调：轻微增强视觉冲击力"},
+    {"key": "vibrance", "value": 5, "label": "自然饱和度", "min": -100, "max": 100, "reason": "审美微调：让色彩更生动"}
+  ]
+}
+```
+
+**无异常且算法已优秀：**
+```json
+{
+  "understanding": "质检报告：\n1. 异常检测：未发现任何异常\n2. 算法建议评估：参数合理，曝光、色彩、对比度都在最佳范围\n3. 处理方案：放行 - 算法结果已经很好，无需调整",
+  "adjustments": []
+}
+```
 "#;
     let user_text = format!(
-        "当前参数: {}\n初步建议: {}",
-        current_adjustments,
-        serde_json::to_string(suggested_adjustments).unwrap_or_default()
+        r#"## 当前任务：风格迁移质量把关
+
+### 图片信息
+- 第一张：参考图（目标风格）
+- 第二张：当前图（调整前的原始图）
+- 第三张：预览图（应用算法建议后的效果）← 重点检查！
+
+### 当前参数状态
+```json
+{}
+```
+
+### 算法团队的初步建议
+```json
+{}
+```
+
+### 你的任务
+1. **对比三张图**：参考图 vs 当前图 vs 预览图
+2. **检查预览图是否存在异常**：
+   - 肤色问题（偏色、过饱和、不均匀）
+   - 曝光问题（过曝、欠曝、死黑、死白）
+   - 色彩问题（偏色、断层、失真）
+   - 细节问题（高光溢出、阴影死黑）
+3. **评估算法建议的效果**：
+   - 预览图是否改善了风格差异？
+   - 预览图是否引入了新的问题？
+4. **提供纠错或微调建议**：
+   - 如果预览图有异常，必须提供纠错参数
+   - 如果预览图无异常但可以优化，提供轻微微调
+   - 如果预览图已经很好，返回空数组并说明原因
+
+**重要**：你现在可以直接"看到"应用参数后的效果（预览图），请基于视觉判断，而不是猜测！
+
+请严格按照 JSON 格式返回你的质检报告和调整建议。"#,
+        serde_json::to_string_pretty(current_adjustments).unwrap_or_default(),
+        serde_json::to_string_pretty(suggested_adjustments).unwrap_or_default()
     );
 
     let messages = json!([
@@ -5214,6 +5536,12 @@ async fn run_vlm_refinement(
                     "type": "image_url",
                     "image_url": {
                         "url": format!("data:image/jpeg;base64,{}", cur_b64)
+                    }
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", preview_b64)
                     }
                 }
             ]

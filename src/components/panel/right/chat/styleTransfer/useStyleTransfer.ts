@@ -1,9 +1,9 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { AppSettings, Invokes } from '../../../../ui/AppProperties';
 import { Adjustments } from '../../../../../utils/adjustments';
+import { useChatPersistence } from '../../../../../hooks/useChatPersistence';
 import {
   ChatAdjustResponse,
   ChatMessage,
@@ -30,6 +30,7 @@ interface PendingStyleTransferSelection {
   auxReferencePaths: string[];
   sourceImagePath: string;
   styleTransferType?: string;
+  messageId?: string; // 关联的消息 ID
 }
 
 interface UseStyleTransferParams {
@@ -63,26 +64,40 @@ export function useStyleTransfer({
   applyAssistantResult,
   t,
 }: UseStyleTransferParams) {
+  // 持久化管理
+  const { saveConfig, loadConfig } = useChatPersistence(currentImagePath);
+
+  // 从持久化存储加载配置
+  const persistedConfig = loadConfig();
+
   const [styleTransferPreset, setStyleTransferPreset] = useState<StyleTransferPreset>(
-    appSettings?.styleTransferPreset || 'artistic',
+    persistedConfig.styleTransferPreset || appSettings?.styleTransferPreset || 'artistic',
   );
   const [styleStrengthInput, setStyleStrengthInput] = useState(
-    formatStyleTransferConfig(appSettings?.styleTransferStrength ?? 1.0),
+    formatStyleTransferConfig(persistedConfig.styleTransferStrength ?? appSettings?.styleTransferStrength ?? 1.0),
   );
   const [highlightGuardInput, setHighlightGuardInput] = useState(
-    formatStyleTransferConfig(appSettings?.styleTransferHighlightGuard ?? 1.0),
+    formatStyleTransferConfig(
+      persistedConfig.styleTransferHighlightGuard ?? appSettings?.styleTransferHighlightGuard ?? 1.0,
+    ),
   );
   const [skinProtectInput, setSkinProtectInput] = useState(
-    formatStyleTransferConfig(appSettings?.styleTransferSkinProtect ?? 1.0),
+    formatStyleTransferConfig(persistedConfig.styleTransferSkinProtect ?? appSettings?.styleTransferSkinProtect ?? 1.0),
   );
-  const [pureStyleTransfer, setPureStyleTransfer] = useState(false);
-  const [enableStyleTransferLut, setEnableStyleTransferLut] = useState(true);
-  const [enableStyleTransferExpertPreset, setEnableStyleTransferExpertPreset] = useState(true);
-  const [enableStyleTransferFeatureMapping, setEnableStyleTransferFeatureMapping] = useState(true);
-  const [enableStyleTransferAutoRefine, setEnableStyleTransferAutoRefine] = useState(true);
-  const [enableStyleTransferVlm, setEnableStyleTransferVlm] = useState(true);
+  const [pureStyleTransfer, setPureStyleTransfer] = useState(persistedConfig.pureStyleTransfer ?? false);
+  const [enableStyleTransferLut, setEnableStyleTransferLut] = useState(persistedConfig.enableStyleTransferLut ?? true);
+  const [enableStyleTransferExpertPreset, setEnableStyleTransferExpertPreset] = useState(
+    persistedConfig.enableStyleTransferExpertPreset ?? true,
+  );
+  const [enableStyleTransferFeatureMapping, setEnableStyleTransferFeatureMapping] = useState(
+    persistedConfig.enableStyleTransferFeatureMapping ?? true,
+  );
+  const [enableStyleTransferAutoRefine, setEnableStyleTransferAutoRefine] = useState(
+    persistedConfig.enableStyleTransferAutoRefine ?? true,
+  );
+  const [enableStyleTransferVlm, setEnableStyleTransferVlm] = useState(persistedConfig.enableStyleTransferVlm ?? true);
   const [styleTransferStrategyMode, setStyleTransferStrategyMode] = useState<StyleTransferStrategyMode>(
-    appSettings?.styleTransferStrategyMode || 'safe',
+    persistedConfig.styleTransferStrategyMode || appSettings?.styleTransferStrategyMode || 'safe',
   );
   const [styleTransferModelStatus, setStyleTransferModelStatus] = useState<StyleTransferModelStatusResponse | null>(
     null,
@@ -182,6 +197,36 @@ export function useStyleTransfer({
     setStyleTransferStrategyMode(appSettings?.styleTransferStrategyMode || 'safe');
   }, [appSettings?.styleTransferStrategyMode]);
 
+  // 保存配置到持久化存储
+  useEffect(() => {
+    saveConfig({
+      styleTransferStrength: parseFloat(styleStrengthInput),
+      styleTransferHighlightGuard: parseFloat(highlightGuardInput),
+      styleTransferSkinProtect: parseFloat(skinProtectInput),
+      styleTransferPreset,
+      styleTransferStrategyMode,
+      pureStyleTransfer,
+      enableStyleTransferLut,
+      enableStyleTransferExpertPreset,
+      enableStyleTransferFeatureMapping,
+      enableStyleTransferAutoRefine,
+      enableStyleTransferVlm,
+    });
+  }, [
+    styleStrengthInput,
+    highlightGuardInput,
+    skinProtectInput,
+    styleTransferPreset,
+    styleTransferStrategyMode,
+    pureStyleTransfer,
+    enableStyleTransferLut,
+    enableStyleTransferExpertPreset,
+    enableStyleTransferFeatureMapping,
+    enableStyleTransferAutoRefine,
+    enableStyleTransferVlm,
+    saveConfig,
+  ]);
+
   const refreshStyleTransferModelStatus = useCallback(() => {
     return invoke<StyleTransferModelStatusResponse>(Invokes.GetStyleTransferModelStatus)
       .then((status) => {
@@ -258,11 +303,13 @@ export function useStyleTransfer({
       const currentStreamMsgId = streamMsgId;
       const runToken = crypto.randomUUID();
       activeRunTokenRef.current = runToken;
+      const thinkingStartTime = Date.now(); // 记录思考开始时间
       const streamMsg: ChatMessage = {
         id: currentStreamMsgId,
         role: 'assistant',
         content: '',
         thinkingContent: '',
+        thinkingStartTime, // 添加思考开始时间
         referencePath: mainReferencePath,
         mainReferencePath,
         auxReferencePaths,
@@ -275,47 +322,14 @@ export function useStyleTransfer({
 
       const simpleAdj = getSimpleAdjustments(adjustments);
       const tuning = getEffectiveStyleTransferTuning();
-      const appendRunNote = (note: string) => {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === currentStreamMsgId
-              ? {
-                  ...msg,
-                  content:
-                    msg.content.indexOf(note) >= 0 ? msg.content : `${msg.content}${msg.content ? '\n' : ''}${note}`,
-                }
-              : msg,
-          ),
-        );
-      };
 
       let cleanedUp = false;
       let unlisten = () => {};
       const cleanupRun = () => {
         if (cleanedUp) return;
         cleanedUp = true;
-        window.clearTimeout(slowWarningTimer);
-        window.clearTimeout(continueWaitTimer);
         unlisten();
       };
-
-      const slowWarningTimer = window.setTimeout(() => {
-        if (activeRunTokenRef.current !== runToken) return;
-        appendRunNote(t('chat.styleTransferSlowWarning'));
-      }, 30_000);
-
-      const continueWaitTimer = window.setTimeout(() => {
-        if (activeRunTokenRef.current !== runToken) return;
-        const shouldContinue = window.confirm(t('chat.styleTransferTimeoutConfirmPending'));
-        if (!shouldContinue) {
-          appendRunNote(t('chat.styleTransferRuntimeStopped'));
-          activeRunTokenRef.current = null;
-          setIsLoading(false);
-          cleanupRun();
-          return;
-        }
-        appendRunNote(t('chat.styleTransferContinueConfirmed'));
-      }, 120_000);
 
       const finalizeRun = () => {
         if (activeRunTokenRef.current === runToken) {
@@ -430,52 +444,49 @@ export function useStyleTransfer({
       return;
     }
 
-    return openFileDialog({
-      multiple: true,
-      filters: [
-        {
-          name: t('chat.imageFiles'),
-          extensions: [
-            'jpg',
-            'jpeg',
-            'png',
-            'tiff',
-            'tif',
-            'webp',
-            'bmp',
-            'dng',
-            'nef',
-            'cr2',
-            'cr3',
-            'arw',
-            'raf',
-            'orf',
-            'rw2',
-          ],
-        },
-      ],
-    })
-      .then((selected) => {
-        if (!selected) return;
+    // 创建用户消息
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: t('chat.importReference'),
+    };
 
-        const selectedPaths = Array.isArray(selected) ? selected : [selected];
-        const sanitizedPaths = selectedPaths.filter((path): path is string => typeof path === 'string' && !!path);
-        if (!sanitizedPaths.length) return;
-        const [mainReferencePath, ...auxReferencePaths] = sanitizedPaths;
-        setPendingStyleTransferSelection({
-          mainReferencePath,
-          auxReferencePaths,
-          sourceImagePath: currentImagePath,
-        });
-      })
-      .catch((error) => {
-        setError(String(error));
-      });
-  }, [currentImagePath, isLoading, runStyleTransfer, setError, t]);
+    // 创建 AI 消息（包含参考图设置模块）
+    const assistantMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      isStyleTransferSetup: true, // 标记为参考图设置消息
+    };
+
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+
+    // 设置待处理的风格迁移选择
+    setPendingStyleTransferSelection({
+      mainReferencePath: '',
+      auxReferencePaths: [],
+      sourceImagePath: currentImagePath,
+      messageId: assistantMsg.id, // 关联消息 ID
+    });
+  }, [currentImagePath, isLoading, setError, setMessages, t]);
 
   const confirmPendingStyleTransferSelection = useCallback(
     (styleTransferType?: string) => {
       if (!pendingStyleTransferSelection) return;
+
+      // 删除参考图设置消息（用户和 AI 的两条消息）
+      if (pendingStyleTransferSelection.messageId) {
+        setMessages((prev) => {
+          // 找到设置消息的索引
+          const setupMsgIndex = prev.findIndex((msg) => msg.id === pendingStyleTransferSelection.messageId);
+          if (setupMsgIndex > 0) {
+            // 删除用户消息和设置消息
+            return prev.filter((_, index) => index !== setupMsgIndex - 1 && index !== setupMsgIndex);
+          }
+          return prev;
+        });
+      }
+
       const selection = {
         ...pendingStyleTransferSelection,
         styleTransferType: styleTransferType || pendingStyleTransferSelection.styleTransferType || 'general',
@@ -483,16 +494,36 @@ export function useStyleTransfer({
       setPendingStyleTransferSelection(null);
       return runStyleTransfer(selection);
     },
-    [pendingStyleTransferSelection, runStyleTransfer],
+    [pendingStyleTransferSelection, runStyleTransfer, setMessages],
   );
 
   const cancelPendingStyleTransferSelection = useCallback(() => {
+    // 删除对应的消息
+    if (pendingStyleTransferSelection?.messageId) {
+      setMessages((prev) => prev.filter((msg) => msg.id !== pendingStyleTransferSelection.messageId));
+    }
     setPendingStyleTransferSelection(null);
+  }, [pendingStyleTransferSelection, setMessages]);
+
+  const updateMainReference = useCallback((path: string) => {
+    setPendingStyleTransferSelection((prev) => {
+      if (!prev) return null;
+      return { ...prev, mainReferencePath: path };
+    });
+  }, []);
+
+  const updateAuxReferences = useCallback((paths: string[]) => {
+    setPendingStyleTransferSelection((prev) => {
+      if (!prev) return null;
+      return { ...prev, auxReferencePaths: paths };
+    });
   }, []);
 
   return {
     cancelPendingStyleTransferSelection,
     confirmPendingStyleTransferSelection,
+    updateMainReference,
+    updateAuxReferences,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,

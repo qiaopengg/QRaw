@@ -1739,15 +1739,22 @@ pub async fn generate_thumbnails(
         let thumbnails: HashMap<String, String> = paths
             .par_iter()
             .filter_map(|path_str| {
-                generate_single_thumbnail_and_cache(
+                match generate_single_thumbnail_and_cache(
                     path_str,
                     &thumb_cache_dir,
                     gpu_context.as_ref(),
                     None,
                     false,
                     &app_handle_clone,
-                )
-                .map(|(data, _rating)| (path_str.clone(), data))
+                ) {
+                    Some((data, _rating)) => Some((path_str.clone(), data)),
+                    None => {
+                        // 记录失败的路径，帮助调试
+                        eprintln!("[generate_thumbnails] 生成缩略图失败: {}", path_str);
+                        // 返回错误信息而不是过滤掉
+                        Some((path_str.clone(), format!("ERROR:无法生成缩略图")))
+                    }
+                }
             })
             .collect();
 
