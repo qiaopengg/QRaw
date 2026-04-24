@@ -5163,6 +5163,7 @@ pub fn run() {
             file_management::delete_files_from_disk,
             file_management::delete_files_with_associated,
             file_management::save_metadata_and_update_thumbnail,
+            file_management::save_style_transfer_sidecar,
             file_management::apply_adjustments_to_paths,
             file_management::load_metadata,
             file_management::load_presets,

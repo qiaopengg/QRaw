@@ -1,5 +1,5 @@
-import React from 'react';
-import { Save } from 'lucide-react';
+import React, { useState } from 'react';
+import { Copy, Save } from 'lucide-react';
 import Slider from '../../../../ui/Slider';
 import { Adjustments } from '../../../../../utils/adjustments';
 import { ChatMessage, StyleConstraintAction } from '../types';
@@ -49,12 +49,101 @@ export function StyleTransferSuggestionsCard({
   message,
   t,
 }: StyleTransferSuggestionsCardProps) {
-  if (!message.adjustments || message.adjustments.length === 0) {
+  const [copied, setCopied] = useState(false);
+  const hasAdjustments = Boolean(message.adjustments && message.adjustments.length > 0);
+  const hasDebugContent = Boolean(message.processingDebug || message.styleDebug || message.constraintDebug);
+  if (!hasAdjustments && !hasDebugContent) {
     return null;
   }
 
+  const debugPayload = {
+    executionMeta: message.executionMeta,
+    processingDebug: message.processingDebug,
+    qualityReport: message.qualityReport,
+    riskWarnings: message.riskWarnings,
+    modelStatus: message.modelStatus
+      ? {
+          requiredReady: message.modelStatus.requiredReady,
+          fullReady: message.modelStatus.fullReady,
+          readyCount: message.modelStatus.readyCount,
+          requiredCount: message.modelStatus.requiredCount,
+          models: message.modelStatus.models.map((model) => ({
+            id: model.id,
+            ready: model.ready,
+            required: model.required,
+            filename: model.filename,
+          })),
+        }
+      : null,
+  };
+
+  const copyDebugPayload = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(debugPayload, null, 2));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy style transfer debug payload:', error);
+    }
+  };
+
   return (
     <div className="w-full bg-surface/50 rounded-lg p-2 space-y-2 border border-surface">
+      {message.processingDebug && (
+        <div className="rounded border border-cyan-400/20 bg-cyan-500/5 px-2 py-1.5 space-y-1">
+          <div className="flex items-center justify-between gap-2 text-[9px] text-text-secondary">
+            <span>处理调试</span>
+            <button
+              onClick={copyDebugPayload}
+              className="inline-flex items-center gap-1 text-cyan-300 hover:text-cyan-200 transition-colors"
+            >
+              <Copy size={10} />
+              {copied ? '已复制调试数据' : '复制调试数据'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-secondary/80">
+            <span>执行引擎 {message.executionMeta?.engine || 'unknown'}</span>
+            <span>canonical input {message.processingDebug.canonicalInputUsed ? 'on' : 'off'}</span>
+            <span>style backbone {message.processingDebug.styleBackboneUsed ? 'on' : 'off'}</span>
+            <span>
+              主参考相似度{' '}
+              {typeof message.processingDebug.semanticSimilarity === 'number'
+                ? message.processingDebug.semanticSimilarity.toFixed(2)
+                : 'n/a'}
+            </span>
+            <span>参考图数量 {message.processingDebug.referenceCount}</span>
+            <span>局部区域 {message.processingDebug.localRegionCount}</span>
+            <span>滑块映射 {message.processingDebug.sliderMappingCount}</span>
+            <span>风险提示 {message.processingDebug.riskWarningCount}</span>
+          </div>
+          <div className="flex flex-wrap gap-1 text-[9px]">
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              pure {message.processingDebug.pureAlgorithm ? 'on' : 'off'}
+            </span>
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              featureMapping {message.processingDebug.featureMappingEnabled ? 'on' : 'off'}
+            </span>
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              autoRefine {message.processingDebug.autoRefineEnabled ? 'on' : 'off'}
+            </span>
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              expertPreset {message.processingDebug.expertPresetEnabled ? 'on' : 'off'}
+            </span>
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              LUT {message.processingDebug.lutEnabled ? 'on' : 'off'}
+            </span>
+            <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
+              VLM {message.processingDebug.vlmEnabled ? 'on' : 'off'}
+            </span>
+          </div>
+          {!!message.processingDebug.auxSemanticSimilarities.length && (
+            <div className="text-[9px] text-text-secondary/75">
+              辅助参考图相似度 {message.processingDebug.auxSemanticSimilarities.map((value) => value.toFixed(2)).join(' / ')}
+            </div>
+          )}
+        </div>
+      )}
+
       {message.styleDebug && (
         <div className="rounded border border-surface bg-bg-primary/60 px-2 py-1.5 space-y-1">
           <div className="flex items-center justify-between text-[9px] text-text-secondary">
@@ -184,94 +273,98 @@ export function StyleTransferSuggestionsCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-text-secondary">{t('chat.suggestions')}</span>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              applyAllSuggestions(message);
-              const name = prompt('请输入预设名称', 'AI 预设');
-              if (name) addPreset(name, null, false, false, false);
-            }}
-            className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
-            title="将当前调整保存为预设"
-          >
-            <Save size={10} />
-            保存为预设
-          </button>
-          <button
-            onClick={() => applyAllSuggestions(message)}
-            className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            {t('chat.applyAll')}
-          </button>
-        </div>
-      </div>
+      {hasAdjustments && (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-text-secondary">{t('chat.suggestions')}</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  applyAllSuggestions(message);
+                  const name = prompt('请输入预设名称', 'AI 预设');
+                  if (name) addPreset(name, null, false, false, false);
+                }}
+                className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors"
+                title="将当前调整保存为预设"
+              >
+                <Save size={10} />
+                保存为预设
+              </button>
+              <button
+                onClick={() => applyAllSuggestions(message)}
+                className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                {t('chat.applyAll')}
+              </button>
+            </div>
+          </div>
 
-      {message.adjustments.map((suggestion) => (
-        <div key={suggestion.key} className="space-y-0.5">
-          {suggestion.reason && <p className="text-[9px] text-text-secondary opacity-60">{suggestion.reason}</p>}
-          {suggestion.key === 'hsl' &&
-          suggestion.complex_value !== undefined &&
-          typeof suggestion.complex_value === 'object' ? (
-            <div className="rounded border border-surface bg-surface/30 px-2 py-1.5 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-text-primary">{suggestion.label || '颜色混合器'}</span>
-                <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">HSL</span>
-              </div>
-              {Object.entries(
-                suggestion.complex_value as Record<string, Partial<Adjustments['hsl'][keyof Adjustments['hsl']]>>,
-              ).map(([color]) => (
-                <div key={color} className="space-y-0.5">
-                  <div className="text-[9px] text-text-secondary/80">{HSL_COLOR_LABELS[color] || color}</div>
-                  <Slider
-                    label="色相"
-                    min={-100}
-                    max={100}
-                    step={1}
-                    value={adjustments.hsl[color]?.hue ?? 0}
-                    onChange={(event) => handleHslSliderChange(message.id, color, 'hue', event)}
-                  />
-                  <Slider
-                    label="饱和度"
-                    min={-100}
-                    max={100}
-                    step={1}
-                    value={adjustments.hsl[color]?.saturation ?? 0}
-                    onChange={(event) => handleHslSliderChange(message.id, color, 'saturation', event)}
-                  />
-                  <Slider
-                    label="明度"
-                    min={-100}
-                    max={100}
-                    step={1}
-                    value={adjustments.hsl[color]?.luminance ?? 0}
-                    onChange={(event) => handleHslSliderChange(message.id, color, 'luminance', event)}
-                  />
+          {message.adjustments?.map((suggestion) => (
+            <div key={suggestion.key} className="space-y-0.5">
+              {suggestion.reason && <p className="text-[9px] text-text-secondary opacity-60">{suggestion.reason}</p>}
+              {suggestion.key === 'hsl' &&
+              suggestion.complex_value !== undefined &&
+              typeof suggestion.complex_value === 'object' ? (
+                <div className="rounded border border-surface bg-surface/30 px-2 py-1.5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-text-primary">{suggestion.label || '颜色混合器'}</span>
+                    <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">HSL</span>
+                  </div>
+                  {Object.entries(
+                    suggestion.complex_value as Record<string, Partial<Adjustments['hsl'][keyof Adjustments['hsl']]>>,
+                  ).map(([color]) => (
+                    <div key={color} className="space-y-0.5">
+                      <div className="text-[9px] text-text-secondary/80">{HSL_COLOR_LABELS[color] || color}</div>
+                      <Slider
+                        label="色相"
+                        min={-100}
+                        max={100}
+                        step={1}
+                        value={adjustments.hsl[color]?.hue ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, color, 'hue', event)}
+                      />
+                      <Slider
+                        label="饱和度"
+                        min={-100}
+                        max={100}
+                        step={1}
+                        value={adjustments.hsl[color]?.saturation ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, color, 'saturation', event)}
+                      />
+                      <Slider
+                        label="明度"
+                        min={-100}
+                        max={100}
+                        step={1}
+                        value={adjustments.hsl[color]?.luminance ?? 0}
+                        onChange={(event) => handleHslSliderChange(message.id, color, 'luminance', event)}
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : suggestion.complex_value !== undefined ? (
+                <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">
+                  <span className="text-[10px] text-text-primary">{suggestion.label}</span>
+                  <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">已应用高级映射</span>
+                </div>
+              ) : (
+                <Slider
+                  label={suggestion.label}
+                  min={suggestion.min}
+                  max={suggestion.max}
+                  step={suggestion.key === 'exposure' ? 0.01 : 1}
+                  value={
+                    (adjustments[suggestion.key as keyof Adjustments] as number) ??
+                    message.appliedValues?.[suggestion.key] ??
+                    suggestion.value
+                  }
+                  onChange={(event) => handleSliderChange(message.id, suggestion.key, event)}
+                />
+              )}
             </div>
-          ) : suggestion.complex_value !== undefined ? (
-            <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">
-              <span className="text-[10px] text-text-primary">{suggestion.label}</span>
-              <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">已应用高级映射</span>
-            </div>
-          ) : (
-            <Slider
-              label={suggestion.label}
-              min={suggestion.min}
-              max={suggestion.max}
-              step={suggestion.key === 'exposure' ? 0.01 : 1}
-              value={
-                (adjustments[suggestion.key as keyof Adjustments] as number) ??
-                message.appliedValues?.[suggestion.key] ??
-                suggestion.value
-              }
-              onChange={(event) => handleSliderChange(message.id, suggestion.key, event)}
-            />
-          )}
-        </div>
-      ))}
+          ))}
+        </>
+      )}
     </div>
   );
 }

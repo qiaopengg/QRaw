@@ -27,7 +27,7 @@ download() {
     fi
 
     echo "  ⬇️  Downloading $name ..."
-    if curl -L --fail --progress-bar -o "$dest" "$url"; then
+    if curl -L -sS --fail -o "$dest" "$url"; then
         local size=$(stat -f%z "$dest" 2>/dev/null || stat -c%s "$dest" 2>/dev/null)
         echo "  ✅ $name ($(echo "scale=1; $size/1048576" | bc) MB)"
     else
@@ -42,19 +42,19 @@ echo "── Required Models ──"
 
 # YOLOv8n-Face (face detection, required)
 download \
-    "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.onnx" \
+    "https://mirror.ghproxy.com/https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.onnx" \
     "$MODELS_DIR/yolov8n-face.onnx" \
     "YOLOv8n-Face (face detection)"
 
 # YuNet (face detection, preferred)
 download \
-    "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" \
+    "https://mirror.ghproxy.com/https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" \
     "$MODELS_DIR/face_detection_yunet_2023mar.onnx" \
     "YuNet (face detection)"
 
 # FerPlus (expression classification, fallback)
 download \
-    "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx" \
+    "https://mirror.ghproxy.com/https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx" \
     "$MODELS_DIR/emotion-ferplus-8.onnx" \
     "FerPlus (expression)"
 
@@ -63,21 +63,21 @@ echo "── Enhancement Models ──"
 
 # InsightFace 2d106det (106-point landmark, enables EAR blink detection)
 download \
-    "https://huggingface.co/fofr/comfyui/resolve/main/insightface/models/buffalo_l/2d106det.onnx" \
+    "https://hf-mirror.com/fofr/comfyui/resolve/main/insightface/models/buffalo_l/2d106det.onnx" \
     "$MODELS_DIR/2d106det.onnx" \
     "InsightFace 2d106det (blink detection)"
 
 # HSEmotion ONNX (better expression model, replaces FerPlus)
 # From hsemotion-onnx package — the model is hosted on GitHub
 download \
-    "https://github.com/HSE-asavchenko/hsemotion-onnx/raw/main/hsemotion_onnx/models/enet_b0_8_best_afew.onnx" \
+    "https://mirror.ghproxy.com/https://github.com/HSE-asavchenko/hsemotion-onnx/raw/main/hsemotion_onnx/models/enet_b0_8_best_afew.onnx" \
     "$MODELS_DIR/hsemotion.onnx" \
     "HSEmotion (expression, AffectNet-trained)"
 
 # NIMA Aesthetic — try from idealo's pre-exported ONNX on HuggingFace
 # Note: If this URL doesn't work, NIMA aesthetic will be skipped (optional)
 download \
-    "https://huggingface.co/chavinlo/nima-aesthetic/resolve/main/nima_aesthetic.onnx" \
+    "https://hf-mirror.com/chavinlo/nima-aesthetic/resolve/main/nima_aesthetic.onnx" \
     "$MODELS_DIR/nima.onnx" \
     "NIMA Aesthetic (image quality)" || true
 

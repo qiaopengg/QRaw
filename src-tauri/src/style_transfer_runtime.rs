@@ -118,10 +118,55 @@ pub struct StyleTransferExecutionMeta {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct StyleTransferProcessingDebug {
+    pub canonical_input_used: bool,
+    pub style_backbone_used: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_backbone_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_similarity: Option<f64>,
+    #[serde(default)]
+    pub aux_semantic_similarities: Vec<f64>,
+    pub reference_count: usize,
+    pub pure_algorithm: bool,
+    pub feature_mapping_enabled: bool,
+    pub auto_refine_enabled: bool,
+    pub expert_preset_enabled: bool,
+    pub lut_enabled: bool,
+    pub vlm_enabled: bool,
+    pub local_region_count: usize,
+    pub slider_mapping_count: usize,
+    pub risk_warning_count: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct StyleTransferExecutionResponse {
     pub understanding: String,
     #[serde(default)]
     pub adjustments: Vec<StyleTransferSuggestion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_adjustments: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guarded_global_adjustments: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curves: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hsl: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_lut: Option<Value>,
+    #[serde(default)]
+    pub local_regions: Vec<Value>,
+    #[serde(default)]
+    pub guarded_local_regions: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_report: Option<Value>,
+    #[serde(default)]
+    pub risk_warnings: Vec<String>,
+    #[serde(default)]
+    pub slider_mapping: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processing_debug: Option<StyleTransferProcessingDebug>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_debug: Option<StyleTransferDebugInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,20 +210,74 @@ fn wrap_analysis_response(
     preset: StyleTransferPreset,
     strategy_mode: StyleTransferStrategyMode,
     reference_count: usize,
+    request: &StyleTransferRunRequest,
     model_status: Option<StyleTransferModelStatusResponse>,
 ) -> StyleTransferExecutionResponse {
-    let engine = if model_status
+    let engine = if analysis_response.backbone_used {
+        if request.pure_algorithm.unwrap_or(false) {
+            "analysis-canonical-vitb-pure"
+        } else {
+            "analysis-canonical-vitb-enhanced"
+        }
+    } else if model_status
         .as_ref()
-        .map(|s| s.required_ready)
+        .map(|status| status.required_ready)
         .unwrap_or(false)
     {
-        "legacy-analysis-v4-skeleton"
+        "analysis-canonical-fallback"
     } else {
-        "legacy-analysis"
+        "analysis-legacy-fallback"
     };
+    let processing_debug = Some(StyleTransferProcessingDebug {
+        canonical_input_used: analysis_response.canonical_input_used,
+        style_backbone_used: analysis_response.backbone_used,
+        style_backbone_model: analysis_response
+            .backbone_used
+            .then(|| "style_transfer_dinov2_vitb.onnx".to_string()),
+        semantic_similarity: analysis_response.semantic_similarity,
+        aux_semantic_similarities: analysis_response.aux_semantic_similarities.clone(),
+        reference_count,
+        pure_algorithm: request.pure_algorithm.unwrap_or(false),
+        feature_mapping_enabled: request.enable_feature_mapping.unwrap_or(true)
+            && !request.pure_algorithm.unwrap_or(false),
+        auto_refine_enabled: request.enable_auto_refine.unwrap_or(true)
+            && !request.pure_algorithm.unwrap_or(false),
+        expert_preset_enabled: request.enable_expert_preset.unwrap_or(true)
+            && !request.pure_algorithm.unwrap_or(false),
+        lut_enabled: request.enable_lut.unwrap_or(true) && !request.pure_algorithm.unwrap_or(false),
+        vlm_enabled: request.enable_vlm.unwrap_or(true) && !request.pure_algorithm.unwrap_or(false),
+        local_region_count: analysis_response.local_regions.len(),
+        slider_mapping_count: analysis_response.slider_mapping.len(),
+        risk_warning_count: analysis_response.risk_warnings.len(),
+    });
     StyleTransferExecutionResponse {
         understanding: analysis_response.understanding,
         adjustments: analysis_response.adjustments,
+        global_adjustments: Some(analysis_response.global_adjustments),
+        guarded_global_adjustments: Some(analysis_response.guarded_global_adjustments),
+        curves: Some(analysis_response.curves),
+        hsl: Some(analysis_response.hsl),
+        global_lut: analysis_response.global_lut,
+        local_regions: analysis_response
+            .local_regions
+            .into_iter()
+            .map(|region| serde_json::to_value(region).unwrap_or(Value::Null))
+            .collect(),
+        guarded_local_regions: analysis_response
+            .guarded_local_regions
+            .into_iter()
+            .map(|region| serde_json::to_value(region).unwrap_or(Value::Null))
+            .collect(),
+        quality_report: analysis_response
+            .quality_report
+            .and_then(|report| serde_json::to_value(report).ok()),
+        risk_warnings: analysis_response.risk_warnings,
+        slider_mapping: analysis_response
+            .slider_mapping
+            .into_iter()
+            .map(|entry| serde_json::to_value(entry).unwrap_or(Value::Null))
+            .collect(),
+        processing_debug,
         style_debug: analysis_response.style_debug,
         output_image_path: None,
         preview_image_path: None,
@@ -239,6 +338,7 @@ pub async fn run_style_transfer(
     request: StyleTransferRunRequest,
     app_handle: tauri::AppHandle,
 ) -> Result<StyleTransferExecutionResponse, String> {
+    let request_snapshot = request.clone();
     let requested_mode = resolve_mode(request.mode, &app_handle);
     let preset = resolve_preset(request.preset, &app_handle);
     let strategy_mode = resolve_strategy_mode(request.strategy_mode);
@@ -253,6 +353,7 @@ pub async fn run_style_transfer(
         );
     let analysis_response = style_transfer::analyze_style_transfer(
         reference_path,
+        request.aux_reference_paths.clone(),
         request.current_image_path,
         request.current_adjustments,
         style_strength,
@@ -278,6 +379,7 @@ pub async fn run_style_transfer(
         preset,
         strategy_mode,
         reference_count,
+        &request_snapshot,
         model_status,
     ))
 }

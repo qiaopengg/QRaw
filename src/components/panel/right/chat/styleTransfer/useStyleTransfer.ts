@@ -25,6 +25,12 @@ interface StyleTransferTuningValues {
   skinProtectStrength: number;
 }
 
+interface PendingStyleTransferSelection {
+  mainReferencePath: string;
+  auxReferencePaths: string[];
+  sourceImagePath: string;
+}
+
 interface UseStyleTransferParams {
   activeModel: string;
   adjustments: Adjustments;
@@ -68,7 +74,7 @@ export function useStyleTransfer({
   const [skinProtectInput, setSkinProtectInput] = useState(
     formatStyleTransferConfig(appSettings?.styleTransferSkinProtect ?? 1.0),
   );
-  const [pureStyleTransfer, setPureStyleTransfer] = useState(true);
+  const [pureStyleTransfer, setPureStyleTransfer] = useState(false);
   const [enableStyleTransferLut, setEnableStyleTransferLut] = useState(true);
   const [enableStyleTransferExpertPreset, setEnableStyleTransferExpertPreset] = useState(true);
   const [enableStyleTransferFeatureMapping, setEnableStyleTransferFeatureMapping] = useState(true);
@@ -81,6 +87,8 @@ export function useStyleTransfer({
     null,
   );
   const [isPreparingStyleTransferModels, setIsPreparingStyleTransferModels] = useState(false);
+  const [pendingStyleTransferSelection, setPendingStyleTransferSelection] =
+    useState<PendingStyleTransferSelection | null>(null);
   const activeRunTokenRef = useRef<string | null>(null);
 
   const parseStyleTransferProgress = useCallback((rawText: string) => {
@@ -283,6 +291,7 @@ export function useStyleTransfer({
         if (cleanedUp) return;
         cleanedUp = true;
         window.clearTimeout(slowWarningTimer);
+        window.clearTimeout(continueWaitTimer);
         unlisten();
       };
 
@@ -290,6 +299,19 @@ export function useStyleTransfer({
         if (activeRunTokenRef.current !== runToken) return;
         appendRunNote(t('chat.styleTransferSlowWarning'));
       }, 30_000);
+
+      const continueWaitTimer = window.setTimeout(() => {
+        if (activeRunTokenRef.current !== runToken) return;
+        const shouldContinue = window.confirm(t('chat.styleTransferTimeoutConfirmPending'));
+        if (!shouldContinue) {
+          appendRunNote(t('chat.styleTransferRuntimeStopped'));
+          activeRunTokenRef.current = null;
+          setIsLoading(false);
+          cleanupRun();
+          return;
+        }
+        appendRunNote(t('chat.styleTransferContinueConfirmed'));
+      }, 120_000);
 
       const finalizeRun = () => {
         if (activeRunTokenRef.current === runToken) {
@@ -435,8 +457,7 @@ export function useStyleTransfer({
         const sanitizedPaths = selectedPaths.filter((path): path is string => typeof path === 'string' && !!path);
         if (!sanitizedPaths.length) return;
         const [mainReferencePath, ...auxReferencePaths] = sanitizedPaths;
-
-        return runStyleTransfer({
+        setPendingStyleTransferSelection({
           mainReferencePath,
           auxReferencePaths,
           sourceImagePath: currentImagePath,
@@ -447,7 +468,20 @@ export function useStyleTransfer({
       });
   }, [currentImagePath, isLoading, runStyleTransfer, setError, t]);
 
+  const confirmPendingStyleTransferSelection = useCallback(() => {
+    if (!pendingStyleTransferSelection) return;
+    const selection = pendingStyleTransferSelection;
+    setPendingStyleTransferSelection(null);
+    return runStyleTransfer(selection);
+  }, [pendingStyleTransferSelection, runStyleTransfer]);
+
+  const cancelPendingStyleTransferSelection = useCallback(() => {
+    setPendingStyleTransferSelection(null);
+  }, []);
+
   return {
+    cancelPendingStyleTransferSelection,
+    confirmPendingStyleTransferSelection,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,
@@ -476,5 +510,6 @@ export function useStyleTransfer({
     refreshStyleTransferModelStatus,
     updateStyleTransferStrategyMode,
     updateStyleTransferPreset,
+    pendingStyleTransferSelection,
   };
 }

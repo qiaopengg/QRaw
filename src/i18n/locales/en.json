@@ -998,6 +998,7 @@
     "styleTransferPrepareModels": "Prepare models",
     "styleTransferModelStatusPending": "Some required local models are still missing.",
     "styleTransferModelStatusReady": "All required local models are ready.",
+    "styleTransferModelStatusDegraded": "Running in degraded mode: core segmentation models are ready, but the DINOv2 style backbone is still missing.",
     "styleTransferArtifactReady": "Ready",
     "styleTransferArtifactPending": "Pending",
     "styleTransferStrengthLabel": "Style Strength (0.5 - 2.0)",

@@ -130,9 +130,11 @@ export function StyleTransferSettings({
                 </button>
               </div>
               <div className="text-[9px] text-text-secondary/70">
-                {styleTransferModelStatus?.requiredReady
+                {styleTransferModelStatus?.fullReady
                   ? t('chat.styleTransferModelStatusReady')
-                  : t('chat.styleTransferModelStatusPending')}
+                  : styleTransferModelStatus?.requiredReady
+                    ? t('chat.styleTransferModelStatusDegraded')
+                    : t('chat.styleTransferModelStatusPending')}
               </div>
               {styleTransferModelStatus?.models?.length ? (
                 <div className="max-h-24 overflow-y-auto space-y-1 pt-1">
@@ -141,9 +143,20 @@ export function StyleTransferSettings({
                       key={model.id}
                       className="flex items-center justify-between gap-2 rounded bg-surface/40 px-1.5 py-1 text-[9px]"
                     >
-                      <span className="truncate text-text-secondary">{model.name}</span>
-                      <span className={model.ready ? 'text-emerald-300' : 'text-amber-300'}>
-                        {model.ready ? t('chat.styleTransferArtifactReady') : t('chat.styleTransferArtifactPending')}
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <span className="truncate text-text-secondary">{model.name}</span>
+                        <span
+                          className={`shrink-0 rounded px-1 py-0.5 ${
+                            model.required
+                              ? 'bg-blue-500/10 text-blue-300'
+                              : 'bg-text-secondary/10 text-text-secondary/80'
+                          }`}
+                        >
+                          {model.required ? '必需' : '可选'}
+                        </span>
+                      </div>
+                      <span className={model.ready ? 'text-emerald-300' : model.required ? 'text-amber-300' : 'text-text-secondary/70'}>
+                        {model.ready ? t('chat.styleTransferArtifactReady') : model.required ? t('chat.styleTransferArtifactPending') : '不影响主流程'}
                       </span>
                     </div>
                   ))}

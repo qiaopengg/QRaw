@@ -24,6 +24,8 @@ export interface StyleTransferModelArtifactStatus {
 export interface StyleTransferModelStatusResponse {
   modelDir: string;
   requiredReady: boolean;
+  fullReady: boolean;
+  degradedMode: boolean;
   readyCount: number;
   requiredCount: number;
   models: StyleTransferModelArtifactStatus[];
@@ -54,10 +56,59 @@ export interface StyleTransferExecutionMeta {
   referenceCount: number;
 }
 
+export interface StyleTransferProcessingDebug {
+  canonicalInputUsed: boolean;
+  styleBackboneUsed: boolean;
+  styleBackboneModel?: string;
+  semanticSimilarity?: number;
+  auxSemanticSimilarities: number[];
+  referenceCount: number;
+  pureAlgorithm: boolean;
+  featureMappingEnabled: boolean;
+  autoRefineEnabled: boolean;
+  expertPresetEnabled: boolean;
+  lutEnabled: boolean;
+  vlmEnabled: boolean;
+  localRegionCount: number;
+  sliderMappingCount: number;
+  riskWarningCount: number;
+}
+
 export interface StyleTransferProgressState {
   percentage: number;
   description: string;
   rawText: string;
+}
+
+export interface StyleTransferSliderMappingEntry {
+  key: string;
+  value: unknown;
+  complexValue?: unknown;
+  target: 'adjustments' | 'curves' | 'hsl' | 'lut';
+  label?: string;
+}
+
+export interface StyleTransferLocalRegionMaskHint {
+  maskType: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface StyleTransferLocalRegion {
+  id: string;
+  label: string;
+  regionType: string;
+  defaultHidden: boolean;
+  visibleInUi: boolean;
+  adjustments: Record<string, unknown>;
+  maskHint: StyleTransferLocalRegionMaskHint;
+}
+
+export interface StyleTransferQualityReport {
+  guarded: boolean;
+  referenceCount: number;
+  baselineDistance: number;
+  fusedReferenceWeight: number;
+  notes: string[];
 }
 
 export type StyleTransferPreviewWorkflowState =
@@ -188,7 +239,18 @@ export interface ChatAdjustResponse {
   adjustments: AdjustmentSuggestion[];
   style_debug?: StyleDebugInfo;
   constraint_debug?: ConstraintDebugInfo;
+  globalAdjustments?: Record<string, unknown>;
+  guardedGlobalAdjustments?: Record<string, unknown>;
+  curves?: Adjustments['curves'];
+  hsl?: Partial<Adjustments['hsl']>;
+  globalLut?: Record<string, unknown> | null;
+  localRegions?: StyleTransferLocalRegion[];
+  guardedLocalRegions?: StyleTransferLocalRegion[];
+  qualityReport?: StyleTransferQualityReport;
+  riskWarnings?: string[];
+  sliderMapping?: StyleTransferSliderMappingEntry[];
   executionMeta?: StyleTransferExecutionMeta;
+  processingDebug?: StyleTransferProcessingDebug;
   modelStatus?: StyleTransferModelStatusResponse;
   outputImagePath?: string;
   previewImagePath?: string;
@@ -205,7 +267,18 @@ export interface ChatMessage {
   appliedValues?: AppliedValueMap;
   styleDebug?: StyleDebugInfo;
   constraintDebug?: ConstraintDebugInfo;
+  globalAdjustments?: Record<string, unknown>;
+  guardedGlobalAdjustments?: Record<string, unknown>;
+  curves?: Adjustments['curves'];
+  hsl?: Partial<Adjustments['hsl']>;
+  globalLut?: Record<string, unknown> | null;
+  localRegions?: StyleTransferLocalRegion[];
+  guardedLocalRegions?: StyleTransferLocalRegion[];
+  qualityReport?: StyleTransferQualityReport;
+  riskWarnings?: string[];
+  sliderMapping?: StyleTransferSliderMappingEntry[];
   executionMeta?: StyleTransferExecutionMeta;
+  processingDebug?: StyleTransferProcessingDebug;
   outputImagePath?: string;
   previewImagePath?: string;
   pureGenerationImagePath?: string;

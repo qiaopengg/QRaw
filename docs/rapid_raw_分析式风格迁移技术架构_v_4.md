@@ -2503,3 +2503,234 @@ RapidRAW V4 不再讨论“生成式还是分析式”
 - 模型只负责低分辨率理解与参数预测
 - 最终高分辨率效果由现有 GPU / shader / LUT / mask 编辑链完成
 - 风格迁移结果不是黑箱结果图，而是可编辑的滑块、曲线、HSL、LUT、局部区域参数
+
+## 18.8 本轮记录（工程实施状态核对）
+
+### Y. 已完成的前置工程
+
+当前结论：
+
+- 已建立统一的风格迁移模型管理入口，继续沿用 `~/.qraw/models` 作为共享模型仓
+- 已在前端加入：
+  - `safe / strong` 策略切换
+  - 主参考图 + 辅助参考图请求结构
+  - 模型准备按钮
+  - 模型就绪状态卡片
+- 已在运行时加入：
+  - 多参考图字段
+  - 策略模式字段
+  - 模型状态回传结构
+
+### Z. 当前未完成项
+
+当前结论：
+
+- `style_transfer_dinov2_vitb.onnx`
+  - 当前仍未正式落地到共享模型仓
+- `style_transfer_dinov2_vitb.preprocess.json`
+  - 当前仍未正式落地到共享模型仓
+- 当前运行时主链仍在调用既有 `style_transfer::analyze_style_transfer`
+- 新增的模型管理目前主要完成了“状态管理 / 准备入口 / UI 暴露”，尚未完成 DINOv2 风格理解模型的正式推理接入
+
+### AA. 对“是否严格符合文档”的阶段判断
+
+当前结论：
+
+- 当前 staged 代码不应被视为“100% 严格符合 V4 文档”
+- 更准确地说：
+  - 已完成 Phase 1 的管理骨架与交互骨架
+  - 尚未完成 V4 文档要求的核心模型推理闭环
+  - 尚未完成 canonical RAW preview + 风格 backbone + 参数预测头 + 高分辨率应用闭环
+
+## 18.9 本轮记录（模型下载与运行时对接收口）
+
+### AB. 风格 backbone 模型来源与落盘结果
+
+当前结论：
+
+- `style_transfer_dinov2_vitb.onnx`
+  - 已正式落盘到共享模型仓 `~/.qraw/models`
+- `style_transfer_dinov2_vitb.preprocess.json`
+  - 已正式落盘到共享模型仓 `~/.qraw/models`
+- 当前使用的真实上游来源不是 `CyberTimon/RapidRAW-Models`
+  - 而是 `onnx-community/dinov2-base-ONNX`
+- 项目内继续沿用 RapidRAW 侧的目标工件命名：
+  - `style_transfer_dinov2_vitb.onnx`
+  - `style_transfer_dinov2_vitb.preprocess.json`
+
+本轮实测 SHA256：
+
+- `style_transfer_dinov2_vitb.onnx`
+  - `f16115e628d65b7cc7b1e16c504e2af682169aabf3fff4edfe906118f522e204`
+- `style_transfer_dinov2_vitb.preprocess.json`
+  - `14e780d86fa1861f8751f868d7f45425b5feb55c38ca26f152ca5097ab30f828`
+
+### AC. 运行时主链对接结果
+
+当前结论：
+
+- `prepare_style_transfer_models`
+  - 已把风格 backbone 作为必需模型纳入准备链路
+- `get_style_transfer_model_status`
+  - 已把风格 backbone 与 preprocess 配置纳入状态返回
+- `analyze_style_transfer`
+  - 已强制加载风格 backbone
+- 风格 backbone 输出 embedding 已接入：
+  - 主参考图与目标图语义相似度计算
+  - 辅助参考图加权融合
+  - 自适应 early-exit / VLM 触发阈值
+  - 风险提示生成
+  - 质量报告备注
+
+这意味着当前已不再是“只有模型管理壳子、没有真实推理接入”的状态。
+
+### AD. 可重复下载与本地导出兼容性修正
+
+当前结论：
+
+- `scripts/download_style_transfer_models_partial.sh`
+  - 已补入风格 backbone 与 preprocess 配置的下载和 SHA 校验
+- `scripts/export_style_transfer_backbone.py`
+  - 已修正输出的 `preprocess.json` 字段命名
+  - 保证其与 Rust 运行时的反序列化结构兼容
+- Rust 运行时侧也已补充 preprocess 字段别名兼容
+  - 允许同时读取 snake_case / camelCase 风格配置
+
+### AE. 工程验证结果
+
+当前结论：
+
+- `cargo test extract_style_transfer_embedding_smoke_test -- --nocapture`
+  - 已通过
+- 该 smoke test 证明：
+  - 当前 Rust + ONNX Runtime 代码可以真实加载 `style_transfer_dinov2_vitb.onnx`
+  - 可以读取 `style_transfer_dinov2_vitb.preprocess.json`
+  - 可以对测试图像产出 L2 归一化 embedding
+- `cargo check`
+  - 已通过
+- `pnpm build`
+  - 已通过
+- `scripts/download_style_transfer_models_partial.sh`
+  - 已通过本地复核，现有模型文件全部 hash 校验成功
+
+### AF. 与文档一致性的仓库修正
+
+当前结论：
+
+- 仓库内 `.qraw-models/*` 二进制副本已移除
+- 当前工程只保留共享模型仓 `~/.qraw/models` 作为正式模型落点
+- `get_qraw_models_dir`
+  - 已取消隐式工作区 dev fallback
+  - 仅保留 `QRAW_MODELS_DIR` 显式覆盖和 `~/.qraw/models` 默认落点
+- 这与 V4 文档中“模型集中管理、避免仓库内携带运行时模型副本”的要求保持一致
+
+### AG. 对本轮完成度的正式判断
+
+当前结论：
+
+- “模型下载成功并和代码逻辑对接成功”这一轮目标已经成立
+- 本轮已完成：
+  - 模型真实下载
+  - hash 校验
+  - 模型状态管理
+  - 运行时真实加载
+  - ONNX 推理自检
+  - 多参考图语义加权接入
+  - UI 准备与状态暴露
+  - sidecar 结果承接
+- 但 V4 文档中的后续增强项仍然存在：
+  - 更强的学习型参数预测头
+  - 更细的局部区域策略
+  - benchmark 数据闭环
+
+这些属于后续 Phase 2 / Phase 3 增强，不影响本轮“模型闭环已落地”的判断。
+
+## 18.10 本轮记录（主辅参考图确认、处理调试与参数同源）
+
+### AH. CLIP Tokenizer 的定位澄清
+
+当前结论：
+
+- `CLIP Tokenizer` 不属于当前风格迁移主链的必需模型
+- 它当前属于可选辅助能力
+  - 主要服务于其他 AI 能力或可选辅助链路
+- 即使 `CLIP Tokenizer` 未就绪
+  - 也不应阻塞分析式风格迁移主流程
+  - 也不应被用户误解为“主风格迁移模型未就绪”
+
+因此本轮已修正 UI 表达：
+
+- 必需模型与可选模型必须显式区分
+- 可选模型未就绪时，需明确标注“不影响主流程”
+
+### AI. 主参考图与辅助参考图确认交互
+
+当前结论：
+
+- 参考图导入后，不应立即启动风格迁移
+- 必须先在聊天窗口中展示：
+  - 主参考图预览
+  - 辅助参考图预览
+  - 明确的确认 / 取消入口
+- 用户确认后，才正式进入风格迁移分析流程
+
+本轮已落地：
+
+- 新增聊天窗口内的参考图确认卡
+- 主参考图与辅助参考图已区分展示
+- 该确认步骤先于 `run_style_transfer` 执行
+
+### AJ. “是否真的走了模型链”的可见性要求
+
+当前结论：
+
+- 仅靠“用户主观感觉”无法判断是否命中了增强链
+- 系统必须显式输出处理调试结果，告诉用户本次执行是否真实经过：
+  - canonical input
+  - style backbone
+  - 主辅参考图语义相似度
+  - 各增强开关是否启用
+  - 最终映射出的局部区域 / 滑块 / 风险提示数量
+
+本轮已落地：
+
+- 后端新增结构化 `processingDebug`
+- 聊天回复中新增“处理调试”卡
+- 调试卡提供一键复制调试数据按钮
+
+### AK. 默认执行策略修正
+
+当前结论：
+
+- 聊天侧默认开启 `pure algorithm`
+  - 会让增强链默认被关闭
+  - 与 V4 文档“默认走完整分析增强链”的方向不一致
+
+本轮已修正：
+
+- 默认不再启用 `pure algorithm`
+- 默认改为走完整分析增强链
+- `pure algorithm` 仅作为显式降级选项保留
+
+### AL. 调色参数命名与回显同源
+
+当前结论：
+
+- AI 聊天中的调色结果与右侧“调整”模块，本质上必须是同一份数据
+- 风格迁移结果不能再走一套“聊天专用命名”或“聊天专用 patch”
+- 必须只写回项目内置的正式调色字段，并确保侧边栏切换后回显一致
+
+本轮已修正：
+
+- 聊天侧结构化 patch 改为优先消费正式 `guardedGlobalAdjustments / sliderMapping`
+- 仅将已知正式调色字段写回主 `Adjustments`
+- `curves / hsl / LUT / masks` 继续走正式结构写回
+- 聊天消息中的 `appliedValues` 也改为基于同一份结构化 patch 回填
+
+这意味着：
+
+- AI 聊天里的滑块
+- 右侧调整面板里的滑块
+- sidecar 中记录的结构化结果
+
+现在都应收敛到同一组正式字段语义之上。

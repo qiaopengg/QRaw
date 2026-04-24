@@ -2,9 +2,9 @@ use std::env;
 use std::fs;
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use image::imageops::{self, FilterType};
 use image::{
     DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma, Rgb, Rgb32FImage, Rgba, RgbaImage,
@@ -45,6 +45,15 @@ const CLIP_TOKENIZER_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Mod
 const CLIP_TOKENIZER_FILENAME: &str = "clip_tokenizer.json";
 const CLIP_MODEL_SHA256: &str = "57879bb1c23cdeb350d23569dd251ed4b740a96d747c529e94a2bb8040ac5d00";
 
+const STYLE_TRANSFER_BACKBONE_URL: &str = "https://huggingface.co/onnx-community/dinov2-base-ONNX/resolve/main/onnx/model.onnx?download=true";
+const STYLE_TRANSFER_BACKBONE_FILENAME: &str = "style_transfer_dinov2_vitb.onnx";
+const STYLE_TRANSFER_BACKBONE_SHA256: &str =
+    "f16115e628d65b7cc7b1e16c504e2af682169aabf3fff4edfe906118f522e204";
+const STYLE_TRANSFER_PREPROCESS_URL: &str = "https://huggingface.co/onnx-community/dinov2-base-ONNX/resolve/main/preprocessor_config.json?download=true";
+const STYLE_TRANSFER_PREPROCESS_FILENAME: &str = "style_transfer_dinov2_vitb.preprocess.json";
+const STYLE_TRANSFER_PREPROCESS_SHA256: &str =
+    "14e780d86fa1861f8751f868d7f45425b5feb55c38ca26f152ca5097ab30f828";
+
 const DENOISE_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/nind_denoise_utnet_684.onnx?download=true";
 const DENOISE_FILENAME: &str = "nind_denoise_utnet_684.onnx";
 const DENOISE_SHA256: &str = "ee3586279d514df557ff3f7dec6df37fafc51ba5d3a3435b2cc9ac2d9017e7fe";
@@ -84,6 +93,48 @@ pub struct ClipModels {
     pub model: Mutex<Session>,
     pub tokenizer: Tokenizer,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StyleTransferBackboneSizeConfig {
+    #[serde(alias = "shortestEdge")]
+    pub shortest_edge: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StyleTransferBackboneCropConfig {
+    pub height: u32,
+    pub width: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StyleTransferBackbonePreprocessConfig {
+    #[serde(alias = "cropSize")]
+    pub crop_size: StyleTransferBackboneCropConfig,
+    #[serde(alias = "doCenterCrop")]
+    pub do_center_crop: bool,
+    #[serde(default, alias = "doConvertRgb")]
+    pub do_convert_rgb: bool,
+    #[serde(alias = "doNormalize")]
+    pub do_normalize: bool,
+    #[serde(alias = "doRescale")]
+    pub do_rescale: bool,
+    #[serde(alias = "doResize")]
+    pub do_resize: bool,
+    #[serde(alias = "imageMean")]
+    pub image_mean: Vec<f32>,
+    #[serde(alias = "imageStd")]
+    pub image_std: Vec<f32>,
+    #[serde(alias = "rescaleFactor")]
+    pub rescale_factor: f32,
+    pub size: StyleTransferBackboneSizeConfig,
+}
+
+pub struct StyleTransferBackboneModels {
+    pub session: Mutex<Session>,
+    pub preprocess: StyleTransferBackbonePreprocessConfig,
+}
+
+static STYLE_TRANSFER_BACKBONE_MODELS: OnceLock<Arc<StyleTransferBackboneModels>> = OnceLock::new();
 
 pub struct CullingModels {
     pub face_detector: Mutex<Session>,
@@ -207,6 +258,101 @@ pub fn get_qraw_models_dir() -> Result<PathBuf> {
     let path = PathBuf::from(home).join(".qraw").join("models");
     fs::create_dir_all(&path)?;
     Ok(path)
+}
+
+fn resize_shortest_edge_rgb(
+    image: &DynamicImage,
+    shortest_edge: u32,
+    filter: FilterType,
+) -> image::RgbImage {
+    let rgb = image.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let min_edge = w.min(h).max(1);
+    let scale = shortest_edge as f32 / min_edge as f32;
+    let target_w = ((w as f32) * scale).round().max(1.0) as u32;
+    let target_h = ((h as f32) * scale).round().max(1.0) as u32;
+    imageops::resize(&rgb, target_w, target_h, filter)
+}
+
+fn center_crop_rgb(image: &image::RgbImage, target_w: u32, target_h: u32) -> image::RgbImage {
+    let crop_w = target_w.min(image.width()).max(1);
+    let crop_h = target_h.min(image.height()).max(1);
+    let offset_x = image.width().saturating_sub(crop_w) / 2;
+    let offset_y = image.height().saturating_sub(crop_h) / 2;
+    imageops::crop_imm(image, offset_x, offset_y, crop_w, crop_h).to_image()
+}
+
+fn preprocess_style_transfer_backbone_image(
+    image: &DynamicImage,
+    config: &StyleTransferBackbonePreprocessConfig,
+) -> Array4<f32> {
+    let source_rgb = if config.do_convert_rgb {
+        image.to_rgb8()
+    } else {
+        image.to_rgb8()
+    };
+    let resized = if config.do_resize {
+        let dynamic_rgb = DynamicImage::ImageRgb8(source_rgb);
+        resize_shortest_edge_rgb(
+            &dynamic_rgb,
+            config.size.shortest_edge.max(1),
+            FilterType::CatmullRom,
+        )
+    } else {
+        source_rgb
+    };
+    let cropped = if config.do_center_crop {
+        center_crop_rgb(
+            &resized,
+            config.crop_size.width.max(1),
+            config.crop_size.height.max(1),
+        )
+    } else {
+        resized
+    };
+
+    let target_w = config.crop_size.width.max(1) as usize;
+    let target_h = config.crop_size.height.max(1) as usize;
+    let mut arr = Array4::<f32>::zeros((1, 3, target_h, target_w));
+
+    let mean = if config.image_mean.len() >= 3 {
+        [
+            config.image_mean[0],
+            config.image_mean[1],
+            config.image_mean[2],
+        ]
+    } else {
+        [0.485, 0.456, 0.406]
+    };
+    let std = if config.image_std.len() >= 3 {
+        [
+            config.image_std[0].max(1e-6),
+            config.image_std[1].max(1e-6),
+            config.image_std[2].max(1e-6),
+        ]
+    } else {
+        [0.229, 0.224, 0.225]
+    };
+    let rescale = if config.do_rescale {
+        config.rescale_factor
+    } else {
+        1.0
+    };
+
+    for (x, y, pixel) in cropped.enumerate_pixels() {
+        let xf = x as usize;
+        let yf = y as usize;
+        let mut channels = [pixel[0] as f32, pixel[1] as f32, pixel[2] as f32];
+        for c in 0..3 {
+            channels[c] *= rescale;
+            if config.do_normalize {
+                channels[c] = (channels[c] - mean[c]) / std[c];
+            }
+            arr[[0, c, yf, xf]] = channels[c];
+        }
+    }
+
+    arr
 }
 
 async fn download_model(url: &str, dest: &Path) -> Result<()> {
@@ -585,6 +731,125 @@ pub async fn get_or_init_clip_models(
     }
 
     Ok(clip_models)
+}
+
+pub async fn get_or_init_style_transfer_backbone(
+    app_handle: &tauri::AppHandle,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<StyleTransferBackboneModels>> {
+    if let Some(models) = STYLE_TRANSFER_BACKBONE_MODELS.get() {
+        return Ok(models.clone());
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(models) = STYLE_TRANSFER_BACKBONE_MODELS.get() {
+        return Ok(models.clone());
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    let backbone_url = get_model_env("STYLE_TRANSFER_DINOV2_VITB", "URL")
+        .or_else(|| Some(STYLE_TRANSFER_BACKBONE_URL.to_string()));
+    let preprocess_url = get_model_env("STYLE_TRANSFER_DINOV2_VITB_PREPROCESS", "URL")
+        .or_else(|| Some(STYLE_TRANSFER_PREPROCESS_URL.to_string()));
+    let preprocess_sha = get_model_env("STYLE_TRANSFER_DINOV2_VITB_PREPROCESS", "SHA256")
+        .or_else(|| Some(STYLE_TRANSFER_PREPROCESS_SHA256.to_string()));
+
+    let backbone_path = ensure_model(
+        app_handle,
+        &models_dir,
+        STYLE_TRANSFER_BACKBONE_FILENAME,
+        "STYLE_TRANSFER_DINOV2_VITB",
+        backbone_url.as_deref(),
+        Some(STYLE_TRANSFER_BACKBONE_SHA256),
+    )
+    .await?;
+
+    let preprocess_path = ensure_model(
+        app_handle,
+        &models_dir,
+        STYLE_TRANSFER_PREPROCESS_FILENAME,
+        "STYLE_TRANSFER_DINOV2_VITB_PREPROCESS",
+        preprocess_url.as_deref(),
+        preprocess_sha.as_deref(),
+    )
+    .await?;
+
+    let preprocess_content = fs::read_to_string(preprocess_path)?;
+    let preprocess: StyleTransferBackbonePreprocessConfig =
+        serde_json::from_str(&preprocess_content)?;
+
+    let _ = ort::init().with_name("AI-StyleTransfer").commit();
+    let session = Session::builder()?.commit_from_file(backbone_path)?;
+
+    crate::register_exit_handler();
+
+    let models = Arc::new(StyleTransferBackboneModels {
+        session: Mutex::new(session),
+        preprocess,
+    });
+
+    let _ = STYLE_TRANSFER_BACKBONE_MODELS.set(models.clone());
+    Ok(models)
+}
+
+pub fn extract_style_transfer_embedding(
+    image: &DynamicImage,
+    backbone_models: &StyleTransferBackboneModels,
+) -> Result<Vec<f32>> {
+    let input = preprocess_style_transfer_backbone_image(image, &backbone_models.preprocess);
+    let input_dyn = input.into_dyn();
+    let input_val = Tensor::from_array(input_dyn.as_standard_layout().into_owned())?;
+
+    let output_dyn = {
+        let mut session = backbone_models.session.lock().unwrap();
+        let outputs = session.run(ort::inputs![input_val])?;
+        outputs[0].try_extract_array::<f32>()?.to_owned()
+    };
+
+    let shape = output_dyn.shape().to_vec();
+    let flat = output_dyn.into_raw_vec_and_offset().0;
+    let embedding = match shape.as_slice() {
+        [1, token_count, hidden_size] if *token_count > 0 && *hidden_size > 0 => {
+            let hidden = *hidden_size;
+            let tokens = *token_count;
+            let cls = &flat[0..hidden];
+            let mut patch_mean = vec![0.0f32; hidden];
+            let patch_count = tokens.saturating_sub(1).max(1);
+            for token_idx in 1..tokens {
+                let base = token_idx * hidden;
+                for channel_idx in 0..hidden {
+                    patch_mean[channel_idx] += flat[base + channel_idx];
+                }
+            }
+            for channel_idx in 0..hidden {
+                patch_mean[channel_idx] /= patch_count as f32;
+            }
+            let mut fused = Vec::with_capacity(hidden * 2);
+            fused.extend_from_slice(cls);
+            fused.extend_from_slice(&patch_mean);
+            fused
+        }
+        [1, hidden_size] if *hidden_size > 0 => flat,
+        [hidden_size] if *hidden_size > 0 => flat,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unexpected style backbone output shape: {:?}",
+                shape
+            ));
+        }
+    };
+
+    let norm = embedding
+        .iter()
+        .map(|v| (*v as f64) * (*v as f64))
+        .sum::<f64>()
+        .sqrt()
+        .max(1e-12);
+    Ok(embedding
+        .into_iter()
+        .map(|value| (value as f64 / norm) as f32)
+        .collect())
 }
 
 pub async fn get_or_init_lama_model(
@@ -1109,7 +1374,6 @@ pub fn run_expression_model(
     }
 
     let input_val = Tensor::from_array(arr.into_dyn().as_standard_layout().into_owned())?;
-    let mut last_err: Option<anyhow::Error> = None;
 
     let out_dyns = {
         let mut session = expression_mutex.lock().unwrap();
@@ -2200,4 +2464,101 @@ pub struct AiDepthMaskParameters {
     pub flip_vertical: Option<bool>,
     #[serde(default)]
     pub orientation_steps: Option<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn configure_test_ort_dylib_path() {
+        if env::var_os("ORT_DYLIB_PATH").is_some() {
+            return;
+        }
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let library_name = {
+            #[cfg(target_os = "windows")]
+            {
+                "onnxruntime.dll"
+            }
+            #[cfg(target_os = "linux")]
+            {
+                "libonnxruntime.so"
+            }
+            #[cfg(target_os = "macos")]
+            {
+                "libonnxruntime.dylib"
+            }
+            #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+            {
+                "libonnxruntime.so"
+            }
+        };
+
+        for candidate in [
+            manifest_dir.join("resources").join(library_name),
+            manifest_dir
+                .join("target")
+                .join("debug")
+                .join("resources")
+                .join(library_name),
+        ] {
+            if candidate.exists() {
+                unsafe {
+                    env::set_var("ORT_DYLIB_PATH", &candidate);
+                }
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn extract_style_transfer_embedding_smoke_test() -> Result<()> {
+        configure_test_ort_dylib_path();
+        crate::register_exit_handler();
+
+        let model_dir = get_qraw_models_dir()?;
+        let backbone_path = model_dir.join(STYLE_TRANSFER_BACKBONE_FILENAME);
+        let preprocess_path = model_dir.join(STYLE_TRANSFER_PREPROCESS_FILENAME);
+
+        if !backbone_path.exists() || !preprocess_path.exists() {
+            return Ok(());
+        }
+
+        let preprocess_content = fs::read_to_string(preprocess_path)?;
+        let preprocess: StyleTransferBackbonePreprocessConfig =
+            serde_json::from_str(&preprocess_content)?;
+
+        let _ = ort::init().with_name("AI-StyleTransfer-Test").commit();
+        let session = Session::builder()?.commit_from_file(backbone_path)?;
+        let backbone_models = StyleTransferBackboneModels {
+            session: Mutex::new(session),
+            preprocess,
+        };
+
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_fn(320, 240, |x, y| {
+            let r = ((x as f32 / 319.0) * 255.0).round() as u8;
+            let g = ((y as f32 / 239.0) * 255.0).round() as u8;
+            let b = (((x + y) as f32 / 558.0) * 255.0).round() as u8;
+            Rgb([r, g, b])
+        }));
+
+        let embedding = extract_style_transfer_embedding(&image, &backbone_models)?;
+        assert_eq!(embedding.len(), 1536);
+
+        let norm = embedding
+            .iter()
+            .map(|value| (*value as f64) * (*value as f64))
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-3,
+            "embedding should be L2-normalized, got {}",
+            norm
+        );
+
+        std::mem::forget(backbone_models);
+
+        Ok(())
+    }
 }

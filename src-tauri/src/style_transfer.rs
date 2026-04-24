@@ -1,31 +1,58 @@
+use crate::ai_processing::{
+    StyleTransferBackboneModels, extract_style_transfer_embedding,
+    get_or_init_style_transfer_backbone,
+};
 use crate::expert_presets::{derive_style_tags, get_expert_preset_by_id, select_expert_preset};
+use crate::file_management::load_settings;
+use crate::formats::is_raw_file;
+use crate::image_loader::{load_base_image_from_bytes, load_image_with_orientation};
+use crate::image_processing::downscale_f32_image;
 use base64::{Engine as _, engine::general_purpose};
 use image::{DynamicImage, GenericImageView};
-use rawler::decoders::RawDecodeParams;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
-use tauri::Emitter;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
 
 const EARLY_EXIT_STYLE_DISTANCE_THRESHOLD: f64 = 0.22;
 const LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD: f64 = 0.68;
 
-/// 智能加载图像：先尝试 image crate（支持 JPEG/PNG 等），失败则用 rawler 解码 RAW 文件
-/// 为风格分析优化：优先提取预览图（更快、更省内存），避免全尺寸 RAW 解码
-fn smart_open_image(path: &str) -> Result<DynamicImage, String> {
-    // 先尝试标准格式
-    match image::open(path) {
-        Ok(img) => Ok(img),
-        Err(_std_err) => {
-            // 尝试用 rawler 提取预览图（比 raw_to_srgb 快得多且省内存）
-            let params = RawDecodeParams::default();
-            rawler::analyze::extract_preview_pixels(path, &params)
-                .map_err(|e| format!("无法打开图片（标准格式和 RAW 均失败）: {}", e))
-        }
+const CANONICAL_ANALYSIS_MAX_DIM: u32 = 1536;
+
+fn build_canonical_preview(
+    path: &str,
+    highlight_compression: f32,
+    linear_mode: &str,
+) -> Result<DynamicImage, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("无法读取图片: {}", e))?;
+    let base = if is_raw_file(path) {
+        load_base_image_from_bytes(
+            &bytes,
+            path,
+            true,
+            highlight_compression,
+            linear_mode.to_string(),
+            None,
+        )
+        .map_err(|e| format!("RAW canonical input 构建失败: {}", e))?
+    } else {
+        load_image_with_orientation(&bytes, None)
+            .map_err(|e| format!("标准格式 canonical input 构建失败: {}", e))?
+    };
+
+    let (w, h) = base.dimensions();
+    let longest = w.max(h);
+    if longest <= CANONICAL_ANALYSIS_MAX_DIM {
+        return Ok(base);
     }
+    let scale = CANONICAL_ANALYSIS_MAX_DIM as f32 / longest as f32;
+    let target_w = ((w as f32) * scale).round().max(1.0) as u32;
+    let target_h = ((h as f32) * scale).round().max(1.0) as u32;
+    Ok(downscale_f32_image(&base, target_w, target_h))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -71,9 +98,80 @@ pub struct StyleTransferSuggestion {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransferSliderMappingEntry {
+    pub key: String,
+    pub value: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complex_value: Option<Value>,
+    pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransferLocalRegionMaskHint {
+    pub mask_type: String,
+    pub parameters: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransferLocalRegion {
+    pub id: String,
+    pub label: String,
+    pub region_type: String,
+    pub default_hidden: bool,
+    pub visible_in_ui: bool,
+    pub adjustments: Value,
+    pub mask_hint: StyleTransferLocalRegionMaskHint,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransferQualityReport {
+    pub guarded: bool,
+    pub reference_count: usize,
+    pub baseline_distance: f64,
+    pub fused_reference_weight: f64,
+    pub notes: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct StyleTransferResponse {
     pub understanding: String,
+    #[serde(default)]
     pub adjustments: Vec<StyleTransferSuggestion>,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub global_adjustments: Value,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub guarded_global_adjustments: Value,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub curves: Value,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub hsl: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_lut: Option<Value>,
+    #[serde(default)]
+    pub local_regions: Vec<StyleTransferLocalRegion>,
+    #[serde(default)]
+    pub guarded_local_regions: Vec<StyleTransferLocalRegion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_report: Option<StyleTransferQualityReport>,
+    #[serde(default)]
+    pub risk_warnings: Vec<String>,
+    #[serde(default)]
+    pub slider_mapping: Vec<StyleTransferSliderMappingEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_similarity: Option<f64>,
+    #[serde(default)]
+    pub aux_semantic_similarities: Vec<f64>,
+    #[serde(default)]
+    pub backbone_used: bool,
+    #[serde(default)]
+    pub canonical_input_used: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_debug: Option<StyleTransferDebugInfo>,
 }
@@ -184,6 +282,9 @@ struct StyleTransferPreparedContext {
     baseline_error: StyleTransferErrorBreakdown,
     expert_tags: Vec<&'static str>,
     expert_preset_id: Option<&'static str>,
+    semantic_similarity: Option<f64>,
+    aux_semantic_similarities: Vec<f64>,
+    backbone_used: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -198,11 +299,343 @@ struct StyleTransferAlgoOptions {
 struct AlgorithmPipelineResult {
     adjustments: Vec<StyleTransferSuggestion>,
     style_debug: StyleTransferDebugInfo,
+    ref_features: StyleFeatures,
+    cur_features: StyleFeatures,
+    baseline_error: StyleTransferErrorBreakdown,
+    semantic_similarity: Option<f64>,
+    aux_semantic_similarities: Vec<f64>,
+    backbone_used: bool,
+}
+
+fn weighted_average(primary: f64, secondary: f64, weight: f64) -> f64 {
+    (primary * (1.0 - weight)) + (secondary * weight)
+}
+
+fn cosine_similarity_f32(a: &[f32], b: &[f32]) -> Option<f64> {
+    if a.is_empty() || b.is_empty() || a.len() != b.len() {
+        return None;
+    }
+    let dot = a
+        .iter()
+        .zip(b.iter())
+        .map(|(lhs, rhs)| (*lhs as f64) * (*rhs as f64))
+        .sum::<f64>();
+    Some(dot.max(-1.0).min(1.0))
+}
+
+fn blend_style_features(a: &StyleFeatures, b: &StyleFeatures, weight: f64) -> StyleFeatures {
+    let blend = |lhs: f64, rhs: f64| weighted_average(lhs, rhs, weight);
+    StyleFeatures {
+        mean_luminance: blend(a.mean_luminance, b.mean_luminance),
+        highlight_ratio: blend(a.highlight_ratio, b.highlight_ratio),
+        shadow_ratio: blend(a.shadow_ratio, b.shadow_ratio),
+        contrast_spread: blend(a.contrast_spread, b.contrast_spread),
+        p10_luminance: blend(a.p10_luminance, b.p10_luminance),
+        p50_luminance: blend(a.p50_luminance, b.p50_luminance),
+        p90_luminance: blend(a.p90_luminance, b.p90_luminance),
+        p99_luminance: blend(a.p99_luminance, b.p99_luminance),
+        clipped_highlight_ratio: blend(a.clipped_highlight_ratio, b.clipped_highlight_ratio),
+        waveform_low_band: blend(a.waveform_low_band, b.waveform_low_band),
+        waveform_mid_band: blend(a.waveform_mid_band, b.waveform_mid_band),
+        waveform_high_band: blend(a.waveform_high_band, b.waveform_high_band),
+        rb_ratio: blend(a.rb_ratio, b.rb_ratio),
+        gb_ratio: blend(a.gb_ratio, b.gb_ratio),
+        mean_saturation: blend(a.mean_saturation, b.mean_saturation),
+        saturation_spread: blend(a.saturation_spread, b.saturation_spread),
+        shadow_luminance_mean: blend(a.shadow_luminance_mean, b.shadow_luminance_mean),
+        mid_luminance_mean: blend(a.mid_luminance_mean, b.mid_luminance_mean),
+        highlight_luminance_mean: blend(a.highlight_luminance_mean, b.highlight_luminance_mean),
+        skin_ratio: blend(a.skin_ratio, b.skin_ratio),
+        skin_luminance_mean: blend(a.skin_luminance_mean, b.skin_luminance_mean),
+        skin_rb_ratio: blend(a.skin_rb_ratio, b.skin_rb_ratio),
+        hue_mean: blend(a.hue_mean, b.hue_mean),
+        hue_spread: blend(a.hue_spread, b.hue_spread),
+        laplacian_variance: blend(a.laplacian_variance, b.laplacian_variance),
+        vignette_diff: blend(a.vignette_diff, b.vignette_diff),
+    }
+}
+
+fn fuse_reference_features(
+    main_features: &StyleFeatures,
+    aux_features: &[StyleFeatures],
+    aux_similarities_to_target: &[f64],
+) -> StyleFeatures {
+    if aux_features.is_empty() {
+        return main_features.clone();
+    }
+
+    let aux_weight_total = 0.28;
+    let raw_weights = if aux_similarities_to_target.len() == aux_features.len()
+        && aux_similarities_to_target.iter().any(|sim| sim.is_finite())
+    {
+        aux_similarities_to_target
+            .iter()
+            .map(|sim| ((sim - 0.22) / 0.58).max(0.0).min(1.0))
+            .collect::<Vec<_>>()
+    } else {
+        vec![1.0; aux_features.len()]
+    };
+    let raw_weight_sum = raw_weights.iter().sum::<f64>().max(1e-6);
+    let mut fused = main_features.clone();
+    for (idx, aux) in aux_features.iter().enumerate() {
+        let normalized_weight = raw_weights.get(idx).copied().unwrap_or(1.0) / raw_weight_sum;
+        fused = blend_style_features(&fused, aux, aux_weight_total * normalized_weight);
+    }
+    fused
+}
+
+fn build_style_transfer_local_regions(
+    ref_features: &StyleFeatures,
+    cur_features: &StyleFeatures,
+) -> Vec<StyleTransferLocalRegion> {
+    let mut regions = Vec::new();
+
+    if cur_features.skin_ratio > 0.015 && ref_features.skin_ratio > 0.015 {
+        let skin_temp = ((ref_features.skin_rb_ratio - cur_features.skin_rb_ratio) * 16.0)
+            .round()
+            .clamp(-10.0, 10.0);
+        let skin_highlights =
+            ((ref_features.skin_luminance_mean - cur_features.skin_luminance_mean) * 22.0)
+                .round()
+                .clamp(-12.0, 12.0);
+        regions.push(StyleTransferLocalRegion {
+            id: "skin-protection".to_string(),
+            label: "Skin Protection".to_string(),
+            region_type: "skin".to_string(),
+            default_hidden: true,
+            visible_in_ui: true,
+            adjustments: json!({
+                "temperature": skin_temp,
+                "highlights": skin_highlights,
+                "saturation": ((ref_features.mean_saturation - cur_features.mean_saturation) * 12.0).round().clamp(-8.0, 8.0)
+            }),
+            mask_hint: StyleTransferLocalRegionMaskHint {
+                mask_type: "ai-subject".to_string(),
+                parameters: json!({
+                    "grow": 0,
+                    "feather": 12
+                }),
+            },
+        });
+    }
+
+    let sky_delta = (ref_features.waveform_high_band - cur_features.waveform_high_band)
+        .abs()
+        .max((ref_features.highlight_ratio - cur_features.highlight_ratio).abs());
+    if sky_delta > 0.045 || cur_features.clipped_highlight_ratio > 0.015 {
+        regions.push(StyleTransferLocalRegion {
+            id: "sky-balance".to_string(),
+            label: "Sky Balance".to_string(),
+            region_type: "sky".to_string(),
+            default_hidden: true,
+            visible_in_ui: true,
+            adjustments: json!({
+                "dehaze": ((ref_features.contrast_spread - cur_features.contrast_spread) * 18.0).round().clamp(-8.0, 8.0),
+                "highlights": ((ref_features.highlight_luminance_mean - cur_features.highlight_luminance_mean) * 26.0).round().clamp(-20.0, 20.0),
+                "temperature": ((ref_features.rb_ratio - cur_features.rb_ratio) * 10.0).round().clamp(-8.0, 8.0)
+            }),
+            mask_hint: StyleTransferLocalRegionMaskHint {
+                mask_type: "ai-sky".to_string(),
+                parameters: json!({
+                    "grow": 0,
+                    "feather": 8
+                }),
+            },
+        });
+    }
+
+    regions
+}
+
+fn build_risk_warnings(
+    ref_features: &StyleFeatures,
+    cur_features: &StyleFeatures,
+    reference_count: usize,
+    semantic_similarity: Option<f64>,
+    aux_semantic_similarities: &[f64],
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if cur_features.clipped_highlight_ratio > 0.02 {
+        warnings.push("当前目标图高光风险偏高，应用强风格迁移时需要优先保护高光。".to_string());
+    }
+    if cur_features.skin_ratio > 0.02 && ref_features.skin_ratio > 0.02 {
+        warnings.push("当前目标图与参考图都含明显肤色区域，建议默认保留肤色保护。".to_string());
+    }
+    if reference_count > 1 {
+        warnings.push("辅助参考图只作为补充倾向，系统不会对所有参考图做等权平均。".to_string());
+    }
+    if let Some(similarity) = semantic_similarity {
+        if similarity < 0.36 {
+            warnings.push(
+                "主参考图与当前图的语义相似度偏低，本次结果会更偏弱建议与安全保护。".to_string(),
+            );
+        }
+    }
+    if aux_semantic_similarities
+        .iter()
+        .any(|similarity| *similarity < 0.30)
+    {
+        warnings
+            .push("部分辅助参考图与当前图的可迁移度偏低，系统已自动降低其融合权重。".to_string());
+    }
+    warnings
+}
+
+fn build_slider_mapping(
+    adjustments: &[StyleTransferSuggestion],
+) -> Vec<StyleTransferSliderMappingEntry> {
+    adjustments
+        .iter()
+        .map(|suggestion| {
+            let target = match suggestion.key.as_str() {
+                "curves" => "curves",
+                "hsl" => "hsl",
+                "lutData" | "lutIntensity" | "lutSize" | "lutPath" | "lutName" => "lut",
+                _ => "adjustments",
+            };
+            StyleTransferSliderMappingEntry {
+                key: suggestion.key.clone(),
+                value: json!(suggestion.value),
+                complex_value: suggestion.complex_value.clone(),
+                target: target.to_string(),
+                label: Some(suggestion.label.clone()),
+            }
+        })
+        .collect()
+}
+
+fn empty_structured_response_fields() -> (
+    Value,
+    Value,
+    Value,
+    Option<Value>,
+    Vec<StyleTransferLocalRegion>,
+    StyleTransferQualityReport,
+    Vec<String>,
+    Vec<StyleTransferSliderMappingEntry>,
+) {
+    (
+        json!({}),
+        Value::Null,
+        Value::Null,
+        None,
+        Vec::new(),
+        StyleTransferQualityReport {
+            guarded: false,
+            reference_count: 1,
+            baseline_distance: 0.0,
+            fused_reference_weight: 1.0,
+            notes: vec!["结果已走快速路径，未生成额外局部区域。".to_string()],
+        },
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+fn build_structured_style_transfer_fields(
+    adjustments: &[StyleTransferSuggestion],
+    ref_features: &StyleFeatures,
+    cur_features: &StyleFeatures,
+    baseline_error: &StyleTransferErrorBreakdown,
+    reference_count: usize,
+    semantic_similarity: Option<f64>,
+    aux_semantic_similarities: &[f64],
+    backbone_used: bool,
+) -> (
+    Value,
+    Value,
+    Value,
+    Option<Value>,
+    Vec<StyleTransferLocalRegion>,
+    StyleTransferQualityReport,
+    Vec<String>,
+    Vec<StyleTransferSliderMappingEntry>,
+) {
+    let mut global_adjustments = serde_json::Map::new();
+    let mut curves = Value::Null;
+    let mut hsl = Value::Null;
+    let mut lut_map = serde_json::Map::new();
+
+    for suggestion in adjustments {
+        match suggestion.key.as_str() {
+            "curves" => {
+                curves = suggestion.complex_value.clone().unwrap_or(Value::Null);
+            }
+            "hsl" => {
+                hsl = suggestion.complex_value.clone().unwrap_or(Value::Null);
+            }
+            "lutData" | "lutIntensity" | "lutSize" | "lutName" | "lutPath" => {
+                let value = suggestion
+                    .complex_value
+                    .clone()
+                    .unwrap_or_else(|| json!(suggestion.value));
+                lut_map.insert(suggestion.key.clone(), value);
+            }
+            "grainAmount" | "halationAmount" | "glowAmount" | "vignetteAmount"
+            | "vignetteFeather" | "vignetteMidpoint" | "vignetteRoundness" => {}
+            _ => {
+                let value = suggestion
+                    .complex_value
+                    .clone()
+                    .unwrap_or_else(|| json!(suggestion.value));
+                global_adjustments.insert(suggestion.key.clone(), value);
+            }
+        }
+    }
+
+    let local_regions = build_style_transfer_local_regions(ref_features, cur_features);
+    let risk_warnings = build_risk_warnings(
+        ref_features,
+        cur_features,
+        reference_count,
+        semantic_similarity,
+        aux_semantic_similarities,
+    );
+    let slider_mapping = build_slider_mapping(adjustments);
+    let mut notes = vec![
+        "分析阶段统一使用 canonical input，最终仍映射到当前可编辑滑块系统。".to_string(),
+        "局部区域默认隐藏，但保留回显与继续编辑能力。".to_string(),
+    ];
+    if backbone_used {
+        if let Some(similarity) = semantic_similarity {
+            notes.push(format!(
+                "ViT-B style backbone 已参与参考图理解与风险评估，主参考图语义相似度 {:.2}。",
+                similarity
+            ));
+        } else {
+            notes.push("ViT-B style backbone 已参与参考图理解与多参考融合。".to_string());
+        }
+    } else {
+        notes.push("当前结果未启用 ViT-B style backbone，主要依赖规则分析链。".to_string());
+    }
+    let quality_report = StyleTransferQualityReport {
+        guarded: !risk_warnings.is_empty(),
+        reference_count,
+        baseline_distance: (baseline_error.total * 100.0).round() / 100.0,
+        fused_reference_weight: if reference_count > 1 { 0.72 } else { 1.0 },
+        notes,
+    };
+
+    (
+        Value::Object(global_adjustments),
+        curves,
+        hsl,
+        if lut_map.is_empty() {
+            None
+        } else {
+            Some(Value::Object(lut_map))
+        },
+        local_regions,
+        quality_report,
+        risk_warnings,
+        slider_mapping,
+    )
 }
 
 fn validate_style_transfer_paths(
     reference_path: &str,
     current_image_path: &str,
+    aux_reference_paths: &[String],
 ) -> Result<(), String> {
     if !Path::new(reference_path).exists() {
         return Err("参考图文件不存在".to_string());
@@ -215,19 +648,39 @@ fn validate_style_transfer_paths(
     if ref_meta.len() > 100 * 1024 * 1024 {
         return Err("参考图文件过大（超过 100MB）".to_string());
     }
+    for aux_reference_path in aux_reference_paths {
+        if !Path::new(aux_reference_path).exists() {
+            return Err(format!("辅助参考图文件不存在: {}", aux_reference_path));
+        }
+    }
     Ok(())
 }
 
 async fn load_style_transfer_images(
     reference_path: &str,
     current_image_path: &str,
-) -> Result<(DynamicImage, DynamicImage), String> {
+    aux_reference_paths: &[String],
+    app_handle: &tauri::AppHandle,
+) -> Result<(DynamicImage, DynamicImage, Vec<DynamicImage>), String> {
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    let highlight_compression = settings.raw_highlight_compression.unwrap_or(2.5);
+    let linear_mode = settings.linear_raw_mode;
     let ref_path = reference_path.to_string();
     let cur_path = current_image_path.to_string();
+    let aux_paths = aux_reference_paths.to_vec();
     tokio::task::spawn_blocking(move || {
-        let r = smart_open_image(&ref_path).map_err(|e| format!("无法打开参考图: {}", e))?;
-        let c = smart_open_image(&cur_path).map_err(|e| format!("无法打开当前图片: {}", e))?;
-        Ok::<(DynamicImage, DynamicImage), String>((r, c))
+        let r = build_canonical_preview(&ref_path, highlight_compression, &linear_mode)
+            .map_err(|e| format!("无法打开参考图: {}", e))?;
+        let c = build_canonical_preview(&cur_path, highlight_compression, &linear_mode)
+            .map_err(|e| format!("无法打开当前图片: {}", e))?;
+        let mut aux_images = Vec::with_capacity(aux_paths.len());
+        for aux_path in aux_paths {
+            aux_images.push(
+                build_canonical_preview(&aux_path, highlight_compression, &linear_mode)
+                    .map_err(|e| format!("无法打开辅助参考图 {}: {}", aux_path, e))?,
+            );
+        }
+        Ok::<(DynamicImage, DynamicImage, Vec<DynamicImage>), String>((r, c, aux_images))
     })
     .await
     .map_err(|e| format!("图像加载任务失败: {}", e))?
@@ -236,11 +689,51 @@ async fn load_style_transfer_images(
 fn build_style_transfer_context(
     ref_img: DynamicImage,
     cur_img: DynamicImage,
+    aux_imgs: Vec<DynamicImage>,
     current_adjustments: &Value,
     tuning: StyleTransferTuning,
     enable_expert_preset: bool,
+    style_backbone: Option<Arc<StyleTransferBackboneModels>>,
 ) -> StyleTransferPreparedContext {
-    let ref_features = extract_features(&ref_img);
+    let main_ref_features = extract_features(&ref_img);
+    let aux_features = aux_imgs.iter().map(extract_features).collect::<Vec<_>>();
+    let current_embedding = style_backbone
+        .as_ref()
+        .and_then(|model| extract_style_transfer_embedding(&cur_img, model).ok());
+    let main_reference_embedding = style_backbone
+        .as_ref()
+        .and_then(|model| extract_style_transfer_embedding(&ref_img, model).ok());
+    let aux_reference_embeddings = if let Some(model) = style_backbone.as_ref() {
+        aux_imgs
+            .iter()
+            .map(|image| extract_style_transfer_embedding(image, model).ok())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let semantic_similarity = main_reference_embedding.as_ref().and_then(|embedding| {
+        current_embedding
+            .as_ref()
+            .and_then(|current| cosine_similarity_f32(embedding, current))
+    });
+    let aux_semantic_similarities = aux_reference_embeddings
+        .iter()
+        .map(|embedding| {
+            embedding
+                .as_ref()
+                .and_then(|value| {
+                    current_embedding
+                        .as_ref()
+                        .and_then(|current| cosine_similarity_f32(value, current))
+                })
+                .unwrap_or(0.0)
+        })
+        .collect::<Vec<_>>();
+    let ref_features = fuse_reference_features(
+        &main_ref_features,
+        &aux_features,
+        &aux_semantic_similarities,
+    );
     let cur_features = extract_features(&cur_img);
     let (expert_tags, expert_preset_id) = if enable_expert_preset {
         let tags = derive_style_tags(
@@ -273,6 +766,9 @@ fn build_style_transfer_context(
         baseline_error,
         expert_tags,
         expert_preset_id,
+        semantic_similarity,
+        aux_semantic_similarities,
+        backbone_used: style_backbone.is_some(),
     }
 }
 
@@ -385,6 +881,12 @@ fn run_algorithm_pipeline(
         return AlgorithmPipelineResult {
             adjustments,
             style_debug,
+            ref_features: ctx.ref_features.clone(),
+            cur_features: ctx.cur_features.clone(),
+            baseline_error: ctx.baseline_error.clone(),
+            semantic_similarity: ctx.semantic_similarity,
+            aux_semantic_similarities: ctx.aux_semantic_similarities.clone(),
+            backbone_used: ctx.backbone_used,
         };
     }
     let auto_refine_rounds = if options.enable_auto_refine {
@@ -537,6 +1039,12 @@ fn run_algorithm_pipeline(
     AlgorithmPipelineResult {
         adjustments,
         style_debug,
+        ref_features: ctx.ref_features.clone(),
+        cur_features: ctx.cur_features.clone(),
+        baseline_error: ctx.baseline_error.clone(),
+        semantic_similarity: ctx.semantic_similarity,
+        aux_semantic_similarities: ctx.aux_semantic_similarities.clone(),
+        backbone_used: ctx.backbone_used,
     }
 }
 
@@ -551,9 +1059,33 @@ fn build_style_transfer_early_exit_response(
         0,
         Some(empty_constraint_debug(&ctx.constraint_window)),
     );
+    let (
+        global_adjustments,
+        curves,
+        hsl,
+        global_lut,
+        local_regions,
+        quality_report,
+        risk_warnings,
+        slider_mapping,
+    ) = empty_structured_response_fields();
     StyleTransferResponse {
         understanding: "两张图片风格差异很小，已走快速路径并跳过重度迁移。".to_string(),
         adjustments: Vec::new(),
+        global_adjustments,
+        guarded_global_adjustments: json!({}),
+        curves,
+        hsl,
+        global_lut,
+        local_regions,
+        guarded_local_regions: Vec::new(),
+        quality_report: Some(quality_report),
+        risk_warnings,
+        slider_mapping,
+        semantic_similarity: ctx.semantic_similarity,
+        aux_semantic_similarities: ctx.aux_semantic_similarities.clone(),
+        backbone_used: ctx.backbone_used,
+        canonical_input_used: true,
         style_debug: Some(style_debug),
     }
 }
@@ -585,6 +1117,13 @@ fn build_algorithm_understanding(adjustment_count: usize, suffix: &str) -> Strin
 
 fn build_algorithm_response(
     adjustments: Vec<StyleTransferSuggestion>,
+    ref_features: &StyleFeatures,
+    cur_features: &StyleFeatures,
+    baseline_error: &StyleTransferErrorBreakdown,
+    reference_count: usize,
+    semantic_similarity: Option<f64>,
+    aux_semantic_similarities: &[f64],
+    backbone_used: bool,
     style_debug: StyleTransferDebugInfo,
     suffix: &str,
     detailed: bool,
@@ -600,9 +1139,42 @@ fn build_algorithm_response(
     } else {
         build_algorithm_understanding(adjustments.len(), suffix)
     };
+    let (
+        global_adjustments,
+        curves,
+        hsl,
+        global_lut,
+        local_regions,
+        quality_report,
+        risk_warnings,
+        slider_mapping,
+    ) = build_structured_style_transfer_fields(
+        &adjustments,
+        ref_features,
+        cur_features,
+        baseline_error,
+        reference_count,
+        semantic_similarity,
+        aux_semantic_similarities,
+        backbone_used,
+    );
     StyleTransferResponse {
         understanding,
         adjustments,
+        guarded_global_adjustments: global_adjustments.clone(),
+        global_adjustments,
+        curves,
+        hsl,
+        global_lut,
+        guarded_local_regions: local_regions.clone(),
+        local_regions,
+        quality_report: Some(quality_report),
+        risk_warnings,
+        slider_mapping,
+        semantic_similarity,
+        aux_semantic_similarities: aux_semantic_similarities.to_vec(),
+        backbone_used,
+        canonical_input_used: true,
         style_debug: Some(style_debug),
     }
 }
@@ -969,7 +1541,7 @@ pub fn build_dynamic_constraint_window_from_image(
 ) -> DynamicConstraintWindow {
     if let Some(path) = current_image_path {
         if Path::new(path).exists() {
-            if let Ok(img) = smart_open_image(path) {
+            if let Ok(img) = build_canonical_preview(path, 2.5, "srgb") {
                 let feat = extract_features(&img);
 
                 // 检查是否为纯白色图片（高亮度，低对比度，几乎没有色彩）
@@ -1854,18 +2426,24 @@ fn adaptive_style_thresholds(
     ref_feat: &StyleFeatures,
     cur_feat: &StyleFeatures,
     baseline_error: &StyleTransferErrorBreakdown,
+    semantic_similarity: Option<f64>,
 ) -> (f64, f64) {
     let style_force = style_intensity_score(ref_feat, cur_feat);
     let color_ratio = baseline_error.color / baseline_error.total.max(1e-6);
     let tonal_ratio = baseline_error.tonal / baseline_error.total.max(1e-6);
+    let semantic_gap = semantic_similarity
+        .map(|similarity| (1.0 - similarity).max(0.0).min(1.0))
+        .unwrap_or(0.0);
     let early_exit = (EARLY_EXIT_STYLE_DISTANCE_THRESHOLD - style_force * 0.055
         + tonal_ratio * 0.018
-        - color_ratio * 0.012)
+        - color_ratio * 0.012
+        - semantic_gap * 0.08)
         .max(0.14)
         .min(0.30);
     let llm_trigger =
         (LLM_TRIGGER_STYLE_DISTANCE_THRESHOLD - style_force * 0.14 - color_ratio * 0.08
-            + tonal_ratio * 0.03)
+            + tonal_ratio * 0.03
+            - semantic_gap * 0.10)
             .max(0.42)
             .min(0.80);
     (early_exit, llm_trigger.max(early_exit + 0.12))
@@ -4272,6 +4850,7 @@ fn map_features_to_adjustments(
 #[tauri::command]
 pub async fn analyze_style_transfer(
     reference_path: String,
+    aux_reference_paths: Vec<String>,
     current_image_path: String,
     current_adjustments: Value,
     style_strength: Option<f64>,
@@ -4319,26 +4898,39 @@ pub async fn analyze_style_transfer(
     } else {
         enable_vlm.unwrap_or(true)
     };
-    validate_style_transfer_paths(&reference_path, &current_image_path)?;
-    let (ref_img, cur_img) =
-        load_style_transfer_images(&reference_path, &current_image_path).await?;
+    let app_state = app_handle.state::<crate::AppState>();
+    let style_backbone = get_or_init_style_transfer_backbone(&app_handle, &app_state.ai_init_lock)
+        .await
+        .map_err(|e| format!("风格理解模型未就绪: {}", e))?;
+    validate_style_transfer_paths(&reference_path, &current_image_path, &aux_reference_paths)?;
+    let (ref_img, cur_img, aux_imgs) = load_style_transfer_images(
+        &reference_path,
+        &current_image_path,
+        &aux_reference_paths,
+        &app_handle,
+    )
+    .await?;
 
     let endpoint_for_check = llm_endpoint.clone();
     let current_adjustments_for_vlm = current_adjustments.clone();
+    let style_backbone_for_worker = style_backbone.clone();
 
     let (algorithm_result, suffix, early_exit_res, ctx_images) =
         tokio::task::spawn_blocking(move || {
             let ctx = build_style_transfer_context(
                 ref_img,
                 cur_img,
+                aux_imgs,
                 &current_adjustments,
                 tuning,
                 enable_expert_preset,
+                Some(style_backbone_for_worker),
             );
             let (early_exit_threshold, llm_trigger) = adaptive_style_thresholds(
                 &ctx.ref_features,
                 &ctx.cur_features,
                 &ctx.baseline_error,
+                ctx.semantic_similarity,
             );
             if !pure_algorithm && ctx.baseline_error.total < early_exit_threshold {
                 let suffix = build_expert_preset_suffix(&ctx);
@@ -4397,6 +4989,13 @@ pub async fn analyze_style_transfer(
     let algorithm_result = algorithm_result.unwrap();
     let mut final_res = build_algorithm_response(
         algorithm_result.adjustments.clone(),
+        &algorithm_result.ref_features,
+        &algorithm_result.cur_features,
+        &algorithm_result.baseline_error,
+        1 + aux_reference_paths.len(),
+        algorithm_result.semantic_similarity,
+        &algorithm_result.aux_semantic_similarities,
+        algorithm_result.backbone_used,
         algorithm_result.style_debug.clone(),
         &suffix,
         true,

@@ -2192,14 +2192,7 @@ pub fn save_metadata_and_update_thumbnail(
     metadata.rating = adjustments["rating"].as_u64().unwrap_or(0) as u8;
     metadata.adjustments = adjustments;
 
-    let json_string = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
-    std::fs::write(&sidecar_path, json_string).map_err(|e| match e.kind() {
-        ErrorKind::PermissionDenied => format!(
-            "无法写入编辑数据文件: {}（权限不足，可能是文件夹只读或未授权）",
-            sidecar_path.display()
-        ),
-        _ => format!("写入编辑数据文件失败: {} ({})", sidecar_path.display(), e),
-    })?;
+    write_metadata_sidecar(&sidecar_path, &metadata)?;
 
     if let Ok(settings) = load_settings(app_handle.clone())
         && settings.enable_xmp_sync.unwrap_or(false)
@@ -2261,6 +2254,51 @@ pub fn save_metadata_and_update_thumbnail(
 
         increment_thumbnail_progress(&state, &app_handle_clone);
     });
+
+    Ok(())
+}
+
+fn write_metadata_sidecar(sidecar_path: &Path, metadata: &ImageMetadata) -> Result<(), String> {
+    let json_string = serde_json::to_string_pretty(metadata).map_err(|e| e.to_string())?;
+    std::fs::write(sidecar_path, json_string).map_err(|e| match e.kind() {
+        ErrorKind::PermissionDenied => format!(
+            "无法写入编辑数据文件: {}（权限不足，可能是文件夹只读或未授权）",
+            sidecar_path.display()
+        ),
+        _ => format!("写入编辑数据文件失败: {} ({})", sidecar_path.display(), e),
+    })
+}
+
+#[tauri::command]
+pub fn save_style_transfer_sidecar(
+    path: String,
+    adjustments: Value,
+    style_transfer: Value,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+    let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+    let create_xmp_if_missing = settings.create_xmp_if_missing.unwrap_or(false);
+    let (source_path, sidecar_path) = parse_virtual_path(&path);
+
+    let mut metadata: ImageMetadata = if sidecar_path.exists() {
+        fs::read_to_string(&sidecar_path)
+            .ok()
+            .and_then(|content| serde_json::from_str(&content).ok())
+            .unwrap_or_default()
+    } else {
+        ImageMetadata::default()
+    };
+
+    metadata.rating = adjustments["rating"].as_u64().unwrap_or(0) as u8;
+    metadata.adjustments = adjustments;
+    metadata.style_transfer = Some(style_transfer);
+
+    write_metadata_sidecar(&sidecar_path, &metadata)?;
+
+    if enable_xmp_sync {
+        sync_metadata_to_xmp(&source_path, &metadata, create_xmp_if_missing);
+    }
 
     Ok(())
 }

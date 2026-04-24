@@ -29,6 +29,7 @@ import { getSimpleAdjustments } from './chat/styleTransfer/utils';
 import { useStyleTransfer } from './chat/styleTransfer/useStyleTransfer';
 import { useStyleTransferMessageActions } from './chat/styleTransfer/useStyleTransferMessageActions';
 import { StyleTransferSettings } from './chat/styleTransfer/StyleTransferSettings';
+import { StyleTransferReferenceSelectionCard } from './chat/styleTransfer/StyleTransferReferenceSelectionCard';
 import { StyleTransferResultCard } from './chat/styleTransfer/StyleTransferResultCard';
 import { StyleTransferSuggestionsCard } from './chat/styleTransfer/StyleTransferSuggestionsCard';
 
@@ -148,13 +149,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
   );
 }
 
-function StyleTransferProgressBlock({
-  description,
-  percentage,
-}: {
-  description: string;
-  percentage: number;
-}) {
+function StyleTransferProgressBlock({ description, percentage }: { description: string; percentage: number }) {
   const safePercentage = Math.max(0, Math.min(100, percentage));
 
   return (
@@ -259,6 +254,7 @@ export default function ChatPanel({
     showStyleTransferSource,
     toggleStyleTransferCompare,
   } = useStyleTransferMessageActions({
+    adjustments,
     onOpenImage,
     setAdjustments,
     setMessages,
@@ -367,6 +363,8 @@ export default function ChatPanel({
     setError(null);
   };
   const {
+    cancelPendingStyleTransferSelection,
+    confirmPendingStyleTransferSelection,
     enableStyleTransferAutoRefine,
     enableStyleTransferExpertPreset,
     enableStyleTransferFeatureMapping,
@@ -389,6 +387,7 @@ export default function ChatPanel({
     setStyleStrengthInput,
     skinProtectInput,
     styleStrengthInput,
+    pendingStyleTransferSelection,
     styleTransferModelStatus,
     styleTransferPreset,
     styleTransferStrategyMode,
@@ -570,6 +569,15 @@ export default function ChatPanel({
               {t('chat.importReference')}
             </button>
           </div>
+        )}
+
+        {pendingStyleTransferSelection && (
+          <StyleTransferReferenceSelectionCard
+            auxReferencePaths={pendingStyleTransferSelection.auxReferencePaths}
+            mainReferencePath={pendingStyleTransferSelection.mainReferencePath}
+            onCancel={cancelPendingStyleTransferSelection}
+            onConfirm={() => void confirmPendingStyleTransferSelection()}
+          />
         )}
 
         {messages.map((msg) => (

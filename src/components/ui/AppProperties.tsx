@@ -99,6 +99,7 @@ export enum Invokes {
   RenameFolder = 'rename_folder',
   ResetAdjustmentsForPaths = 'reset_adjustments_for_paths',
   SaveMetadataAndUpdateThumbnail = 'save_metadata_and_update_thumbnail',
+  SaveStyleTransferSidecar = 'save_style_transfer_sidecar',
   SaveCollage = 'save_collage',
   SaveDenoisedImage = 'save_denoised_image',
   SavePanorama = 'save_panorama',
