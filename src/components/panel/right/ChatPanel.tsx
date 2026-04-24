@@ -36,7 +36,8 @@ import { StyleTransferSuggestionsCard } from './chat/styleTransfer/StyleTransfer
 const DEFAULT_MODEL = 'auto';
 
 const PRESET_MODELS = [
-  { label: 'auto（自动路由）⭐', value: 'auto', desc: '自然语言修图→qwen3.5:9b，风格迁移→qwen2.5vl:7b' },
+  { label: 'auto（自动路由）⭐', value: 'auto', desc: '自然语言修图→qwen3.5:9b，风格迁移→qwen3.6:27b' },
+  { label: 'qwen3.6:27b ⭐⭐', value: 'qwen3.6:27b', desc: '最新视觉模型 · 强大的图像理解 · 需32GB内存' },
   { label: 'qwen3.5:9b ⭐', value: 'qwen3.5:9b', desc: '推荐 · 最强中文理解 · 需16GB内存' },
   { label: 'qwen2.5vl:7b', value: 'qwen2.5vl:7b', desc: '视觉理解 · 适合风格迁移' },
   { label: 'qwen3.5:4b', value: 'qwen3.5:4b', desc: '轻量 · 8GB内存可用' },
@@ -576,7 +577,7 @@ export default function ChatPanel({
             auxReferencePaths={pendingStyleTransferSelection.auxReferencePaths}
             mainReferencePath={pendingStyleTransferSelection.mainReferencePath}
             onCancel={cancelPendingStyleTransferSelection}
-            onConfirm={() => void confirmPendingStyleTransferSelection()}
+            onConfirm={(styleTransferType) => void confirmPendingStyleTransferSelection(styleTransferType)}
           />
         )}
 

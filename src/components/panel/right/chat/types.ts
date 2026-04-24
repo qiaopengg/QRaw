@@ -288,6 +288,7 @@ export interface ChatMessage {
   mainReferencePath?: string;
   auxReferencePaths?: string[];
   sourceImagePath?: string;
+  styleTransferType?: string;
   requestedMode?: StyleTransferRequestMode;
   strategyMode?: StyleTransferStrategyMode;
   styleTransferProgress?: StyleTransferProgressState;

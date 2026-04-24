@@ -50,8 +50,25 @@ export function StyleTransferSuggestionsCard({
   t,
 }: StyleTransferSuggestionsCardProps) {
   const [copied, setCopied] = useState(false);
+  const [isInteractingWithSlider, setIsInteractingWithSlider] = useState(false);
   const hasAdjustments = Boolean(message.adjustments && message.adjustments.length > 0);
   const hasDebugContent = Boolean(message.processingDebug || message.styleDebug || message.constraintDebug);
+
+  // 阻止滑块交互时的滚动
+  React.useEffect(() => {
+    if (isInteractingWithSlider) {
+      // 禁用自动滚动
+      const messagesContainer = document.querySelector('.overflow-y-auto');
+      if (messagesContainer) {
+        const originalOverflow = messagesContainer.style.overflow;
+        messagesContainer.style.overflow = 'hidden';
+        return () => {
+          messagesContainer.style.overflow = originalOverflow;
+        };
+      }
+    }
+  }, [isInteractingWithSlider]);
+
   if (!hasAdjustments && !hasDebugContent) {
     return null;
   }
@@ -138,7 +155,8 @@ export function StyleTransferSuggestionsCard({
           </div>
           {!!message.processingDebug.auxSemanticSimilarities.length && (
             <div className="text-[9px] text-text-secondary/75">
-              辅助参考图相似度 {message.processingDebug.auxSemanticSimilarities.map((value) => value.toFixed(2)).join(' / ')}
+              辅助参考图相似度{' '}
+              {message.processingDebug.auxSemanticSimilarities.map((value) => value.toFixed(2)).join(' / ')}
             </div>
           )}
         </div>
@@ -322,6 +340,10 @@ export function StyleTransferSuggestionsCard({
                         step={1}
                         value={adjustments.hsl[color]?.hue ?? 0}
                         onChange={(event) => handleHslSliderChange(message.id, color, 'hue', event)}
+                        onMouseDown={() => setIsInteractingWithSlider(true)}
+                        onMouseUp={() => setIsInteractingWithSlider(false)}
+                        onTouchStart={() => setIsInteractingWithSlider(true)}
+                        onTouchEnd={() => setIsInteractingWithSlider(false)}
                       />
                       <Slider
                         label="饱和度"
@@ -330,6 +352,10 @@ export function StyleTransferSuggestionsCard({
                         step={1}
                         value={adjustments.hsl[color]?.saturation ?? 0}
                         onChange={(event) => handleHslSliderChange(message.id, color, 'saturation', event)}
+                        onMouseDown={() => setIsInteractingWithSlider(true)}
+                        onMouseUp={() => setIsInteractingWithSlider(false)}
+                        onTouchStart={() => setIsInteractingWithSlider(true)}
+                        onTouchEnd={() => setIsInteractingWithSlider(false)}
                       />
                       <Slider
                         label="明度"
@@ -338,6 +364,10 @@ export function StyleTransferSuggestionsCard({
                         step={1}
                         value={adjustments.hsl[color]?.luminance ?? 0}
                         onChange={(event) => handleHslSliderChange(message.id, color, 'luminance', event)}
+                        onMouseDown={() => setIsInteractingWithSlider(true)}
+                        onMouseUp={() => setIsInteractingWithSlider(false)}
+                        onTouchStart={() => setIsInteractingWithSlider(true)}
+                        onTouchEnd={() => setIsInteractingWithSlider(false)}
                       />
                     </div>
                   ))}
@@ -345,11 +375,13 @@ export function StyleTransferSuggestionsCard({
               ) : suggestion.complex_value !== undefined ? (
                 <div className="flex items-center justify-between bg-surface/50 rounded px-2 py-1.5 border border-surface">
                   <span className="text-[10px] text-text-primary">{suggestion.label}</span>
-                  <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">已应用高级映射</span>
+                  <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                    已应用高级映射
+                  </span>
                 </div>
               ) : (
                 <Slider
-                  label={suggestion.label}
+                  label={t(`adjustments.${suggestion.key}`) || suggestion.label}
                   min={suggestion.min}
                   max={suggestion.max}
                   step={suggestion.key === 'exposure' ? 0.01 : 1}
@@ -359,6 +391,10 @@ export function StyleTransferSuggestionsCard({
                     suggestion.value
                   }
                   onChange={(event) => handleSliderChange(message.id, suggestion.key, event)}
+                  onMouseDown={() => setIsInteractingWithSlider(true)}
+                  onMouseUp={() => setIsInteractingWithSlider(false)}
+                  onTouchStart={() => setIsInteractingWithSlider(true)}
+                  onTouchEnd={() => setIsInteractingWithSlider(false)}
                 />
               )}
             </div>

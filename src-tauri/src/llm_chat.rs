@@ -559,24 +559,31 @@ pub async fn chat_adjust(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
-                    {
-                        if delta_content.is_empty() {
+                    // qwen3.6:27b 使用 reasoning 字段存储思考过程，content 字段存储最终答案
+                    // 我们需要同时处理这两个字段
+                    let delta_reasoning = sse_json["choices"][0]["delta"]["reasoning"].as_str();
+                    let delta_content = sse_json["choices"][0]["delta"]["content"].as_str();
+                    
+                    // 优先使用 reasoning（思考过程），如果没有则使用 content
+                    let text_to_process = delta_reasoning.or(delta_content);
+                    
+                    if let Some(delta_text) = text_to_process {
+                        if delta_text.is_empty() {
                             continue;
                         }
 
-                        full_content.push_str(delta_content);
+                        full_content.push_str(delta_text);
 
                         // 检测 <think> 标签状态
-                        if delta_content.contains("<think>") {
+                        if delta_text.contains("<think>") {
                             in_thinking = true;
                         }
 
                         if in_thinking {
-                            thinking_buffer.push_str(delta_content);
+                            thinking_buffer.push_str(delta_text);
                             // 清理标签后推送思考内容
                             let clean =
-                                delta_content.replace("<think>", "").replace("</think>", "");
+                                delta_text.replace("<think>", "").replace("</think>", "");
                             if !clean.is_empty() {
                                 let _ = app_handle.emit(
                                     "chat-stream-chunk",
@@ -589,7 +596,7 @@ pub async fn chat_adjust(
                             }
                         }
 
-                        if delta_content.contains("</think>") {
+                        if delta_text.contains("</think>") {
                             in_thinking = false;
                             thinking_buffer.clear();
                             // 思考结束，推送过渡提示

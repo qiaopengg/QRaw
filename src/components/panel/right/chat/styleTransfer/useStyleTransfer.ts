@@ -29,6 +29,7 @@ interface PendingStyleTransferSelection {
   mainReferencePath: string;
   auxReferencePaths: string[];
   sourceImagePath: string;
+  styleTransferType?: string;
 }
 
 interface UseStyleTransferParams {
@@ -235,10 +236,12 @@ export function useStyleTransfer({
       mainReferencePath,
       auxReferencePaths,
       sourceImagePath,
+      styleTransferType,
     }: {
       mainReferencePath: string;
       auxReferencePaths: string[];
       sourceImagePath: string;
+      styleTransferType?: string;
     }) => {
       let streamMsgId: string | null = null;
 
@@ -264,6 +267,7 @@ export function useStyleTransfer({
         mainReferencePath,
         auxReferencePaths,
         sourceImagePath,
+        styleTransferType: styleTransferType || 'general',
         requestedMode: 'analysis',
         strategyMode: styleTransferStrategyMode,
       };
@@ -363,6 +367,7 @@ export function useStyleTransfer({
               styleStrength: tuning.styleStrength,
               highlightGuardStrength: tuning.highlightGuardStrength,
               skinProtectStrength: tuning.skinProtectStrength,
+              styleTransferType: styleTransferType || 'general',
               pureAlgorithm: pureStyleTransfer,
               enableExpertPreset: enableStyleTransferExpertPreset,
               enableFeatureMapping: enableStyleTransferFeatureMapping,
@@ -468,12 +473,18 @@ export function useStyleTransfer({
       });
   }, [currentImagePath, isLoading, runStyleTransfer, setError, t]);
 
-  const confirmPendingStyleTransferSelection = useCallback(() => {
-    if (!pendingStyleTransferSelection) return;
-    const selection = pendingStyleTransferSelection;
-    setPendingStyleTransferSelection(null);
-    return runStyleTransfer(selection);
-  }, [pendingStyleTransferSelection, runStyleTransfer]);
+  const confirmPendingStyleTransferSelection = useCallback(
+    (styleTransferType?: string) => {
+      if (!pendingStyleTransferSelection) return;
+      const selection = {
+        ...pendingStyleTransferSelection,
+        styleTransferType: styleTransferType || pendingStyleTransferSelection.styleTransferType || 'general',
+      };
+      setPendingStyleTransferSelection(null);
+      return runStyleTransfer(selection);
+    },
+    [pendingStyleTransferSelection, runStyleTransfer],
+  );
 
   const cancelPendingStyleTransferSelection = useCallback(() => {
     setPendingStyleTransferSelection(null);

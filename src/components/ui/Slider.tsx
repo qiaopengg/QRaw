@@ -9,6 +9,10 @@ interface SliderProps {
   min: number;
   onChange(event: { target: { value: number } } | React.ChangeEvent<HTMLInputElement>): void;
   onDragStateChange?(state: boolean): void;
+  onMouseDown?: () => void;
+  onMouseUp?: () => void;
+  onTouchStart?: () => void;
+  onTouchEnd?: () => void;
   step?: number;
   value: number;
   trackClassName?: string;
@@ -26,6 +30,10 @@ const Slider = ({
   min,
   onChange,
   onDragStateChange = () => {},
+  onMouseDown: externalOnMouseDown,
+  onMouseUp: externalOnMouseUp,
+  onTouchStart: externalOnTouchStart,
+  onTouchEnd: externalOnTouchEnd,
   step = 1,
   value,
   trackClassName,
@@ -154,6 +162,8 @@ const Slider = ({
     const handlePointerUp = () => {
       lastUpTime.current = Date.now();
       setIsDragging(false);
+      externalOnMouseUp?.();
+      externalOnTouchEnd?.();
     };
 
     window.addEventListener('mousemove', handlePointerMove);
@@ -245,6 +255,7 @@ const Slider = ({
     }
 
     e.preventDefault();
+    externalOnMouseDown?.();
 
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -261,6 +272,8 @@ const Slider = ({
 
   const handleTouchStart = (e: React.TouchEvent<HTMLInputElement>) => {
     if (e.touches.length === 0) return;
+
+    externalOnTouchStart?.();
 
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();

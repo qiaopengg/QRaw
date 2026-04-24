@@ -1800,12 +1800,12 @@ fn actions_for_constraint_category(category: &str) -> Vec<StyleConstraintAction>
             },
             StyleConstraintAction {
                 key: "whites".to_string(),
-                label: "白色色阶".to_string(),
+                label: "白色".to_string(),
                 delta: -8.0,
             },
             StyleConstraintAction {
                 key: "exposure".to_string(),
-                label: "曝光".to_string(),
+                label: "曝光度".to_string(),
                 delta: -0.08,
             },
         ],
@@ -1817,12 +1817,12 @@ fn actions_for_constraint_category(category: &str) -> Vec<StyleConstraintAction>
             },
             StyleConstraintAction {
                 key: "blacks".to_string(),
-                label: "黑色色阶".to_string(),
+                label: "黑色".to_string(),
                 delta: 5.0,
             },
             StyleConstraintAction {
                 key: "exposure".to_string(),
-                label: "曝光".to_string(),
+                label: "曝光度".to_string(),
                 delta: 0.06,
             },
         ],
@@ -1846,7 +1846,7 @@ fn actions_for_constraint_category(category: &str) -> Vec<StyleConstraintAction>
             },
             StyleConstraintAction {
                 key: "exposure".to_string(),
-                label: "曝光".to_string(),
+                label: "曝光度".to_string(),
                 delta: -0.04,
             },
         ],
@@ -3306,7 +3306,7 @@ fn build_debug_actions(
     if after.tonal > 0.35 {
         actions.push(StyleTransferDebugAction {
             key: "exposure".to_string(),
-            label: "曝光".to_string(),
+            label: "曝光度".to_string(),
             recommended_delta: ((ref_feat.p50_luminance - pred_feat.p50_luminance) * 0.9)
                 .max(-0.18)
                 .min(0.18),
@@ -3358,7 +3358,7 @@ fn build_debug_actions(
     if after.highlight_penalty > 0.02 {
         actions.push(StyleTransferDebugAction {
             key: "whites".to_string(),
-            label: "白色色阶".to_string(),
+            label: "白色".to_string(),
             recommended_delta: (-(pred_feat.p99_luminance - target_p99_cap(ref_feat, tuning))
                 * 55.0)
                 .max(-10.0)
@@ -4100,7 +4100,7 @@ fn map_features_to_adjustments(
         suggestions.push(StyleTransferSuggestion {
             key: "exposure".to_string(),
             value: (new_exposure * 100.0).round() / 100.0,
-            label: "曝光".to_string(),
+            label: "曝光度".to_string(),
             min: -5.0,
             max: 5.0,
             complex_value: None,
@@ -4206,7 +4206,7 @@ fn map_features_to_adjustments(
         suggestions.push(StyleTransferSuggestion {
             key: "whites".to_string(),
             value: new_whites.round(),
-            label: "白色色阶".to_string(),
+            label: "白色".to_string(),
             min: -100.0,
             max: 100.0,
             complex_value: None,
@@ -4224,7 +4224,7 @@ fn map_features_to_adjustments(
         suggestions.push(StyleTransferSuggestion {
             key: "blacks".to_string(),
             value: new_blacks.round(),
-            label: "黑色色阶".to_string(),
+            label: "黑色".to_string(),
             min: -100.0,
             max: 100.0,
             complex_value: None,
@@ -4281,7 +4281,7 @@ fn map_features_to_adjustments(
         suggestions.push(StyleTransferSuggestion {
             key: "tint".to_string(),
             value: new_tint.round(),
-            label: "色调偏移".to_string(),
+            label: "色调".to_string(),
             min: -100.0,
             max: 100.0,
             complex_value: None,
@@ -4393,7 +4393,7 @@ fn map_features_to_adjustments(
             suggestions.push(StyleTransferSuggestion {
                 key: "vignetteAmount".to_string(),
                 value: new_vig.round(),
-                label: "暗角".to_string(),
+                label: "暗角量".to_string(),
                 min: -100.0,
                 max: 100.0,
                 complex_value: None,
@@ -4862,6 +4862,7 @@ pub async fn analyze_style_transfer(
     enable_auto_refine: Option<bool>,
     enable_lut: Option<bool>,
     enable_vlm: Option<bool>,
+    style_transfer_type: Option<String>,
     llm_endpoint: Option<String>,
     llm_api_key: Option<String>,
     llm_model: Option<String>,
@@ -4872,6 +4873,36 @@ pub async fn analyze_style_transfer(
         highlight_guard_strength,
         skin_protect_strength,
     );
+    
+    // 根据风格迁移类型调整参数
+    let tuning = match style_transfer_type.as_deref() {
+        Some("portrait") => {
+            // 人像：增强肤色保护，更保守的整体强度
+            StyleTransferTuning {
+                style_strength: tuning.style_strength * 0.95,
+                highlight_guard_strength: tuning.highlight_guard_strength * 1.2,
+                skin_protect_strength: tuning.skin_protect_strength * 1.3,
+            }
+        }
+        Some("landscape") => {
+            // 风光：稍微增强整体强度，适度降低高光保护
+            StyleTransferTuning {
+                style_strength: tuning.style_strength * 1.05,
+                highlight_guard_strength: tuning.highlight_guard_strength * 0.95,
+                skin_protect_strength: tuning.skin_protect_strength,
+            }
+        }
+        Some("urban") => {
+            // 城市：增强整体强度和高光保护（适合夜景）
+            StyleTransferTuning {
+                style_strength: tuning.style_strength * 1.1,
+                highlight_guard_strength: tuning.highlight_guard_strength * 1.15,
+                skin_protect_strength: tuning.skin_protect_strength,
+            }
+        }
+        _ => tuning, // 通用或未指定：使用默认参数
+    };
+    
     let pure_algorithm = pure_algorithm.unwrap_or(false);
     let enable_expert_preset = if pure_algorithm {
         false
@@ -5001,6 +5032,7 @@ pub async fn analyze_style_transfer(
         true,
     );
 
+    // VLM增强：如果需要，等待VLM完成后再返回最终结果
     if let Some((ref_img, cur_img)) = ctx_images {
         if let Some(endpoint) = llm_endpoint {
             let _ = app_handle.emit(
@@ -5025,12 +5057,14 @@ pub async fn analyze_style_transfer(
             .await
             {
                 Ok(vlm_res) => {
+                    // 合并VLM的理解说明
                     if !vlm_res.understanding.is_empty() {
                         final_res.understanding = format!(
                             "{}\n\n[视觉模型微调]\n{}",
                             final_res.understanding, vlm_res.understanding
                         );
                     }
+                    // 合并VLM的参数建议
                     if !vlm_res.adjustments.is_empty() {
                         let mut keyed: HashMap<String, usize> = HashMap::new();
                         for (idx, s) in final_res.adjustments.iter().enumerate() {
@@ -5054,58 +5088,30 @@ pub async fn analyze_style_transfer(
                             }
                         }
                     }
+                    // VLM成功完成，发送完成通知
                     let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
-                        "chunk_type": "done",
-                        "text": "",
-                        "result": crate::llm_chat::ChatAdjustResponse {
-                            understanding: final_res.understanding.clone(),
-                            adjustments: final_res.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
-                                key: s.key.clone(),
-                                value: serde_json::json!(s.value),
-                                complex_value: s.complex_value.clone(),
-                                label: s.label.clone(),
-                                min: s.min,
-                                max: s.max,
-                                reason: s.reason.clone()
-                            }).collect(),
-                            style_debug: final_res.style_debug.clone().map(|d| serde_json::to_value(d).unwrap()),
-                            constraint_debug: None
-                        }
+                        "chunk_type": "thinking",
+                        "text": "\n✓ 视觉模型微调完成\n",
+                        "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                     }));
                 }
                 Err(e) => {
+                    // VLM失败，发送错误通知但继续使用算法结果
                     let _ = app_handle.emit(
                         "style-transfer-stream",
                         serde_json::json!({
                             "chunk_type": "error",
-                            "text": format!("\n视觉模型微调失败: {}\n", e),
+                            "text": format!("\n视觉模型微调失败: {}\n将使用算法结果继续...\n", e),
                             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                         }),
                     );
                 }
             }
         }
-    } else {
-        let _ = app_handle.emit("style-transfer-stream", serde_json::json!({
-            "chunk_type": "done",
-            "text": "",
-            "result": crate::llm_chat::ChatAdjustResponse {
-                understanding: final_res.understanding.clone(),
-                adjustments: final_res.adjustments.iter().map(|s| crate::llm_chat::AdjustmentSuggestion {
-                    key: s.key.clone(),
-                    value: serde_json::json!(s.value),
-                    complex_value: s.complex_value.clone(),
-                    label: s.label.clone(),
-                    min: s.min,
-                    max: s.max,
-                    reason: s.reason.clone()
-                }).collect(),
-                style_debug: final_res.style_debug.clone().map(|d| serde_json::to_value(d).unwrap()),
-                constraint_debug: None
-            }
-        }));
     }
 
+    // 不再发送done事件，让前端通过invoke的返回值来获取最终结果
+    // 这样可以确保VLM完成后才显示结果
     Ok(final_res)
 }
 
@@ -5134,21 +5140,52 @@ async fn run_vlm_refinement(
     app_handle: &tauri::AppHandle,
 ) -> Result<crate::llm_chat::ChatAdjustResponse, String> {
     let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_secs(300))  // 增加到 5 分钟
         .build()
         .map_err(|e| e.to_string())?;
 
-    let model_name = model.unwrap_or("qwen2.5vl:7b").trim();
+    let model_name = model.unwrap_or("qwen3.6:27b").trim();
     let model_name = if model_name.is_empty() || model_name.eq_ignore_ascii_case("auto") {
-        "qwen2.5vl:7b"
+        "qwen3.6:27b"
     } else {
         model_name
     };
 
     let ref_b64 = image_to_base64_jpeg(ref_img);
     let cur_b64 = image_to_base64_jpeg(cur_img);
+    
+    // 记录图片大小用于调试
+    eprintln!("[VLM] 参考图 base64 大小: {} bytes", ref_b64.len());
+    eprintln!("[VLM] 当前图 base64 大小: {} bytes", cur_b64.len());
 
-    let system_prompt = "你是一位专业摄影师和调色专家。请观察参考图(第一张)和当前图(第二张)，以及初步的参数调整建议。请根据参考图的风格，对当前图的参数进行微调，以达到更好的风格匹配效果。请以JSON格式返回结果，包含understanding和adjustments。";
+    let system_prompt = r#"你是一位专业摄影师和调色专家。请观察参考图(第一张)和当前图(第二张)，以及初步的参数调整建议。
+
+你的任务：
+1. 分析参考图和当前图的风格差异
+2. 评估初步建议是否合理
+3. 如果需要微调，提供具体的参数调整
+
+返回格式（严格JSON）：
+{
+  "understanding": "你对两张图片风格差异的分析（字符串）",
+  "adjustments": [
+    {
+      "key": "参数名（如exposure、contrast等）",
+      "value": 数值,
+      "label": "参数中文名",
+      "min": -100.0,
+      "max": 100.0,
+      "reason": "调整理由"
+    }
+  ]
+}
+
+重要规则：
+- adjustments必须是数组格式，即使为空也要返回[]
+- 如果初步建议已经很好，可以返回空数组[]，表示使用算法结果
+- 不要返回文本描述如"将使用算法结果继续"，而是直接返回[]
+- 每个adjustment对象必须包含key、value、label、min、max、reason字段
+"#;
     let user_text = format!(
         "当前参数: {}\n初步建议: {}",
         current_adjustments,
@@ -5198,12 +5235,23 @@ async fn run_vlm_refinement(
         }
     }
 
-    let response = req.send().await.map_err(|e| format!("请求失败: {}", e))?;
+    eprintln!("[VLM] 正在发送请求到: {}", url);
+    eprintln!("[VLM] 使用模型: {}", model_name);
+    
+    let response = req.send().await.map_err(|e| {
+        let error_msg = format!("请求失败: {} (检查 Ollama 是否正在运行)", e);
+        eprintln!("[VLM] {}", error_msg);
+        error_msg
+    })?;
 
+    eprintln!("[VLM] 收到响应，状态码: {}", response.status());
+    
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("LLM 返回错误 {}: {}", status, body));
+        let error_msg = format!("LLM 返回错误 {}: {}", status, body);
+        eprintln!("[VLM] {}", error_msg);
+        return Err(error_msg);
     }
 
     let mut full_content = String::new();
@@ -5215,9 +5263,18 @@ async fn run_vlm_refinement(
     let mut line_buffer = String::new();
 
     use tauri::Emitter;
+    
+    eprintln!("[VLM] 开始读取流式响应...");
+    let mut chunk_count = 0;
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("流读取错误: {}", e))?;
+        chunk_count += 1;
+        let chunk = chunk_result.map_err(|e| {
+            // 提供更详细的错误信息
+            let error_msg = format!("流读取错误: {} (已读取 {} 个块，可能原因: 1.Ollama服务中断 2.响应超时 3.网络问题)", e, chunk_count);
+            eprintln!("[VLM] {}", error_msg);
+            error_msg
+        })?;
         let chunk_str = String::from_utf8_lossy(&chunk);
         line_buffer.push_str(&chunk_str);
 
@@ -5231,22 +5288,29 @@ async fn run_vlm_refinement(
 
             if let Some(json_str) = line.strip_prefix("data: ") {
                 if let Ok(sse_json) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta_content) = sse_json["choices"][0]["delta"]["content"].as_str()
-                    {
-                        if delta_content.is_empty() {
+                    // qwen3.6:27b 使用 reasoning 字段存储思考过程，content 字段存储最终答案
+                    // 我们需要同时处理这两个字段
+                    let delta_reasoning = sse_json["choices"][0]["delta"]["reasoning"].as_str();
+                    let delta_content = sse_json["choices"][0]["delta"]["content"].as_str();
+                    
+                    // 优先使用 reasoning（思考过程），如果没有则使用 content
+                    let text_to_process = delta_reasoning.or(delta_content);
+                    
+                    if let Some(delta_text) = text_to_process {
+                        if delta_text.is_empty() {
                             continue;
                         }
 
-                        full_content.push_str(delta_content);
+                        full_content.push_str(delta_text);
 
-                        if delta_content.contains("<think>") {
+                        if delta_text.contains("<think>") {
                             in_thinking = true;
                         }
 
                         if in_thinking {
-                            thinking_buffer.push_str(delta_content);
+                            thinking_buffer.push_str(delta_text);
                             let clean =
-                                delta_content.replace("<think>", "").replace("</think>", "");
+                                delta_text.replace("<think>", "").replace("</think>", "");
                             if !clean.is_empty() {
                                 let _ = app_handle.emit(
                                     "style-transfer-stream",
@@ -5259,7 +5323,7 @@ async fn run_vlm_refinement(
                             }
                         }
 
-                        if delta_content.contains("</think>") {
+                        if delta_text.contains("</think>") {
                             in_thinking = false;
                             thinking_buffer.clear();
                             let _ = app_handle.emit(
@@ -5277,9 +5341,99 @@ async fn run_vlm_refinement(
         }
     }
 
+    eprintln!("[VLM] 流读取完成，共读取 {} 个块", chunk_count);
+    eprintln!("[VLM] 完整内容长度: {} 字符", full_content.len());
+
     let json_str = crate::llm_chat::extract_json(&full_content)?;
-    let parsed: crate::llm_chat::ChatAdjustResponse =
-        serde_json::from_str(&json_str).map_err(|e| {
+    
+    // 尝试解析VLM响应，处理understanding和adjustments的格式转换
+    let mut parsed: crate::llm_chat::ChatAdjustResponse =
+        serde_json::from_str(&json_str).or_else(|_| {
+            // 如果直接解析失败，尝试修复格式
+            let mut json_value: Value = serde_json::from_str(&json_str)
+                .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+            
+            // 1. 处理understanding字段：如果是对象，转换为字符串
+            if let Some(understanding_obj) = json_value.get_mut("understanding") {
+                if understanding_obj.is_object() {
+                    // 将对象转换为描述性字符串
+                    let mut parts = Vec::new();
+                    if let Some(obj) = understanding_obj.as_object() {
+                        if let Some(reference) = obj.get("reference").and_then(|v| v.as_str()) {
+                            parts.push(format!("参考图: {}", reference));
+                        }
+                        if let Some(current) = obj.get("current").and_then(|v| v.as_str()) {
+                            parts.push(format!("当前图: {}", current));
+                        }
+                        // 如果有其他字段，也添加进来
+                        for (key, value) in obj {
+                            if key != "reference" && key != "current" {
+                                if let Some(text) = value.as_str() {
+                                    parts.push(format!("{}: {}", key, text));
+                                }
+                            }
+                        }
+                    }
+                    *understanding_obj = json!(parts.join("\n"));
+                } else if !understanding_obj.is_string() {
+                    // 如果既不是对象也不是字符串，转换为字符串
+                    *understanding_obj = json!(understanding_obj.to_string());
+                }
+            }
+            
+            // 2. 处理adjustments字段：如果不是数组，转换为空数组
+            if let Some(adjustments_obj) = json_value.get_mut("adjustments") {
+                if !adjustments_obj.is_array() {
+                    // 如果是对象，尝试转换为数组
+                    if adjustments_obj.is_object() {
+                        let mut adjustments_array = Vec::new();
+                        if let Some(obj) = adjustments_obj.as_object() {
+                            for (key, value) in obj {
+                                // 尝试提取数值
+                                let numeric_value_opt: Option<f64> = if value.is_number() {
+                                    value.as_f64()
+                                } else if let Some(text) = value.as_str() {
+                                    // 尝试从字符串中提取数值（如 "Increase by 0.5" -> 0.5）
+                                    text.split_whitespace()
+                                        .filter_map(|word| word.parse::<f64>().ok())
+                                        .next()
+                                } else {
+                                    None
+                                };
+                                
+                                // 如果成功提取到数值，才添加到数组
+                                if let Some(num_val) = numeric_value_opt {
+                                    let reason = if let Some(text) = value.as_str() {
+                                        text.to_string()
+                                    } else {
+                                        format!("VLM建议调整{}", key)
+                                    };
+                                    
+                                    let suggestion = json!({
+                                        "key": key,
+                                        "value": num_val,
+                                        "label": key,
+                                        "min": -100.0,
+                                        "max": 100.0,
+                                        "reason": reason
+                                    });
+                                    adjustments_array.push(suggestion);
+                                }
+                            }
+                        }
+                        *adjustments_obj = json!(adjustments_array);
+                    } else {
+                        // 如果是字符串或其他类型（如"将使用算法结果继续..."），转换为空数组
+                        // VLM无法提供具体参数时，返回空数组，让算法结果继续
+                        *adjustments_obj = json!([]);
+                    }
+                }
+            }
+            
+            serde_json::from_value(json_value)
+                .map_err(|e| format!("转换后解析失败: {}", e))
+        })
+        .map_err(|e| {
             format!(
                 "解析 JSON 失败: {}，原始内容: {}",
                 e,
