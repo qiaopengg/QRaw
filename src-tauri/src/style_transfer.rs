@@ -599,14 +599,14 @@ fn build_structured_style_transfer_fields(
     if backbone_used {
         if let Some(similarity) = semantic_similarity {
             notes.push(format!(
-                "ViT-B style backbone 已参与参考图理解与风险评估，主参考图语义相似度 {:.2}。",
+                "智能风格分析已参与，主参考图匹配度 {:.2}。",
                 similarity
             ));
         } else {
-            notes.push("ViT-B style backbone 已参与参考图理解与多参考融合。".to_string());
+            notes.push("智能风格分析已参与多参考图融合。".to_string());
         }
     } else {
-        notes.push("当前结果未启用 ViT-B style backbone，主要依赖规则分析链。".to_string());
+        notes.push("当前结果主要依赖基础分析。".to_string());
     }
     let quality_report = StyleTransferQualityReport {
         guarded: !risk_warnings.is_empty(),
@@ -4873,7 +4873,7 @@ pub async fn analyze_style_transfer(
         "style-transfer-stream",
         serde_json::json!({
             "chunk_type": "thinking",
-            "text": "[PROGRESS] (0%) - 开始风格迁移分析...\n",
+            "text": "[PROGRESS] (0%) - 开始分析照片风格...\n",
             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
         }),
     );
@@ -4942,7 +4942,7 @@ pub async fn analyze_style_transfer(
     let app_state = app_handle.state::<crate::AppState>();
     let style_backbone = get_or_init_style_transfer_backbone(&app_handle, &app_state.ai_init_lock)
         .await
-        .map_err(|e| format!("风格理解模型未就绪: {}", e))?;
+        .map_err(|e| format!("智能分析模型未就绪: {}", e))?;
     validate_style_transfer_paths(&reference_path, &current_image_path, &aux_reference_paths)?;
     
     // 发送加载图片进度
@@ -4950,7 +4950,7 @@ pub async fn analyze_style_transfer(
         "style-transfer-stream",
         serde_json::json!({
             "chunk_type": "thinking",
-            "text": "[PROGRESS] (10%) - 正在加载图片...\n",
+            "text": "[PROGRESS] (10%) - 正在读取照片...\n",
             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
         }),
     );
@@ -4968,7 +4968,7 @@ pub async fn analyze_style_transfer(
         "style-transfer-stream",
         serde_json::json!({
             "chunk_type": "thinking",
-            "text": "[PROGRESS] (30%) - 正在分析风格特征...\n",
+            "text": "[PROGRESS] (30%) - 正在理解照片风格...\n",
             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
         }),
     );
@@ -5049,7 +5049,7 @@ pub async fn analyze_style_transfer(
         "style-transfer-stream",
         serde_json::json!({
             "chunk_type": "thinking",
-            "text": "[PROGRESS] (70%) - 算法分析完成，正在生成建议...\n",
+            "text": "[PROGRESS] (70%) - 正在生成调色建议...\n",
             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
         }),
     );
@@ -5080,7 +5080,7 @@ pub async fn analyze_style_transfer(
                 "style-transfer-stream",
                 serde_json::json!({
                     "chunk_type": "thinking",
-                    "text": "[PROGRESS] (75%) - 正在生成预览图供视觉模型检查...\n",
+                    "text": "[PROGRESS] (75%) - 正在生成效果预览...\n",
                     "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                 }),
             );
@@ -5096,7 +5096,7 @@ pub async fn analyze_style_transfer(
                 "style-transfer-stream",
                 serde_json::json!({
                     "chunk_type": "thinking",
-                    "text": "[PROGRESS] (80%) - 正在启动视觉大模型进行质量检查...\n",
+                    "text": "[PROGRESS] (80%) - 正在进行智能质检...\n",
                     "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                 }),
             );
@@ -5120,7 +5120,7 @@ pub async fn analyze_style_transfer(
                         "style-transfer-stream",
                         serde_json::json!({
                             "chunk_type": "thinking",
-                            "text": "[PROGRESS] (95%) - 视觉模型微调完成\n",
+                            "text": "[PROGRESS] (95%) - 智能优化完成\n",
                             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                         }),
                     );
@@ -5135,7 +5135,7 @@ pub async fn analyze_style_transfer(
                             "style-transfer-stream",
                             serde_json::json!({
                                 "chunk_type": "thinking",
-                                "text": format!("\n[视觉模型质检]\n{}\n", vlm_res.understanding),
+                                "text": format!("\n[智能质检报告]\n{}\n", vlm_res.understanding),
                                 "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                             }),
                         );
@@ -5152,7 +5152,7 @@ pub async fn analyze_style_transfer(
                     // 合并VLM的理解说明
                     if !vlm_res.understanding.is_empty() {
                         final_res.understanding = format!(
-                            "{}\n\n[视觉模型质检报告]\n{}",
+                            "{}\n\n[智能质检报告]\n{}",
                             final_res.understanding, vlm_res.understanding
                         );
                     }
@@ -5193,7 +5193,7 @@ pub async fn analyze_style_transfer(
                         "style-transfer-stream",
                         serde_json::json!({
                             "chunk_type": "error",
-                            "text": format!("\n视觉模型微调失败: {}\n将使用算法结果继续...\n", e),
+                            "text": format!("\n智能优化失败: {}\n将使用基础分析结果...\n", e),
                             "result": Option::<crate::llm_chat::ChatAdjustResponse>::None
                         }),
                     );

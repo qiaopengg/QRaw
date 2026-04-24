@@ -75,7 +75,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "style-backbone",
-            "Style Transfer Backbone",
+            "智能风格理解",
             STYLE_TRANSFER_BACKBONE_FILENAME,
             "style-understanding",
             true,
@@ -83,7 +83,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "style-backbone-preprocess",
-            "Style Transfer Backbone Preprocess",
+            "风格理解配置",
             STYLE_TRANSFER_PREPROCESS_FILENAME,
             "style-understanding-config",
             true,
@@ -91,7 +91,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "sam-encoder",
-            "SAM Encoder",
+            "智能主体识别",
             SAM_ENCODER_FILENAME,
             "subject-mask",
             true,
@@ -99,7 +99,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "sam-decoder",
-            "SAM Decoder",
+            "主体识别解码",
             SAM_DECODER_FILENAME,
             "subject-mask",
             true,
@@ -107,7 +107,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "u2net-foreground",
-            "Foreground Model",
+            "前景分离",
             U2NET_FILENAME,
             "semantic-region",
             true,
@@ -115,7 +115,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "skyseg",
-            "Sky Segmentation Model",
+            "天空识别",
             SKYSEG_FILENAME,
             "semantic-region",
             true,
@@ -123,7 +123,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "depth-anything",
-            "Depth Model",
+            "景深分析",
             DEPTH_FILENAME,
             "semantic-region",
             true,
@@ -131,7 +131,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "clip-model",
-            "CLIP Model",
+            "图像理解（可选）",
             CLIP_MODEL_FILENAME,
             "optional-vlm-assist",
             false,
@@ -139,7 +139,7 @@ pub fn get_style_transfer_model_status_response() -> Result<StyleTransferModelSt
         make_status(
             &model_dir,
             "clip-tokenizer",
-            "CLIP Tokenizer",
+            "文本理解（可选）",
             CLIP_TOKENIZER_FILENAME,
             "optional-vlm-assist",
             false,

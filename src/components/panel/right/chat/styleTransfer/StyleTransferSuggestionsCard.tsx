@@ -133,10 +133,10 @@ export function StyleTransferSuggestionsCard({
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-secondary/80">
             <span>执行引擎 {message.executionMeta?.engine || 'unknown'}</span>
-            <span>canonical input {message.processingDebug.canonicalInputUsed ? 'on' : 'off'}</span>
-            <span>style backbone {message.processingDebug.styleBackboneUsed ? 'on' : 'off'}</span>
+            <span>统一分析 {message.processingDebug.canonicalInputUsed ? '已启用' : '未启用'}</span>
+            <span>风格理解 {message.processingDebug.styleBackboneUsed ? '已启用' : '未启用'}</span>
             <span>
-              主参考相似度{' '}
+              主参考匹配度{' '}
               {typeof message.processingDebug.semanticSimilarity === 'number'
                 ? message.processingDebug.semanticSimilarity.toFixed(2)
                 : 'n/a'}
@@ -148,27 +148,27 @@ export function StyleTransferSuggestionsCard({
           </div>
           <div className="flex flex-wrap gap-1 text-[9px]">
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              pure {message.processingDebug.pureAlgorithm ? 'on' : 'off'}
+              纯算法 {message.processingDebug.pureAlgorithm ? '已启用' : '未启用'}
             </span>
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              featureMapping {message.processingDebug.featureMappingEnabled ? 'on' : 'off'}
+              特征映射 {message.processingDebug.featureMappingEnabled ? '已启用' : '未启用'}
             </span>
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              autoRefine {message.processingDebug.autoRefineEnabled ? 'on' : 'off'}
+              自动优化 {message.processingDebug.autoRefineEnabled ? '已启用' : '未启用'}
             </span>
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              expertPreset {message.processingDebug.expertPresetEnabled ? 'on' : 'off'}
+              专家预设 {message.processingDebug.expertPresetEnabled ? '已启用' : '未启用'}
             </span>
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              LUT {message.processingDebug.lutEnabled ? 'on' : 'off'}
+              色彩映射 {message.processingDebug.lutEnabled ? '已启用' : '未启用'}
             </span>
             <span className="rounded bg-surface/60 px-1.5 py-0.5 text-text-secondary">
-              VLM {message.processingDebug.vlmEnabled ? 'on' : 'off'}
+              视觉质检 {message.processingDebug.vlmEnabled ? '已启用' : '未启用'}
             </span>
           </div>
           {!!message.processingDebug.auxSemanticSimilarities.length && (
             <div className="text-[9px] text-text-secondary/75">
-              辅助参考图相似度{' '}
+              辅助参考图匹配度{' '}
               {message.processingDebug.auxSemanticSimilarities.map((value) => value.toFixed(2)).join(' / ')}
             </div>
           )}
