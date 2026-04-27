@@ -1,12 +1,36 @@
+// ============================================================================
+// RapidRAW 分析式风格迁移 - 主模块
+// ============================================================================
+// 文档参考：docs/rapid_raw_分析式风格迁移技术架构_v_4.md
+//
+// Phase 1 (当前): 规范输入 + 语义区域识别
+// - ✅ Canonical RAW preview
+// - ✅ ViT-B style backbone
+// - ✅ 真实语义分割（skin/sky）
+// - ✅ 基于语义 mask 的局部参数建议
+//
+// Phase 2 (当前): 学习型映射核心
+// - ✅ Neural Preset 思想的参数预测
+// - ✅ Style prototype embedding
+// - ⏳ Image-Adaptive 3D LUT
+// - ⏳ Bilateral grid / local affine
+//
+// Phase 3 (规划中): 学习型 preset 与产品闭环
+// - ⏳ 离线训练 preset predictor
+// - ⏳ 用户行为闭环
+// - ⏳ 风格原型库与场景库
+
 use crate::ai_processing::{
     StyleTransferBackboneModels, extract_style_transfer_embedding,
-    get_or_init_style_transfer_backbone,
+    get_or_init_style_transfer_backbone, get_or_init_ai_models,
 };
 use crate::expert_presets::{derive_style_tags, get_expert_preset_by_id, select_expert_preset};
 use crate::file_management::load_settings;
 use crate::formats::is_raw_file;
 use crate::image_loader::{load_base_image_from_bytes, load_image_with_orientation};
 use crate::image_processing::downscale_f32_image;
+use crate::style_transfer_semantic::{analyze_semantic_regions, SemanticRegionAnalysis};
+// use crate::style_transfer_learned::LearnedParameterPredictor;  // Phase 2: 已禁用
 use base64::{Engine as _, engine::general_purpose};
 use image::{DynamicImage, GenericImageView};
 use reqwest::Client;
@@ -83,6 +107,9 @@ pub struct StyleFeatures {
     pub hue_spread: f64,
     pub laplacian_variance: f64,
     pub vignette_diff: f64,
+    // Phase 2: 风格 embedding（从 ViT-B backbone 提取）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_embedding: Option<Vec<f32>>,  // 768-dim for ViT-B
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -285,6 +312,11 @@ struct StyleTransferPreparedContext {
     semantic_similarity: Option<f64>,
     aux_semantic_similarities: Vec<f64>,
     backbone_used: bool,
+    // Phase 1: 语义区域分析结果
+    ref_semantic_regions: Vec<SemanticRegionAnalysis>,
+    cur_semantic_regions: Vec<SemanticRegionAnalysis>,
+    // Phase 2: 学习型预测器
+    learned_predictor: Option<Arc<crate::style_transfer_learned::LearnedParameterPredictor>>,
 }
 
 #[derive(Clone, Copy)]
@@ -305,6 +337,9 @@ struct AlgorithmPipelineResult {
     semantic_similarity: Option<f64>,
     aux_semantic_similarities: Vec<f64>,
     backbone_used: bool,
+    // Phase 1: 语义区域分析结果
+    ref_semantic_regions: Vec<SemanticRegionAnalysis>,
+    cur_semantic_regions: Vec<SemanticRegionAnalysis>,
 }
 
 fn weighted_average(primary: f64, secondary: f64, weight: f64) -> f64 {
@@ -352,6 +387,7 @@ fn blend_style_features(a: &StyleFeatures, b: &StyleFeatures, weight: f64) -> St
         hue_spread: blend(a.hue_spread, b.hue_spread),
         laplacian_variance: blend(a.laplacian_variance, b.laplacian_variance),
         vignette_diff: blend(a.vignette_diff, b.vignette_diff),
+        style_embedding: a.style_embedding.clone(),  // 使用第一个特征的 embedding
     }
 }
 
@@ -387,8 +423,111 @@ fn fuse_reference_features(
 fn build_style_transfer_local_regions(
     ref_features: &StyleFeatures,
     cur_features: &StyleFeatures,
+    ctx: &StyleTransferPreparedContext,  // Phase 1: 使用语义区域数据
 ) -> Vec<StyleTransferLocalRegion> {
     let mut regions = Vec::new();
+
+    // Phase 1: 优先使用真实语义区域生成局部调整
+    if !ctx.ref_semantic_regions.is_empty() && !ctx.cur_semantic_regions.is_empty() {
+        eprintln!("[Phase 1] Building semantic-based local regions");
+
+        // 1. Skin 区域（基于真实语义分割）
+        if let (Some(ref_skin), Some(cur_skin)) = (
+            ctx.ref_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Skin),
+            ctx.cur_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Skin),
+        ) {
+            if ref_skin.coverage > 0.05 && cur_skin.coverage > 0.05 {
+                let lum_delta = (ref_skin.mean_luminance - cur_skin.mean_luminance).clamp(-0.15, 0.15);
+                let sat_delta = (ref_skin.mean_saturation - cur_skin.mean_saturation).clamp(-0.20, 0.20);
+
+                regions.push(StyleTransferLocalRegion {
+                    id: "semantic-skin".to_string(),
+                    label: "Skin Region (Semantic)".to_string(),
+                    region_type: "skin".to_string(),
+                    default_hidden: true,
+                    visible_in_ui: true,
+                    adjustments: json!({
+                        "exposure": (lum_delta * 1.2).clamp(-0.3, 0.3),
+                        "saturation": (sat_delta * 15.0).clamp(-15.0, 15.0),
+                    }),
+                    mask_hint: StyleTransferLocalRegionMaskHint {
+                        mask_type: "ai-subject".to_string(),
+                        parameters: json!({
+                            "grow": 0,
+                            "feather": 25
+                        }),
+                    },
+                });
+                eprintln!("[Phase 1] Added semantic skin region");
+            }
+        }
+
+        // 2. Sky 区域（基于真实语义分割）
+        if let (Some(ref_sky), Some(cur_sky)) = (
+            ctx.ref_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Sky),
+            ctx.cur_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Sky),
+        ) {
+            if ref_sky.coverage > 0.05 && cur_sky.coverage > 0.05 {
+                let lum_delta = (ref_sky.mean_luminance - cur_sky.mean_luminance).clamp(-0.20, 0.20);
+                let sat_delta = (ref_sky.mean_saturation - cur_sky.mean_saturation).clamp(-0.25, 0.25);
+
+                regions.push(StyleTransferLocalRegion {
+                    id: "semantic-sky".to_string(),
+                    label: "Sky Region (Semantic)".to_string(),
+                    region_type: "sky".to_string(),
+                    default_hidden: true,
+                    visible_in_ui: true,
+                    adjustments: json!({
+                        "exposure": (lum_delta * 1.5).clamp(-0.5, 0.5),
+                        "saturation": (sat_delta * 20.0).clamp(-20.0, 20.0),
+                    }),
+                    mask_hint: StyleTransferLocalRegionMaskHint {
+                        mask_type: "ai-sky".to_string(),
+                        parameters: json!({
+                            "grow": 0,
+                            "feather": 30
+                        }),
+                    },
+                });
+                eprintln!("[Phase 1] Added semantic sky region");
+            }
+        }
+
+        // 3. Background 区域（基于真实语义分割）
+        if let (Some(ref_bg), Some(cur_bg)) = (
+            ctx.ref_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Background),
+            ctx.cur_semantic_regions.iter().find(|r| r.region_type == crate::style_transfer_semantic::SemanticRegionType::Background),
+        ) {
+            if ref_bg.coverage > 0.10 && cur_bg.coverage > 0.10 {
+                let lum_delta = (ref_bg.mean_luminance - cur_bg.mean_luminance).clamp(-0.15, 0.15);
+
+                regions.push(StyleTransferLocalRegion {
+                    id: "semantic-background".to_string(),
+                    label: "Background Region (Semantic)".to_string(),
+                    region_type: "background".to_string(),
+                    default_hidden: true,
+                    visible_in_ui: true,
+                    adjustments: json!({
+                        "exposure": (lum_delta * 1.0).clamp(-0.4, 0.4),
+                    }),
+                    mask_hint: StyleTransferLocalRegionMaskHint {
+                        mask_type: "inverted-subject".to_string(),
+                        parameters: json!({
+                            "grow": 0,
+                            "feather": 20
+                        }),
+                    },
+                });
+                eprintln!("[Phase 1] Added semantic background region");
+            }
+        }
+        
+        eprintln!("[Phase 1] Total semantic regions: {}", regions.len());
+        return regions;
+    }
+
+    // Fallback: 使用原有的基于全局特征的方法
+    eprintln!("[Phase 1] Semantic regions not available, using feature-based fallback");
 
     if cur_features.skin_ratio > 0.015 && ref_features.skin_ratio > 0.015 {
         let skin_temp = ((ref_features.skin_rb_ratio - cur_features.skin_rb_ratio) * 16.0)
@@ -541,6 +680,7 @@ fn build_structured_style_transfer_fields(
     semantic_similarity: Option<f64>,
     aux_semantic_similarities: &[f64],
     backbone_used: bool,
+    ctx: &StyleTransferPreparedContext,  // Phase 1: 新增参数
 ) -> (
     Value,
     Value,
@@ -583,7 +723,7 @@ fn build_structured_style_transfer_fields(
         }
     }
 
-    let local_regions = build_style_transfer_local_regions(ref_features, cur_features);
+    let local_regions = build_style_transfer_local_regions(ref_features, cur_features, ctx);
     let risk_warnings = build_risk_warnings(
         ref_features,
         cur_features,
@@ -694,8 +834,9 @@ fn build_style_transfer_context(
     tuning: StyleTransferTuning,
     enable_expert_preset: bool,
     style_backbone: Option<Arc<StyleTransferBackboneModels>>,
+    ai_models: Option<Arc<crate::ai_processing::AiModels>>,  // Phase 1: 新增参数
 ) -> StyleTransferPreparedContext {
-    let main_ref_features = extract_features(&ref_img);
+    let mut main_ref_features = extract_features(&ref_img);
     let aux_features = aux_imgs.iter().map(extract_features).collect::<Vec<_>>();
     let current_embedding = style_backbone
         .as_ref()
@@ -711,6 +852,13 @@ fn build_style_transfer_context(
     } else {
         Vec::new()
     };
+    
+    // Phase 2: 填充 style_embedding 到特征中
+    if let Some(ref embedding) = main_reference_embedding {
+        main_ref_features.style_embedding = Some(embedding.clone());
+        eprintln!("[Phase 2] Reference style embedding extracted: {} dims", embedding.len());
+    }
+    
     let semantic_similarity = main_reference_embedding.as_ref().and_then(|embedding| {
         current_embedding
             .as_ref()
@@ -734,7 +882,13 @@ fn build_style_transfer_context(
         &aux_features,
         &aux_semantic_similarities,
     );
-    let cur_features = extract_features(&cur_img);
+    let mut cur_features = extract_features(&cur_img);
+    
+    // Phase 2: 填充当前图像的 style_embedding
+    if let Some(ref embedding) = current_embedding {
+        cur_features.style_embedding = Some(embedding.clone());
+        eprintln!("[Phase 2] Current style embedding extracted: {} dims", embedding.len());
+    }
     let (expert_tags, expert_preset_id) = if enable_expert_preset {
         let tags = derive_style_tags(
             ref_features.mean_luminance,
@@ -756,6 +910,39 @@ fn build_style_transfer_context(
         "image+reference",
     );
     let baseline_error = style_error_breakdown(&ref_features, &cur_features, tuning);
+    
+    // Phase 1: 语义区域分析（已启用）
+    eprintln!("[Phase 1] Starting semantic region analysis");
+    let ref_semantic_regions = if ai_models.is_some() {
+        analyze_semantic_regions(&ref_img, ai_models.as_ref())
+    } else {
+        eprintln!("[Phase 1] AI models not available, skipping semantic analysis");
+        Vec::new()
+    };
+    let cur_semantic_regions = if ai_models.is_some() {
+        analyze_semantic_regions(&cur_img, ai_models.as_ref())
+    } else {
+        Vec::new()
+    };
+    eprintln!("[Phase 1] Ref regions: {}, Cur regions: {}", 
+              ref_semantic_regions.len(), cur_semantic_regions.len());
+    
+    // Phase 2: 学习型预测器（暂时禁用）
+    // 原因：当前实现偏离风格迁移本质，变成了"滤镜选择器"
+    // 真正的风格迁移应该直接分析参考图特征，而不是匹配预设原型
+    // TODO: 未来如果要启用，应该重新设计为：
+    //   输入：(ref_embedding, cur_embedding, ref_features, cur_features)
+    //   输出：针对这两张图的独特参数
+    //   而不是：ref_embedding → 匹配原型 → 固定参数
+    let learned_predictor = None;  // 禁用学习型预测器
+    
+    // let learned_predictor = if enable_expert_preset {
+    //     eprintln!("[Phase 2] Initializing learned parameter predictor");
+    //     Some(Arc::new(LearnedParameterPredictor::new()))
+    // } else {
+    //     None
+    // };
+    
     StyleTransferPreparedContext {
         ref_img,
         cur_img,
@@ -769,6 +956,9 @@ fn build_style_transfer_context(
         semantic_similarity,
         aux_semantic_similarities,
         backbone_used: style_backbone.is_some(),
+        ref_semantic_regions,
+        cur_semantic_regions,
+        learned_predictor,  // Phase 2: 学习型预测器
     }
 }
 
@@ -824,6 +1014,7 @@ fn run_algorithm_pipeline(
             &ctx.cur_features,
             &seeded_adjustments,
             ctx.tuning,
+            ctx,  // Phase 2: 传递 context
         )
     } else {
         Vec::new()
@@ -887,6 +1078,8 @@ fn run_algorithm_pipeline(
             semantic_similarity: ctx.semantic_similarity,
             aux_semantic_similarities: ctx.aux_semantic_similarities.clone(),
             backbone_used: ctx.backbone_used,
+            ref_semantic_regions: ctx.ref_semantic_regions.clone(),
+            cur_semantic_regions: ctx.cur_semantic_regions.clone(),
         };
     }
     let auto_refine_rounds = if options.enable_auto_refine {
@@ -924,6 +1117,7 @@ fn run_algorithm_pipeline(
             &predicted_features,
             &next_adjustments_value,
             ctx.tuning,
+            ctx,  // Phase 2: 传递 context
         );
         let mut keyed: HashMap<String, usize> = HashMap::new();
         for (idx, s) in adjustments.iter().enumerate() {
@@ -1045,6 +1239,8 @@ fn run_algorithm_pipeline(
         semantic_similarity: ctx.semantic_similarity,
         aux_semantic_similarities: ctx.aux_semantic_similarities.clone(),
         backbone_used: ctx.backbone_used,
+        ref_semantic_regions: ctx.ref_semantic_regions.clone(),
+        cur_semantic_regions: ctx.cur_semantic_regions.clone(),
     }
 }
 
@@ -1127,6 +1323,7 @@ fn build_algorithm_response(
     style_debug: StyleTransferDebugInfo,
     suffix: &str,
     detailed: bool,
+    ctx: &StyleTransferPreparedContext,  // Phase 1: 新增参数
 ) -> StyleTransferResponse {
     let understanding = if adjustments.is_empty() {
         format!("两张图片的调色风格非常接近，无需调整。{}", suffix)
@@ -1157,6 +1354,7 @@ fn build_algorithm_response(
         semantic_similarity,
         aux_semantic_similarities,
         backbone_used,
+        ctx,
     );
     StyleTransferResponse {
         understanding,
@@ -1324,6 +1522,7 @@ fn fallback_features_from_adjustments(current_adjustments: &Value) -> StyleFeatu
         hue_spread: 0.0,
         laplacian_variance: 220.0,
         vignette_diff: 0.0,
+        style_embedding: None,  // Fallback 不提取 embedding
     }
 }
 
@@ -1937,6 +2136,7 @@ pub fn extract_features(img: &DynamicImage) -> StyleFeatures {
             hue_spread: 0.0,
             laplacian_variance: 0.0,
             vignette_diff: 0.0,
+            style_embedding: None,  // 空图像不提取 embedding
         };
     }
 
@@ -2326,6 +2526,7 @@ pub fn extract_features(img: &DynamicImage) -> StyleFeatures {
         hue_spread,
         laplacian_variance: safe(laplacian_variance.max(0.0), 0.0),
         vignette_diff: safe(vignette_diff, 0.0),
+        style_embedding: None,  // 将在后续步骤中填充
     }
 }
 
@@ -4007,8 +4208,52 @@ fn map_features_to_adjustments(
     cur_feat: &StyleFeatures,
     current_adjustments: &Value,
     tuning: StyleTransferTuning,
+    #[allow(unused_variables)] ctx: &StyleTransferPreparedContext,  // Phase 2: 暂时未使用
 ) -> Vec<StyleTransferSuggestion> {
     let mut suggestions = Vec::new();
+    
+    // Phase 2: 学习型预测器（已禁用）
+    // 当前实现问题：使用 embedding 匹配内置原型，应用原型的固定参数
+    // 这不是风格迁移，而是"智能滤镜选择"
+    // 真正的风格迁移应该：直接分析参考图的实际特征，生成针对性参数
+    // 
+    // 保留代码作为参考，但不执行
+    /*
+    if let Some(predictor) = &ctx.learned_predictor {
+        if let Some(ref ref_embedding) = ref_feat.style_embedding {
+            eprintln!("[Phase 2] Using learned parameter predictor with {} dims embedding", ref_embedding.len());
+            let learned_params = predictor.predict_parameters(
+                ref_embedding,
+                tuning.style_strength,
+            );
+
+            if !learned_params.is_empty() {
+                eprintln!("[Phase 2] Learned predictor returned {} parameters", learned_params.len());
+
+                // 将学习型预测转换为 suggestions
+                for (key, value) in learned_params {
+                    if let Some((label, min, max)) = action_meta(&key) {
+                        suggestions.push(StyleTransferSuggestion {
+                            key: key.clone(),
+                            value,
+                            label: format!("{} (学习型)", label),
+                            min,
+                            max,
+                            complex_value: None,
+                            reason: "基于风格原型的学习型参数预测".to_string(),
+                        });
+                    }
+                }
+
+                eprintln!("[Phase 2] Mixing learned predictions with rule-based mapping");
+            }
+        } else {
+            eprintln!("[Phase 2] Style embedding not available, skipping learned prediction");
+        }
+    }
+    */
+    
+    // 继续执行原有的规则映射（这才是真正的风格迁移）
     let scene_profile = style_scene_profile(ref_feat, cur_feat);
 
     let get_current = |key: &str, default: f64| -> f64 {
@@ -4943,6 +5188,21 @@ pub async fn analyze_style_transfer(
     let style_backbone = get_or_init_style_transfer_backbone(&app_handle, &app_state.ai_init_lock)
         .await
         .map_err(|e| format!("智能分析模型未就绪: {}", e))?;
+    
+    // Phase 1: 初始化 AI 模型（用于语义区域识别）
+    let ai_models = if !pure_algorithm {
+        eprintln!("[Phase 1] Initializing AI models for semantic analysis");
+        match get_or_init_ai_models(&app_handle, &app_state.ai_state, &app_state.ai_init_lock).await {
+            Ok(models) => Some(models),
+            Err(e) => {
+                eprintln!("[Phase 1] Failed to initialize AI models: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    
     validate_style_transfer_paths(&reference_path, &current_image_path, &aux_reference_paths)?;
     
     // 发送加载图片进度
@@ -4976,6 +5236,7 @@ pub async fn analyze_style_transfer(
     let endpoint_for_check = llm_endpoint.clone();
     let current_adjustments_for_vlm = current_adjustments.clone();
     let style_backbone_for_worker = style_backbone.clone();
+    let ai_models_for_worker = ai_models.clone();  // Phase 1: 传递 AI 模型
 
     let (algorithm_result, suffix, early_exit_res, ctx_images) =
         tokio::task::spawn_blocking(move || {
@@ -4987,6 +5248,7 @@ pub async fn analyze_style_transfer(
                 tuning,
                 enable_expert_preset,
                 Some(style_backbone_for_worker),
+                ai_models_for_worker,  // Phase 1: 传递 AI 模型
             );
             let (early_exit_threshold, llm_trigger) = adaptive_style_thresholds(
                 &ctx.ref_features,
@@ -5059,6 +5321,32 @@ pub async fn analyze_style_transfer(
     }
 
     let algorithm_result = algorithm_result.unwrap();
+    
+    // Phase 1: 创建临时 context 用于传递语义区域信息
+    let temp_ctx = StyleTransferPreparedContext {
+        ref_img: DynamicImage::new_rgb8(1, 1), // 占位
+        cur_img: DynamicImage::new_rgb8(1, 1), // 占位
+        ref_features: algorithm_result.ref_features.clone(),
+        cur_features: algorithm_result.cur_features.clone(),
+        constraint_window: DynamicConstraintWindow {
+            source: "temp".to_string(),
+            highlight_risk: 0.0,
+            shadow_risk: 0.0,
+            saturation_risk: 0.0,
+            bands: HashMap::new(),
+        },
+        tuning: StyleTransferTuning { style_strength: 1.0, highlight_guard_strength: 1.0, skin_protect_strength: 1.0 },
+        baseline_error: algorithm_result.baseline_error.clone(),
+        expert_tags: Vec::new(),
+        expert_preset_id: None,
+        semantic_similarity: algorithm_result.semantic_similarity,
+        aux_semantic_similarities: algorithm_result.aux_semantic_similarities.clone(),
+        backbone_used: algorithm_result.backbone_used,
+        ref_semantic_regions: algorithm_result.ref_semantic_regions.clone(),
+        cur_semantic_regions: algorithm_result.cur_semantic_regions.clone(),
+        learned_predictor: None,  // Phase 2: 临时 context 不需要预测器
+    };
+    
     let mut final_res = build_algorithm_response(
         algorithm_result.adjustments.clone(),
         &algorithm_result.ref_features,
@@ -5071,6 +5359,7 @@ pub async fn analyze_style_transfer(
         algorithm_result.style_debug.clone(),
         &suffix,
         true,
+        &temp_ctx,
     );
 
     // VLM增强：如果需要，等待VLM完成后再返回最终结果

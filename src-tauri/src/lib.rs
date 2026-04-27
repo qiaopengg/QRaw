@@ -25,8 +25,10 @@ mod panorama_utils;
 mod preset_converter;
 mod raw_processing;
 mod style_transfer;
+mod style_transfer_learned;   // Phase 2: 学习型映射
 mod style_transfer_models;
 mod style_transfer_runtime;
+mod style_transfer_semantic;  // Phase 1: 语义区域识别
 mod tagging;
 mod tagging_utils;
 mod window_customizer;

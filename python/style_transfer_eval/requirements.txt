@@ -1,0 +1,31 @@
+# 风格迁移离线评测工具依赖
+
+# 图像处理
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+scikit-image>=0.21.0
+
+# 评测指标
+lpips>=0.1.4  # 感知相似度
+pytorch-fid>=0.3.0  # FID 分数
+scikit-learn>=1.3.0  # 机器学习指标
+
+# 深度学习（用于特征提取）
+torch>=2.0.0
+torchvision>=0.15.0
+onnxruntime>=1.15.0
+
+# 数据处理
+pandas>=2.0.0
+tqdm>=4.65.0
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 配置管理
+pyyaml>=6.0
+
+# 报告生成
+jinja2>=3.1.0

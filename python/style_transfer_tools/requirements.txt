@@ -1,0 +1,32 @@
+# 风格迁移数据处理工具依赖
+
+# 图像处理
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+scikit-image>=0.21.0
+rawpy>=0.18.0  # RAW 图像处理
+
+# 深度学习（用于特征提取）
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0  # DINOv2 等预训练模型
+timm>=0.9.0
+
+# 数据处理
+pandas>=2.0.0
+tqdm>=4.65.0
+h5py>=3.9.0  # 大规模数据存储
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0  # 交互式可视化
+
+# 降维和聚类
+scikit-learn>=1.3.0
+umap-learn>=0.5.3  # UMAP 降维
+hdbscan>=0.8.33  # 聚类
+
+# 配置管理
+pyyaml>=6.0
