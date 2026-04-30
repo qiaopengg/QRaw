@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useRef, useMemo } from 'react';
-import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo, Waves } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo, Waves, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { SelectedImage } from '../../ui/AppProperties';
@@ -23,6 +23,8 @@ interface EditorToolbarProps {
   adjustmentsHistory: any[];
   adjustmentsHistoryIndex: number;
   goToAdjustmentsHistoryIndex(index: number): void;
+  showFocusAreas: boolean;
+  onToggleFocusAreas(): void;
 }
 
 const EditorToolbar = memo(
@@ -42,6 +44,8 @@ const EditorToolbar = memo(
     adjustmentsHistory,
     adjustmentsHistoryIndex,
     goToAdjustmentsHistoryIndex,
+    showFocusAreas,
+    onToggleFocusAreas,
   }: EditorToolbarProps) => {
     const isAnyLoading = isLoading;
     const [isLoaderVisible, setIsLoaderVisible] = useState(false);
@@ -619,6 +623,19 @@ const EditorToolbar = memo(
             data-tooltip={showOriginal ? 'Show Edited (B)' : 'Show Original (B)'}
           >
             {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+          <button
+            className={clsx(
+              'p-2 rounded-full transition-colors',
+              showFocusAreas
+                ? 'bg-accent text-button-text hover:bg-accent/90'
+                : 'bg-surface hover:bg-card-active text-text-primary',
+            )}
+            onClick={onToggleFocusAreas}
+            onKeyDown={handleButtonKeyDown}
+            data-tooltip={showFocusAreas ? '隐藏对焦区域 (Shift+F)' : '显示对焦区域 (Shift+F)'}
+          >
+            <Target size={20} />
           </button>
           <button
             className="bg-surface text-text-primary p-2 rounded-full hover:bg-card-active transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"

@@ -54,6 +54,7 @@ interface KeyboardShortcutsProps {
   originalSize?: { width: number; height: number };
   brushSettings: BrushSettings | null;
   setBrushSettings: (settings: BrushSettings) => void;
+  handleToggleFocusAreas(): void;
 }
 
 export const useKeyboardShortcuts = ({
@@ -107,6 +108,7 @@ export const useKeyboardShortcuts = ({
   originalSize,
   brushSettings,
   setBrushSettings,
+  handleToggleFocusAreas,
 }: KeyboardShortcutsProps) => {
   function getEffectiveCombo(def: KeybindDefinition): string[] | null {
     const userCombo = keybinds?.[def.action];
@@ -407,6 +409,13 @@ export const useKeyboardShortcuts = ({
           setBrushSettings({ feather: brushSettings.feather, size: newSize, tool: brushSettings.tool });
         },
       },
+      toggle_focus_areas: {
+        shouldFire: () => !!selectedImage,
+        execute: (event) => {
+          event.preventDefault();
+          handleToggleFocusAreas();
+        },
+      },
     };
 
     type BuiltInMatch = (e: KeyboardEvent) => boolean;
@@ -538,5 +547,6 @@ export const useKeyboardShortcuts = ({
     originalSize,
     brushSettings,
     setBrushSettings,
+    handleToggleFocusAreas,
   ]);
 };

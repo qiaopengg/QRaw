@@ -64,6 +64,7 @@ export enum Invokes {
   GenerateUncroppedPreview = 'generate_uncropped_preview',
   GetFolderTree = 'get_folder_tree',
   GetFolderChildren = 'get_folder_children',
+  GetFocusRegions = 'get_focus_regions',
   GetLogFilePath = 'get_log_file_path',
   GetOrCreateInternalLibraryRoot = 'get_or_create_internal_library_root',
   GetPinnedFolderTrees = 'get_pinned_folder_trees',
@@ -266,6 +267,23 @@ export interface SelectedImage {
   path: string;
   thumbnailUrl: string;
   width: number;
+}
+
+export type FocusKind = 'point' | 'area' | 'face' | 'eye';
+
+export interface FocusRegion {
+  /** 归一化 X 坐标 (0.0 - 1.0) */
+  x: number;
+  /** 归一化 Y 坐标 (0.0 - 1.0) */
+  y: number;
+  /** 归一化宽度 (0.0 - 1.0) */
+  width: number;
+  /** 归一化高度 (0.0 - 1.0) */
+  height: number;
+  /** 对焦类型 */
+  kind: FocusKind;
+  /** 是否为主对焦点 */
+  is_primary: boolean;
 }
 
 export interface SortCriteria {

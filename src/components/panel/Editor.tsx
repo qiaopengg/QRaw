@@ -9,7 +9,7 @@ import { calculateCenteredCrop, getOrientedDimensions } from '../../utils/cropUt
 import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas from './editor/ImageCanvas';
 import { Mask, SubMask } from './right/Masks';
-import { AppSettings, BrushSettings, Invokes, Panel, SelectedImage, TransformState } from '../ui/AppProperties';
+import { AppSettings, BrushSettings, FocusRegion, Invokes, Panel, SelectedImage, TransformState } from '../ui/AppProperties';
 import type { OverlayMode } from './right/CropPanel';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
@@ -116,6 +116,9 @@ interface EditorProps {
   liveRotation?: number | null;
   isInstantTransition: boolean;
   hasRenderedFirstFrame: boolean;
+  showFocusAreas: boolean;
+  focusRegions: FocusRegion[];
+  onToggleFocusAreas(): void;
 }
 
 export default function Editor({
@@ -170,6 +173,9 @@ export default function Editor({
   liveRotation,
   isInstantTransition,
   hasRenderedFirstFrame,
+  showFocusAreas,
+  focusRegions,
+  onToggleFocusAreas,
 }: EditorProps) {
   const [crop, setCrop] = useState<Crop | null>(null);
   const prevCropParams = useRef<any>(null);
@@ -1795,6 +1801,8 @@ export default function Editor({
           adjustmentsHistory={adjustmentsHistory}
           adjustmentsHistoryIndex={adjustmentsHistoryIndex}
           goToAdjustmentsHistoryIndex={goToAdjustmentsHistoryIndex}
+          showFocusAreas={showFocusAreas}
+          onToggleFocusAreas={onToggleFocusAreas}
         />
       </div>
 
@@ -1877,6 +1885,8 @@ export default function Editor({
             liveRotation={liveRotation}
             zoomScale={transformState.scale}
             hasRenderedFirstFrame={hasRenderedFirstFrame}
+            showFocusAreas={showFocusAreas}
+            focusRegions={focusRegions}
           />
         </div>
       </div>

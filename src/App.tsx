@@ -97,6 +97,7 @@ import {
   AppSettings,
   BrushSettings,
   FilterCriteria,
+  FocusRegion,
   Invokes,
   ImageFile,
   Option,
@@ -352,6 +353,9 @@ function App() {
   const dragIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevAdjustmentsRef = useRef<{ path: string; adjustments: Adjustments } | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showFocusAreas, setShowFocusAreas] = useState(false);
+  const [focusRegions, setFocusRegions] = useState<FocusRegion[]>([]);
+  const [focusAreasError, setFocusAreasError] = useState<string | null>(null);
   const [theme, setTheme] = useState(DEFAULT_THEME_ID);
   const [activeRightPanel, setActiveRightPanel] = useState<Panel | null>(Panel.Adjustments);
   const [slideDirection, setSlideDirection] = useState(1);
@@ -1988,6 +1992,33 @@ function App() {
     setIsWaveformVisible((prev: boolean) => !prev);
   }, []);
 
+  // 对焦区域加载
+  useEffect(() => {
+    if (!selectedImage?.path || !showFocusAreas) {
+      setFocusRegions([]);
+      return;
+    }
+
+    invoke<FocusRegion[]>(Invokes.GetFocusRegions, {
+      params: {
+        path: selectedImage.path,
+        imageWidth: selectedImage.width,
+        imageHeight: selectedImage.height,
+      },
+    })
+      .then((regions) => {
+        setFocusRegions(regions);
+        setFocusAreasError(null);
+      })
+      .catch((err) => {
+        setFocusRegions([]);
+        setFocusAreasError(err);
+        toast.info(`对焦区域显示不可用\n${err}\n\n您可以提交样本文件帮助我们添加支持`, {
+          autoClose: 5000,
+        });
+      });
+  }, [selectedImage?.path, showFocusAreas]);
+
   useEffect(() => {
     if (isInitialMount.current || !appSettings) {
       return;
@@ -2747,6 +2778,10 @@ function App() {
     }
   }, [isFullScreen, selectedImage, zoom]);
 
+  const handleToggleFocusAreas = useCallback(() => {
+    setShowFocusAreas((prev) => !prev);
+  }, []);
+
   const handleCopyAdjustments = useCallback(() => {
     const sourceAdjustments = selectedImage ? adjustments : libraryActiveAdjustments;
     const adjustmentsToCopy: any = {};
@@ -3310,6 +3345,7 @@ function App() {
     keybinds: appSettings?.keybinds,
     brushSettings: brushSettings,
     setBrushSettings: setBrushSettings,
+    handleToggleFocusAreas,
   });
 
   useEffect(() => {
@@ -5328,6 +5364,9 @@ function App() {
           liveRotation={liveRotation}
           isInstantTransition={isInstantTransition}
           hasRenderedFirstFrame={hasRenderedFirstFrame}
+          showFocusAreas={showFocusAreas}
+          focusRegions={focusRegions}
+          onToggleFocusAreas={handleToggleFocusAreas}
         />
       );
 

@@ -5,7 +5,7 @@ import { Stage, Layer, Ellipse, Line, Transformer, Group, Circle, Rect } from 'r
 import { PercentCrop, Crop } from 'react-image-crop';
 import { Adjustments, AiPatch, Coord, MaskContainer } from '../../../utils/adjustments';
 import { Mask, SubMask, SubMaskMode, ToolType } from '../right/Masks';
-import { AppSettings, BrushSettings, SelectedImage } from '../../ui/AppProperties';
+import { AppSettings, BrushSettings, FocusRegion, SelectedImage } from '../../ui/AppProperties';
 import { RenderSize } from '../../../hooks/useImageRenderSize';
 import type { OverlayMode } from '../right/CropPanel';
 import CompositionOverlays from './overlays/CompositionOverlays';
@@ -69,6 +69,8 @@ interface ImageCanvasProps {
   liveRotation?: number | null;
   zoomScale: number;
   hasRenderedFirstFrame: boolean;
+  showFocusAreas: boolean;
+  focusRegions: FocusRegion[];
 }
 
 interface MaskOverlay {
@@ -773,6 +775,85 @@ const MaskOverlay = memo(
   },
 );
 
+interface TransformedFocusPoint {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function transformFocusPoint(
+  region: FocusRegion,
+  adjustments: Adjustments,
+  imageSize: { width: number; height: number },
+  scale: number,
+): TransformedFocusPoint {
+  // 使用局部变量追踪变换后的图像尺寸，不突变入参
+  let imgW = imageSize.width;
+  let imgH = imageSize.height;
+
+  // 1. 归一化坐标 → 像素坐标
+  let x = region.x * imgW;
+  let y = region.y * imgH;
+  let w = region.width * imgW;
+  let h = region.height * imgH;
+
+  // 2. EXIF 旋转 (orientationSteps: 0=0°, 1=90°, 2=180°, 3=270°)
+  const orientationSteps = adjustments.orientationSteps || 0;
+  if (orientationSteps > 0) {
+    for (let i = 0; i < orientationSteps; i++) {
+      const temp = x;
+      x = imgH - y - h;
+      y = temp;
+      [w, h] = [h, w];
+      [imgW, imgH] = [imgH, imgW];
+    }
+  }
+
+  // 3. 用户旋转（任意角度）
+  if (adjustments.rotation && adjustments.rotation !== 0) {
+    const angle = (adjustments.rotation * Math.PI) / 180;
+    const cx = imgW / 2;
+    const cy = imgH / 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const dx = x + w / 2 - cx;
+    const dy = y + h / 2 - cy;
+    x = cx + dx * cos - dy * sin - w / 2;
+    y = cy + dx * sin + dy * cos - h / 2;
+  }
+
+  // 4. 水平翻转
+  if (adjustments.flipHorizontal) {
+    x = imgW - x - w;
+  }
+
+  // 5. 垂直翻转
+  if (adjustments.flipVertical) {
+    y = imgH - y - h;
+  }
+
+  // 6. 裁剪偏移
+  const crop = adjustments.crop;
+  if (crop) {
+    const isPercent = crop.unit === '%';
+    const cropX = isPercent ? (crop.x / 100) * imgW : crop.x;
+    const cropY = isPercent ? (crop.y / 100) * imgH : crop.y;
+    x -= cropX;
+    y -= cropY;
+  }
+
+  // 7. 画布缩放（防止除零）
+  const safeScale = scale > 0 ? scale : 1.0;
+
+  return {
+    x: x * safeScale,
+    y: y * safeScale,
+    width: w * safeScale,
+    height: h * safeScale,
+  };
+}
+
 const ImageCanvas = memo(
   ({
     appSettings,
@@ -819,6 +900,8 @@ const ImageCanvas = memo(
     liveRotation,
     zoomScale,
     hasRenderedFirstFrame,
+    showFocusAreas,
+    focusRegions,
   }: ImageCanvasProps) => {
     const [isCropViewVisible, setIsCropViewVisible] = useState(false);
     const cropImageRef = useRef<HTMLImageElement>(null);
@@ -1156,7 +1239,7 @@ const ImageCanvas = memo(
           const x = pos.x / scale + cropX;
           const y = pos.y / scale + cropY;
 
-          let newParams = { ...activeSubMask.parameters };
+          const newParams = { ...activeSubMask.parameters };
           newParams.targetX = x;
           newParams.targetY = y;
           newParams.rotation = adjustments.rotation || 0;
@@ -1403,7 +1486,7 @@ const ImageCanvas = memo(
             return;
           }
 
-          let updatedParams = { ...localInitialDrawParams };
+          const updatedParams = { ...localInitialDrawParams };
 
           if (activeSubMask.type === Mask.Radial) {
             updatedParams.radiusX = Math.max(1, Math.abs(x - dragStartPointer.current.x));
@@ -1582,7 +1665,7 @@ const ImageCanvas = memo(
 
         const activeId = isMasking ? activeMaskId : activeAiSubMaskId;
 
-        let startPoint = { x: box.start.x / scale + cropX, y: box.start.y / scale + cropY };
+        const startPoint = { x: box.start.x / scale + cropX, y: box.start.y / scale + cropY };
         let endPoint = { x: box.end.x / scale + cropX, y: box.end.y / scale + cropY };
 
         const dx = box.end.x - box.start.x;
@@ -2145,6 +2228,56 @@ const ImageCanvas = memo(
                     y={cursorPreview.y}
                   />
                 )}
+              </Layer>
+            </Stage>
+          )}
+
+          {showFocusAreas && focusRegions.length > 0 && (
+            <Stage
+              height={imageRenderSize.height}
+              style={{
+                cursor: effectiveCursor,
+                left: `${imageRenderSize.offsetX}px`,
+                opacity: isShowingOriginal ? 0 : 1,
+                transition: 'opacity 150ms ease-in-out',
+                position: 'absolute',
+                top: `${imageRenderSize.offsetY}px`,
+                zIndex: 3,
+                pointerEvents: 'none',
+              }}
+              width={imageRenderSize.width}
+            >
+              <Layer>
+                {focusRegions.map((region, index) => {
+                  const transformed = transformFocusPoint(
+                    region,
+                    adjustments,
+                    { width: selectedImage.width, height: selectedImage.height },
+                    imageRenderSize.scale,
+                  );
+
+                  // 以已变换后的中心点为锚，画40px固定正方形
+                  const centerX = transformed.x + transformed.width / 2;
+                  const centerY = transformed.y + transformed.height / 2;
+                  const half = 20;
+
+                  return (
+                    <Rect
+                      key={`focus-${index}`}
+                      x={centerX - half}
+                      y={centerY - half}
+                      width={half * 2}
+                      height={half * 2}
+                      stroke="#22c55e"
+                      strokeWidth={2}
+                      dash={[5, 5]}
+                      listening={false}
+                      shadowColor="black"
+                      shadowBlur={4}
+                      shadowOpacity={0.6}
+                    />
+                  );
+                })}
               </Layer>
             </Stage>
           )}

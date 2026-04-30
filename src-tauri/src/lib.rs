@@ -11,6 +11,7 @@ mod culling;
 mod denoising;
 mod exif_processing;
 mod file_management;
+mod focus_extraction;
 mod formats;
 mod gpu_processing;
 mod image_loader;
@@ -5210,6 +5211,7 @@ pub fn run() {
             check_ai_connector_status,
             test_ai_connector_connection,
             invoke_generative_replace_with_mask_def,
+            focus_extraction::get_focus_regions,
             get_supported_file_types,
             get_log_file_path,
             frontend_log,

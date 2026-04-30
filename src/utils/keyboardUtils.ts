@@ -64,6 +64,7 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
   { action: 'toggle_crop', description: 'Toggle Crop / Straighten', defaultCombo: ['KeyS'], section: 'editing' },
   { action: 'brush_size_up', description: 'Increase brush size', defaultCombo: ['ctrl', 'ArrowUp'], section: 'editing' },
   { action: 'brush_size_down', description: 'Decrease brush size', defaultCombo: ['ctrl', 'ArrowDown'], section: 'editing' },
+  { action: 'toggle_focus_areas', description: 'Toggle focus area overlay', defaultCombo: ['shift', 'KeyF'], section: 'view' },
 ];
 
 const symMap: Record<string, string> = {
