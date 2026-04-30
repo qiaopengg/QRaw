@@ -771,7 +771,7 @@ impl FocusCache {
 //  所有坐标输出为左上角(L,T)，而非中心(Cx,Cy)
 //  Y轴归一化使用 480(等效网格高度), 而非 428(物理传感器行数)
 //  AF网格428行映射到图像的480等效单位, 覆盖约89%图像高度
-//  优先级: FlexibleSpotPosition > FocalPlaneAFPoint > FocusLocation
+//  优先级: FocusPixel(各品牌像素坐标) > FlexibleSpotPosition > FocalPlaneAFPoint > FocusLocation
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, String> {
@@ -779,7 +779,9 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
         .arg("-j")
         .arg("-ImageWidth")
         .arg("-ImageHeight")
+        .arg("-ImageSize")
         .arg("-Orientation")
+        .arg("-FocusPixel")
         .arg("-FocalPlaneAFPointArea")
         .arg("-FocalPlaneAFPointsUsed")
         .arg("-FocalPlaneAFPointLocation1")
@@ -840,6 +842,42 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
             (x, y, w, h)
         }
     };
+
+    // ── 0. FocusPixel (像素坐标, 品牌通用 — Fujifilm/Canon/Nikon) ──
+    // FocusPixel 是 MakerNotes 中的原生像素坐标, 基准尺寸是 ImageSize
+    if let (Some(fpx), Some(isize)) = (string_or("FocusPixel"), string_or("ImageSize")) {
+        let img_parts: Vec<f32> = isize.split('x')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        if img_parts.len() >= 2 && img_parts[0] > 0.0 && img_parts[1] > 0.0 {
+            let px_parts: Vec<f32> = fpx.split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if px_parts.len() >= 2 && px_parts[0] > 0.0 && px_parts[1] > 0.0 {
+                let iw = img_parts[0];
+                let ih = img_parts[1];
+                let cx = px_parts[0] / iw;
+                let cy = px_parts[1] / ih;
+                let marker = 0.02;
+                let lx = (cx - marker).max(0.0);
+                let ly = (cy - marker).max(0.0);
+                let sz = 0.04;
+                if cx > 0.001 && cx < 0.999 && cy > 0.001 && cy < 0.999 {
+                    let (nx, ny, nw, nh) = apply_orientation(lx, ly, sz, sz);
+                    log::info!(
+                        "ExifTool FocusPixel → AF: px=({:.0},{:.0})/{:.0}x{:.0}, display=({:.4},{:.4})",
+                        px_parts[0], px_parts[1], iw, ih, nx + nw/2.0, ny + nh/2.0
+                    );
+                    return Ok(vec![FocusRegion {
+                        x: nx, y: ny,
+                        width: nw, height: nh,
+                        kind: FocusKind::Point,
+                        is_primary: true,
+                    }]);
+                }
+            }
+        }
+    }
 
     // ── 1. FlexibleSpotPosition (640×428 网格, 用户对焦点中心 → 输出左上角) ──
     if let Some(fpos) = string_or("FlexibleSpotPosition") {
