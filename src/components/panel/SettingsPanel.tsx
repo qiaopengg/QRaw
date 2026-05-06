@@ -20,6 +20,7 @@ import {
   Touchpad,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -153,6 +154,11 @@ const linearRawOptions: OptionItem<string>[] = [
   { value: 'gamma', label: 'Apply Gamma' },
   { value: 'skip_calib', label: 'Skip Calibrate' },
   { value: 'gamma_skip_calib', label: 'Apply Gamma & Skip Calibrate' },
+];
+
+const tonemapperOptions: OptionItem<string>[] = [
+  { value: 'agx', label: 'AgX' },
+  { value: 'basic', label: 'Basic' },
 ];
 
 const settingCategories = [
@@ -457,8 +463,6 @@ export default function SettingsPanel({
       appSettings?.useWgpuRenderer ?? (osPlatform === 'linux' || osPlatform === 'android' ? false : true),
     thumbnailWorkerThreads: appSettings?.thumbnailWorkerThreads ?? 4,
     imageCacheSize: appSettings?.imageCacheSize ?? 5,
-    defaultRawTonemapper: appSettings?.defaultRawTonemapper || 'agx',
-    defaultNonRawTonemapper: appSettings?.defaultNonRawTonemapper || 'basic',
   });
   const [restartRequired, setRestartRequired] = useState(false);
   const [activeCategory, setActiveCategory] = useState('general');
@@ -508,8 +512,6 @@ export default function SettingsPanel({
       useWgpuRenderer: appSettings?.useWgpuRenderer ?? true,
       thumbnailWorkerThreads: appSettings?.thumbnailWorkerThreads ?? 4,
       imageCacheSize: appSettings?.imageCacheSize ?? 5,
-      defaultRawTonemapper: appSettings?.defaultRawTonemapper || 'agx',
-      defaultNonRawTonemapper: appSettings?.defaultNonRawTonemapper || 'basic',
     });
     setRestartRequired(false);
   }, [appSettings]);
@@ -844,7 +846,7 @@ export default function SettingsPanel({
             </Text>
           </div>
 
-          <div className="relative flex w-full min-[1200px]:w-112.5 p-2 bg-bg-primary rounded-md">
+          <div className="relative flex w-full min-[1200px]:w-112.5 p-2 bg-surface rounded-md">
             {settingCategories.map((category) => (
               <button
                 key={category.id}
@@ -955,6 +957,18 @@ export default function SettingsPanel({
                       />
                     </SettingItem>
 
+                    <SettingItem
+                      label="Focus Mode"
+                      description="Helps you focus by automatically closing other panels when you open a new one."
+                    >
+                      <Switch
+                        checked={appSettings?.enableFocusMode ?? false}
+                        id="focus-mode-toggle"
+                        label="Enable Focus Mode"
+                        onChange={(checked) => onSettingsChange({ ...appSettings, enableFocusMode: checked })}
+                      />
+                    </SettingItem>
+
                     <SettingItem label="Font" description="Change the application font.">
                       <Dropdown
                         onChange={(value: any) => onSettingsChange({ ...appSettings, fontFamily: value })}
@@ -966,6 +980,23 @@ export default function SettingsPanel({
                         triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>
+
+                    {osPlatform === 'linux' && (
+                      <SettingItem
+                        label="Native Titlebar"
+                        description="Use your system's default window titlebar instead of RapidRAW's custom one."
+                      >
+                        <Switch
+                          checked={appSettings?.decorations ?? false}
+                          id="native-titlebar-toggle"
+                          label="Enable OS Titlebar"
+                          onChange={(checked) => {
+                            onSettingsChange({ ...appSettings, decorations: checked });
+                            getCurrentWindow().setDecorations(checked).catch(console.error);
+                          }}
+                        />
+                      </SettingItem>
+                    )}
                   </div>
                 </div>
 
@@ -1005,19 +1036,6 @@ export default function SettingsPanel({
                       }
                     />
                     <Switch
-                      label="Tone Mapper"
-                      checked={appSettings?.adjustmentVisibility?.toneMapper ?? true}
-                      onChange={(checked) =>
-                        onSettingsChange({
-                          ...appSettings,
-                          adjustmentVisibility: {
-                            ...(appSettings?.adjustmentVisibility || adjustmentVisibilityDefaults),
-                            toneMapper: checked,
-                          },
-                        })
-                      }
-                    />
-                    <Switch
                       label="Color Calibration"
                       checked={appSettings?.adjustmentVisibility?.colorCalibration ?? true}
                       onChange={(checked) =>
@@ -1026,6 +1044,19 @@ export default function SettingsPanel({
                           adjustmentVisibility: {
                             ...(appSettings?.adjustmentVisibility || adjustmentVisibilityDefaults),
                             colorCalibration: checked,
+                          },
+                        })
+                      }
+                    />
+                    <Switch
+                      label="Noise Reduction"
+                      checked={appSettings?.adjustmentVisibility?.noiseReduction ?? true}
+                      onChange={(checked) =>
+                        onSettingsChange({
+                          ...appSettings,
+                          adjustmentVisibility: {
+                            ...(appSettings?.adjustmentVisibility || adjustmentVisibilityDefaults),
+                            noiseReduction: checked,
                           },
                         })
                       }
@@ -1644,36 +1675,6 @@ export default function SettingsPanel({
                     </SettingItem>
 
                     <SettingItem
-                      label="Default RAW Tonemapper"
-                      description="The default tonemapper applied to newly imported or unedited RAW images."
-                    >
-                      <Dropdown
-                        onChange={(value: any) => handleProcessingSettingChange('defaultRawTonemapper', value)}
-                        options={[
-                          { value: 'agx', label: 'AgX (Film-like)' },
-                          { value: 'basic', label: 'Basic (Standard)' },
-                        ]}
-                        value={processingSettings.defaultRawTonemapper}
-                        triggerClassName="bg-bg-primary"
-                      />
-                    </SettingItem>
-
-                    <SettingItem
-                      label="Default Non-RAW Tonemapper"
-                      description="The default tonemapper applied to newly imported or unedited non-RAW images (JPEG, PNG, etc)."
-                    >
-                      <Dropdown
-                        onChange={(value: any) => handleProcessingSettingChange('defaultNonRawTonemapper', value)}
-                        options={[
-                          { value: 'agx', label: 'AgX (Film-like)' },
-                          { value: 'basic', label: 'Basic (Standard)' },
-                        ]}
-                        value={processingSettings.defaultNonRawTonemapper}
-                        triggerClassName="bg-bg-primary"
-                      />
-                    </SettingItem>
-
-                    <SettingItem
                       label="Thumbnail Worker Threads"
                       description="Number of parallel threads used to generate thumbnails. Higher values speed up library loading but use more CPU & RAM."
                     >
@@ -1718,6 +1719,63 @@ export default function SettingsPanel({
                         triggerClassName="bg-bg-primary"
                       />
                     </SettingItem>
+
+                    <div className="space-y-4">
+                      <SettingItem
+                        label="Global Tonemapper Override"
+                        description="Force a specific tonemapper globally for all images, hiding the tonemapper switch from the adjustments panel."
+                      >
+                        <Switch
+                          checked={appSettings?.tonemapperOverrideEnabled ?? false}
+                          id="tonemapper-override-toggle"
+                          label="Enable Tonemapper Override"
+                          onChange={(checked) =>
+                            onSettingsChange({ ...appSettings, tonemapperOverrideEnabled: checked })
+                          }
+                        />
+                      </SettingItem>
+
+                      <AnimatePresence>
+                        {(appSettings?.tonemapperOverrideEnabled ?? false) && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.3, ease: 'easeInOut' }}
+                          >
+                            <div className="pl-4 border-l-2 border-border-color ml-1 space-y-3">
+                              <SettingItem
+                                label="Default RAW Tonemapper"
+                                description="The tonemapper to apply to RAW images."
+                              >
+                                <Dropdown
+                                  onChange={(value: any) =>
+                                    onSettingsChange({ ...appSettings, defaultRawTonemapper: value })
+                                  }
+                                  options={tonemapperOptions}
+                                  value={appSettings?.defaultRawTonemapper || 'agx'}
+                                  triggerClassName="bg-bg-primary"
+                                />
+                              </SettingItem>
+
+                              <SettingItem
+                                label="Default Non-RAW Tonemapper"
+                                description="The tonemapper to apply to non-RAW images (e.g., JPEG, PNG)."
+                              >
+                                <Dropdown
+                                  onChange={(value: any) =>
+                                    onSettingsChange({ ...appSettings, defaultNonRawTonemapper: value })
+                                  }
+                                  options={tonemapperOptions}
+                                  value={appSettings?.defaultNonRawTonemapper || 'basic'}
+                                  triggerClassName="bg-bg-primary"
+                                />
+                              </SettingItem>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
 
                     <SettingItem
                       label="WGPU Direct Rendering"

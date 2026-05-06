@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { RotateCcw, Copy, ClipboardPaste, Aperture, ChartArea } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -12,10 +12,14 @@ import Waveform from '../editor/Waveform';
 import Resizer from '../../ui/Resizer';
 import { Adjustments, SectionVisibility, INITIAL_ADJUSTMENTS, ADJUSTMENT_SECTIONS } from '../../../utils/adjustments';
 import { useContextMenu } from '../../../context/ContextMenuContext';
-import { OPTION_SEPARATOR, SelectedImage, AppSettings, WaveformData, Orientation } from '../../ui/AppProperties';
-import { ChannelConfig } from '../../adjustments/Curves';
+import { OPTION_SEPARATOR, Orientation } from '../../ui/AppProperties';
 import Text from '../../ui/Text';
 import { TextVariants } from '../../../types/typography';
+
+// Zustand Stores
+import { useEditorStore } from '../../../store/useEditorStore';
+import { useSettingsStore } from '../../../store/useSettingsStore';
+import { useUIStore } from '../../../store/useUIStore';
 
 interface ControlsPanelOption {
   disabled?: boolean;
@@ -26,56 +30,65 @@ interface ControlsPanelOption {
 }
 
 interface ControlsProps {
-  adjustments: Adjustments;
-  collapsibleState: any;
-  copiedSectionAdjustments: Adjustments | null;
   handleAutoAdjustments(): void;
   handleLutSelect(path: string): void;
-  histogram: ChannelConfig | null;
-  selectedImage: SelectedImage;
-  setAdjustments(updater: (prev: Adjustments) => Adjustments): void;
-  setCollapsibleState(state: any): void;
-  setCopiedSectionAdjustments(adjustments: any): void;
-  theme: string;
-  appSettings: AppSettings | null;
-  isWbPickerActive?: boolean;
-  toggleWbPicker?: () => void;
-  onDragStateChange?: (isDragging: boolean) => void;
-  isWaveformVisible?: boolean;
-  onToggleWaveform?: () => void;
-  waveform?: WaveformData | null;
-  activeWaveformChannel?: string;
-  setActiveWaveformChannel?: (mode: string) => void;
-  waveformHeight?: number;
-  setWaveformHeight?: (height: number) => void;
+  setAdjustments(updater: Partial<Adjustments> | ((prev: Adjustments) => Adjustments)): void;
 }
 
-export default function Controls({
-  adjustments,
-  collapsibleState,
-  copiedSectionAdjustments,
-  handleAutoAdjustments,
-  handleLutSelect,
-  histogram,
-  selectedImage,
-  setAdjustments,
-  setCollapsibleState,
-  setCopiedSectionAdjustments,
-  theme,
-  appSettings,
-  isWbPickerActive,
-  toggleWbPicker,
-  onDragStateChange,
-  isWaveformVisible,
-  onToggleWaveform,
-  waveform,
-  activeWaveformChannel,
-  setActiveWaveformChannel,
-  waveformHeight,
-  setWaveformHeight,
-}: ControlsProps) {
+export default function Controls({ handleAutoAdjustments, handleLutSelect, setAdjustments }: ControlsProps) {
   const { showContextMenu } = useContextMenu();
   const [isResizingWaveform, setIsResizingWaveform] = useState<boolean>(false);
+
+  // --- Zustand Store Hooks ---
+  const { appSettings, theme } = useSettingsStore();
+  const { collapsibleSectionsState, setUI } = useUIStore();
+  const {
+    adjustments,
+    copiedSectionAdjustments,
+    histogram,
+    selectedImage,
+    isWbPickerActive,
+    isWaveformVisible,
+    waveform,
+    activeWaveformChannel,
+    waveformHeight,
+    setEditor,
+  } = useEditorStore();
+
+  const setCopiedSectionAdjustments = useCallback(
+    (val: any) => setEditor({ copiedSectionAdjustments: val }),
+    [setEditor],
+  );
+
+  const toggleWbPicker = useCallback(
+    () => setEditor((state) => ({ isWbPickerActive: !state.isWbPickerActive })),
+    [setEditor],
+  );
+
+  const onDragStateChange = useCallback(
+    (isDragging: boolean) => setEditor({ isSliderDragging: isDragging }),
+    [setEditor],
+  );
+
+  const onToggleWaveform = useCallback(
+    () => setEditor((state) => ({ isWaveformVisible: !state.isWaveformVisible })),
+    [setEditor],
+  );
+
+  const setActiveWaveformChannel = useCallback(
+    (mode: string) => setEditor({ activeWaveformChannel: mode }),
+    [setEditor],
+  );
+
+  const setWaveformHeight = useCallback((height: number) => setEditor({ waveformHeight: height }), [setEditor]);
+
+  const setCollapsibleState = useCallback(
+    (updater: any) =>
+      setUI((state) => ({
+        collapsibleSectionsState: typeof updater === 'function' ? updater(state.collapsibleSectionsState) : updater,
+      })),
+    [setUI],
+  );
 
   const handleWaveformResize = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -98,7 +111,7 @@ export default function Controls({
       moveEvent.preventDefault();
       const delta = moveEvent.clientY - startY;
       const newHeight = Math.round(Math.max(150, Math.min(450, startHeight + delta)));
-      if (setWaveformHeight) setWaveformHeight(newHeight);
+      setWaveformHeight(newHeight);
     };
 
     const handlePointerUp = (upEvent: PointerEvent) => {
@@ -136,7 +149,7 @@ export default function Controls({
       ...Object.keys(ADJUSTMENT_SECTIONS)
         .flatMap((s) => ADJUSTMENT_SECTIONS[s])
         .reduce((acc: any, key: string) => {
-          acc[key] = INITIAL_ADJUSTMENTS[key];
+          acc[key] = INITIAL_ADJUSTMENTS[key as keyof Adjustments];
           return acc;
         }, {}),
       sectionVisibility: { ...INITIAL_ADJUSTMENTS.sectionVisibility },
@@ -144,7 +157,18 @@ export default function Controls({
   };
 
   const handleToggleSection = (section: string) => {
-    setCollapsibleState((prev: any) => ({ ...prev, [section]: !prev[section] }));
+    setCollapsibleState((prev: any) => {
+      const isOpening = !prev[section];
+      if (appSettings?.enableFocusMode && isOpening) {
+        const newState = { ...prev };
+        Object.keys(newState).forEach((key) => {
+          newState[key] = false;
+        });
+        newState[section] = true;
+        return newState;
+      }
+      return { ...prev, [section]: !prev[section] };
+    });
   };
 
   const handleSectionContextMenu = (event: any, sectionName: string) => {
@@ -160,7 +184,7 @@ export default function Controls({
       const adjustmentsToCopy: any = {};
       for (const key of sectionKeys) {
         if (Object.prototype.hasOwnProperty.call(adjustments, key)) {
-          adjustmentsToCopy[key] = JSON.parse(JSON.stringify(adjustments[key]));
+          adjustmentsToCopy[key] = JSON.parse(JSON.stringify(adjustments[key as keyof Adjustments]));
         }
       }
       setCopiedSectionAdjustments({ section: sectionName, values: adjustmentsToCopy });
@@ -183,7 +207,7 @@ export default function Controls({
     const handleReset = () => {
       const resetValues: any = {};
       for (const key of sectionKeys) {
-        resetValues[key] = JSON.parse(JSON.stringify(INITIAL_ADJUSTMENTS[key]));
+        resetValues[key] = JSON.parse(JSON.stringify(INITIAL_ADJUSTMENTS[key as keyof Adjustments]));
       }
       setAdjustments((prev: Adjustments) => ({
         ...prev,
@@ -268,7 +292,7 @@ export default function Controls({
                 waveformData={waveform || null}
                 histogram={histogram}
                 displayMode={activeWaveformChannel || 'luma'}
-                setDisplayMode={setActiveWaveformChannel || (() => {})}
+                setDisplayMode={setActiveWaveformChannel}
                 showClipping={adjustments.showClipping || false}
                 onToggleClipping={() => {
                   setAdjustments((prev: Adjustments) => ({
@@ -300,8 +324,8 @@ export default function Controls({
           return (
             <div className="shrink-0 group" key={sectionName}>
               <CollapsibleSection
-                isContentVisible={sectionVisibility[sectionName]}
-                isOpen={collapsibleState[sectionName]}
+                isContentVisible={sectionVisibility[sectionName as keyof SectionVisibility]}
+                isOpen={collapsibleSectionsState[sectionName as keyof typeof collapsibleSectionsState]}
                 onContextMenu={(e: any) => handleSectionContextMenu(e, sectionName)}
                 onToggle={() => handleToggleSection(sectionName)}
                 onToggleVisibility={() => handleToggleVisibility(sectionName)}

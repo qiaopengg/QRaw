@@ -11,6 +11,7 @@ import type { EditorFeatureSlots } from '../../../features/contracts';
 interface EditorToolbarProps {
   canRedo: boolean;
   canUndo: boolean;
+  isAndroid: boolean;
   isLoading: boolean;
   onBackToLibrary(): void;
   onRedo(): void;
@@ -31,6 +32,7 @@ const EditorToolbar = memo(
   ({
     canRedo,
     canUndo,
+    isAndroid,
     isLoading,
     onBackToLibrary,
     onRedo,
@@ -57,7 +59,7 @@ const EditorToolbar = memo(
     const historyContainerRef = useRef<HTMLDivElement>(null);
     const historyButtonRef = useRef<HTMLDivElement>(null);
 
-    const showResolution = selectedImage.width > 0 && selectedImage.height > 0;
+    const showResolution = !isAndroid && selectedImage.width > 0 && selectedImage.height > 0;
     const [displayedResolution, setDisplayedResolution] = useState('');
 
     const { baseName, isVirtualCopy, vcId, exifData, hasExif } = useMemo(() => {

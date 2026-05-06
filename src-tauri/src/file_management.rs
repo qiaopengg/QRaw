@@ -16,12 +16,6 @@ use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma};
-#[cfg(target_os = "android")]
-use jni::objects::{JObject, JString, JValue};
-#[cfg(target_os = "android")]
-use jni::{JNIEnv, JavaVM};
-#[cfg(target_os = "android")]
-use ndk_context::android_context;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -31,7 +25,10 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::AppState;
-use crate::calculate_geometry_hash;
+#[cfg(target_os = "android")]
+use crate::android_integration::*;
+use crate::app_settings::*;
+use crate::cache_utils::calculate_geometry_hash;
 use crate::exif_processing;
 use crate::formats::{is_raw_file, is_supported_image_file};
 use crate::gpu_processing;
@@ -106,32 +103,6 @@ pub struct PresetFile {
     pub presets: Vec<PresetItem>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SortCriteria {
-    pub key: String,
-    pub order: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterCriteria {
-    pub rating: u8,
-    pub raw_status: String,
-    #[serde(default)]
-    pub colors: Vec<String>,
-}
-
-impl Default for FilterCriteria {
-    fn default() -> Self {
-        Self {
-            rating: 0,
-            raw_status: "all".to_string(),
-            colors: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum ReadFileError {
     Io(std::io::Error),
@@ -149,402 +120,6 @@ impl fmt::Display for ReadFileError {
             ReadFileError::Empty => write!(f, "File is empty"),
             ReadFileError::NotFound => write!(f, "File not found"),
             ReadFileError::Invalid => write!(f, "Invalid file"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LastFolderState {
-    pub current_folder_path: String,
-    pub expanded_folders: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct MyLens {
-    pub maker: String,
-    pub model: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum PasteMode {
-    Merge,
-    Replace,
-}
-
-fn all_available_adjustments() -> HashSet<String> {
-    [
-        "exposure",
-        "brightness",
-        "contrast",
-        "curves",
-        "highlights",
-        "shadows",
-        "whites",
-        "blacks",
-        "toneMapper",
-        "temperature",
-        "tint",
-        "saturation",
-        "vibrance",
-        "hsl",
-        "colorGrading",
-        "colorCalibration",
-        "clarity",
-        "structure",
-        "dehaze",
-        "sharpness",
-        "centré",
-        "lumaNoiseReduction",
-        "colorNoiseReduction",
-        "chromaticAberrationRedCyan",
-        "chromaticAberrationBlueYellow",
-        "vignetteAmount",
-        "vignetteFeather",
-        "vignetteMidpoint",
-        "vignetteRoundness",
-        "grainAmount",
-        "grainRoughness",
-        "grainSize",
-        "lutIntensity",
-        "lutName",
-        "lutPath",
-        "lutSize",
-        "lutData",
-        "glowAmount",
-        "halationAmount",
-        "flareAmount",
-        "crop",
-        "aspectRatio",
-        "rotation",
-        "flipHorizontal",
-        "flipVertical",
-        "orientationSteps",
-        "transformDistortion",
-        "transformVertical",
-        "transformHorizontal",
-        "transformRotate",
-        "transformAspect",
-        "transformScale",
-        "transformXOffset",
-        "transformYOffset",
-        "masks",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
-}
-
-fn default_included_adjustments() -> HashSet<String> {
-    let mut defaults = all_available_adjustments();
-
-    let off_by_default = [
-        "crop",
-        "aspectRatio",
-        "rotation",
-        "flipHorizontal",
-        "flipVertical",
-        "orientationSteps",
-        "transformDistortion",
-        "transformVertical",
-        "transformHorizontal",
-        "transformRotate",
-        "transformAspect",
-        "transformScale",
-        "transformXOffset",
-        "transformYOffset",
-        "masks",
-    ];
-
-    for item in off_by_default.iter() {
-        defaults.remove(*item);
-    }
-
-    defaults
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CopyPasteSettings {
-    pub mode: PasteMode,
-    #[serde(default = "default_included_adjustments")]
-    pub included_adjustments: HashSet<String>,
-    #[serde(default)]
-    pub known_adjustments: HashSet<String>,
-}
-
-impl Default for CopyPasteSettings {
-    fn default() -> Self {
-        Self {
-            mode: PasteMode::Merge,
-            included_adjustments: default_included_adjustments(),
-            known_adjustments: all_available_adjustments(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ExportPreset {
-    pub id: String,
-    pub name: String,
-    pub file_format: String,
-    pub jpeg_quality: u8,
-    pub enable_resize: bool,
-    pub resize_mode: String,
-    pub resize_value: u32,
-    pub dont_enlarge: bool,
-    pub keep_metadata: bool,
-    pub strip_gps: bool,
-    pub filename_template: String,
-    pub enable_watermark: bool,
-    pub watermark_path: Option<String>,
-    pub watermark_anchor: Option<String>,
-    pub watermark_scale: u32,
-    pub watermark_spacing: u32,
-    pub watermark_opacity: u32,
-    #[serde(default)]
-    pub export_masks: Option<bool>,
-    #[serde(default)]
-    pub preserve_folders: Option<bool>,
-    #[serde(default)]
-    pub last_export_path: Option<String>,
-}
-
-fn default_export_presets() -> Vec<ExportPreset> {
-    vec![
-        ExportPreset {
-            id: "default-hq".to_string(),
-            name: "High Quality".to_string(),
-            file_format: "jpeg".to_string(),
-            jpeg_quality: 95,
-            enable_resize: false,
-            resize_mode: "longEdge".to_string(),
-            resize_value: 2048,
-            dont_enlarge: true,
-            keep_metadata: true,
-            strip_gps: false,
-            filename_template: "{original_filename}".to_string(),
-            enable_watermark: false,
-            watermark_path: None,
-            watermark_anchor: Some("bottomRight".to_string()),
-            watermark_scale: 10,
-            watermark_spacing: 5,
-            watermark_opacity: 75,
-            export_masks: Some(false),
-            preserve_folders: Some(false),
-            last_export_path: None,
-        },
-        ExportPreset {
-            id: "default-fast".to_string(),
-            name: "Fast (Web)".to_string(),
-            file_format: "jpeg".to_string(),
-            jpeg_quality: 80,
-            enable_resize: true,
-            resize_mode: "width".to_string(),
-            resize_value: 2048,
-            dont_enlarge: true,
-            keep_metadata: false,
-            strip_gps: true,
-            filename_template: "{original_filename}_web".to_string(),
-            enable_watermark: false,
-            watermark_path: None,
-            watermark_anchor: Some("bottomRight".to_string()),
-            watermark_scale: 10,
-            watermark_spacing: 5,
-            watermark_opacity: 75,
-            export_masks: Some(false),
-            preserve_folders: Some(false),
-            last_export_path: None,
-        },
-    ]
-}
-
-fn default_linear_raw_mode() -> String {
-    "auto".to_string()
-}
-
-fn default_tagging_shortcuts_option() -> Option<Vec<String>> {
-    Some(vec![
-        "portrait".to_string(),
-        "landscape".to_string(),
-        "architecture".to_string(),
-        "travel".to_string(),
-        "street".to_string(),
-        "family".to_string(),
-        "nature".to_string(),
-        "food".to_string(),
-        "event".to_string(),
-    ])
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct AppSettings {
-    pub last_root_path: Option<String>,
-    #[serde(default)]
-    pub pinned_folders: Vec<String>,
-    pub editor_preview_resolution: Option<u32>,
-    #[serde(default)]
-    pub thumbnail_resolution: Option<u32>,
-    #[serde(default)]
-    pub enable_zoom_hifi: Option<bool>,
-    #[serde(default)]
-    pub use_full_dpi_rendering: Option<bool>,
-    #[serde(default)]
-    pub high_res_zoom_multiplier: Option<f32>,
-    #[serde(default)]
-    pub enable_live_previews: Option<bool>,
-    #[serde(default)]
-    pub live_preview_quality: Option<String>,
-    pub sort_criteria: Option<SortCriteria>,
-    pub filter_criteria: Option<FilterCriteria>,
-    pub theme: Option<String>,
-    #[serde(default)]
-    pub font_family: Option<String>,
-    pub decorations: Option<bool>,
-    #[serde(alias = "comfyuiAddress")]
-    pub ai_connector_address: Option<String>,
-    pub last_folder_state: Option<LastFolderState>,
-    pub ui_visibility: Option<Value>,
-    pub enable_ai_tagging: Option<bool>,
-    pub tagging_thread_count: Option<u32>,
-    #[serde(default = "default_tagging_shortcuts_option")]
-    pub tagging_shortcuts: Option<Vec<String>>,
-    #[serde(default)]
-    pub custom_ai_tags: Option<Vec<String>>,
-    #[serde(default)]
-    pub ai_tag_count: Option<u32>,
-    pub thumbnail_size: Option<String>,
-    pub thumbnail_aspect_ratio: Option<String>,
-    pub ai_provider: Option<String>,
-    #[serde(default = "default_adjustment_visibility")]
-    pub adjustment_visibility: HashMap<String, bool>,
-    pub enable_exif_reading: Option<bool>,
-    #[serde(default)]
-    pub active_tree_section: Option<String>,
-    #[serde(default)]
-    pub copy_paste_settings: CopyPasteSettings,
-    #[serde(default)]
-    pub raw_highlight_compression: Option<f32>,
-    #[serde(default)]
-    pub processing_backend: Option<String>,
-    #[serde(default)]
-    pub linux_gpu_optimization: Option<bool>,
-    #[serde(default)]
-    pub library_view_mode: Option<String>,
-    #[serde(default = "default_export_presets")]
-    pub export_presets: Vec<ExportPreset>,
-    #[serde(default)]
-    pub my_lenses: Option<Vec<MyLens>>,
-    #[serde(default)]
-    pub enable_folder_image_counts: Option<bool>,
-    #[serde(default = "default_linear_raw_mode")]
-    pub linear_raw_mode: String,
-    #[serde(default)]
-    pub enable_xmp_sync: Option<bool>,
-    #[serde(default)]
-    pub create_xmp_if_missing: Option<bool>,
-    #[serde(default)]
-    pub is_waveform_visible: Option<bool>,
-    #[serde(default)]
-    pub waveform_height: Option<u32>,
-    #[serde(default)]
-    pub active_waveform_channel: Option<String>,
-    #[serde(default)]
-    pub use_wgpu_renderer: Option<bool>,
-    #[serde(default)]
-    pub canvas_input_mode: Option<String>,
-    #[serde(default)]
-    pub zoom_speed_multiplier: Option<f32>,
-    #[serde(default)]
-    pub keybinds: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    pub thumbnail_worker_threads: Option<u32>,
-    #[serde(default)]
-    pub image_cache_size: Option<u32>,
-    #[serde(default)]
-    pub default_raw_tonemapper: Option<String>,
-    #[serde(default)]
-    pub default_non_raw_tonemapper: Option<String>,
-}
-
-fn default_adjustment_visibility() -> HashMap<String, bool> {
-    let mut map = HashMap::new();
-    map.insert("sharpening".to_string(), true);
-    map.insert("presence".to_string(), true);
-    map.insert("noiseReduction".to_string(), true);
-    map.insert("chromaticAberration".to_string(), false);
-    map.insert("vignette".to_string(), true);
-    map.insert("colorCalibration".to_string(), false);
-    map.insert("grain".to_string(), true);
-    map.insert("toneMapper".to_string(), true);
-    map
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            last_root_path: None,
-            pinned_folders: Vec::new(),
-            thumbnail_resolution: Some(720),
-            editor_preview_resolution: Some(1920),
-            enable_zoom_hifi: Some(true),
-            use_full_dpi_rendering: Some(false),
-            enable_live_previews: Some(true),
-            live_preview_quality: Some("high".to_string()),
-            sort_criteria: None,
-            filter_criteria: None,
-            theme: Some("dark".to_string()),
-            font_family: None,
-            #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-            decorations: Some(true),
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            decorations: Some(false),
-            ai_connector_address: None,
-            last_folder_state: None,
-            ui_visibility: None,
-            enable_ai_tagging: Some(false),
-            tagging_thread_count: Some(3),
-            tagging_shortcuts: default_tagging_shortcuts_option(),
-            custom_ai_tags: Some(Vec::new()),
-            ai_tag_count: Some(10),
-            thumbnail_size: Some("medium".to_string()),
-            thumbnail_aspect_ratio: Some("cover".to_string()),
-            ai_provider: Some("cpu".to_string()),
-            adjustment_visibility: default_adjustment_visibility(),
-            enable_exif_reading: Some(false),
-            active_tree_section: Some("current".to_string()),
-            copy_paste_settings: CopyPasteSettings::default(),
-            raw_highlight_compression: Some(2.5),
-            processing_backend: Some("auto".to_string()),
-            #[cfg(target_os = "linux")]
-            linux_gpu_optimization: Some(true),
-            #[cfg(not(target_os = "linux"))]
-            linux_gpu_optimization: Some(false),
-            library_view_mode: Some("flat".to_string()),
-            export_presets: default_export_presets(),
-            my_lenses: Some(Vec::new()),
-            high_res_zoom_multiplier: Some(1.0),
-            enable_folder_image_counts: Some(false),
-            linear_raw_mode: default_linear_raw_mode(),
-            enable_xmp_sync: Some(true),
-            create_xmp_if_missing: Some(false),
-            is_waveform_visible: Some(false),
-            waveform_height: Some(220),
-            active_waveform_channel: Some("luma".to_string()),
-            #[cfg(any(target_os = "linux", target_os = "android"))]
-            use_wgpu_renderer: Some(false),
-            #[cfg(not(any(target_os = "linux", target_os = "android")))]
-            use_wgpu_renderer: Some(true),
-            canvas_input_mode: Some("mouse".to_string()),
-            zoom_speed_multiplier: Some(1.0),
-            keybinds: HashMap::new(),
-            thumbnail_worker_threads: Some(4),
-            image_cache_size: Some(5),
-            default_raw_tonemapper: Some("agx".to_string()),
-            default_non_raw_tonemapper: Some("basic".to_string()),
         }
     }
 }
@@ -601,253 +176,6 @@ pub fn parse_virtual_path(virtual_path: &str) -> (PathBuf, PathBuf) {
     (source_path, sidecar_path)
 }
 
-#[cfg(target_os = "android")]
-fn is_android_content_uri(path: &str) -> bool {
-    path.starts_with("content://")
-}
-
-#[cfg(target_os = "android")]
-fn clear_pending_android_exception(env: &mut JNIEnv<'_>) {
-    if env.exception_check().unwrap_or(false) {
-        let _ = env.exception_describe();
-        let _ = env.exception_clear();
-    }
-}
-
-#[cfg(target_os = "android")]
-fn map_android_jni_error(env: &mut JNIEnv<'_>, err: jni::errors::Error) -> String {
-    clear_pending_android_exception(env);
-    format!("Android JNI error: {}", err)
-}
-
-#[cfg(target_os = "android")]
-fn close_android_closeable(env: &mut JNIEnv<'_>, closeable: &JObject<'_>) {
-    if closeable.is_null() {
-        return;
-    }
-
-    if let Err(err) = env.call_method(closeable, "close", "()V", &[]) {
-        clear_pending_android_exception(env);
-        log::warn!("Failed to close Android Closeable: {}", err);
-    }
-}
-
-#[cfg(target_os = "android")]
-fn get_android_content_resolver<'local>(
-    env: &mut JNIEnv<'local>,
-) -> Result<JObject<'local>, String> {
-    let context = env
-        .new_local_ref(unsafe { JObject::from_raw(android_context().context().cast()) })
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    let resolver = env
-        .call_method(
-            &context,
-            "getContentResolver",
-            "()Landroid/content/ContentResolver;",
-            &[],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    if resolver.is_null() {
-        return Err("Android ContentResolver was null.".into());
-    }
-
-    Ok(resolver)
-}
-
-#[cfg(target_os = "android")]
-fn parse_android_uri<'local>(
-    env: &mut JNIEnv<'local>,
-    uri_str: &str,
-) -> Result<JObject<'local>, String> {
-    let uri_string = env
-        .new_string(uri_str)
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    let uri = env
-        .call_static_method(
-            "android/net/Uri",
-            "parse",
-            "(Ljava/lang/String;)Landroid/net/Uri;",
-            &[(&uri_string).into()],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    if uri.is_null() {
-        return Err(format!("Failed to parse Android content URI: {}", uri_str));
-    }
-
-    Ok(uri)
-}
-
-#[cfg(target_os = "android")]
-fn resolve_android_content_uri_name(uri_str: &str) -> Result<String, String> {
-    let vm = unsafe { JavaVM::from_raw(android_context().vm().cast()) }
-        .map_err(|e| format!("Failed to access Android JVM: {}", e))?;
-    let mut env = vm
-        .attach_current_thread()
-        .map_err(|e| format!("Failed to attach current thread to Android JVM: {}", e))?;
-
-    let resolver = get_android_content_resolver(&mut env)?;
-    let uri = parse_android_uri(&mut env, uri_str)?;
-    let null_obj = JObject::null();
-
-    let cursor = env
-        .call_method(
-            &resolver,
-            "query",
-            "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
-            &[
-                (&uri).into(),
-                (&null_obj).into(),
-                (&null_obj).into(),
-                (&null_obj).into(),
-                (&null_obj).into(),
-            ],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    if cursor.is_null() {
-        return Err(format!(
-            "ContentResolver query returned no cursor for URI: {}",
-            uri_str
-        ));
-    }
-
-    let result = (|| -> Result<String, String> {
-        let moved = env
-            .call_method(&cursor, "moveToFirst", "()Z", &[])
-            .and_then(|value| value.z())
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-        if !moved {
-            return Err(format!(
-                "No metadata rows found for content URI: {}",
-                uri_str
-            ));
-        }
-
-        let display_name_column = env
-            .get_static_field(
-                "android/provider/OpenableColumns",
-                "DISPLAY_NAME",
-                "Ljava/lang/String;",
-            )
-            .and_then(|value| value.l())
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-        let column_index = env
-            .call_method(
-                &cursor,
-                "getColumnIndex",
-                "(Ljava/lang/String;)I",
-                &[(&display_name_column).into()],
-            )
-            .and_then(|value| value.i())
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-        if column_index < 0 {
-            return Err(format!(
-                "DISPLAY_NAME column was unavailable for content URI: {}",
-                uri_str
-            ));
-        }
-
-        let display_name_obj = env
-            .call_method(
-                &cursor,
-                "getString",
-                "(I)Ljava/lang/String;",
-                &[JValue::from(column_index)],
-            )
-            .and_then(|value| value.l())
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-        if display_name_obj.is_null() {
-            return Err(format!(
-                "Display name was null for content URI: {}",
-                uri_str
-            ));
-        }
-
-        let display_name_java = JString::from(display_name_obj);
-        let display_name = env
-            .get_string(&display_name_java)
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-        Ok(display_name.into())
-    })();
-
-    close_android_closeable(&mut env, &cursor);
-    result
-}
-
-#[cfg(target_os = "android")]
-fn read_android_content_uri(uri_str: &str) -> Result<Vec<u8>, String> {
-    let vm = unsafe { JavaVM::from_raw(android_context().vm().cast()) }
-        .map_err(|e| format!("Failed to access Android JVM: {}", e))?;
-    let mut env = vm
-        .attach_current_thread()
-        .map_err(|e| format!("Failed to attach current thread to Android JVM: {}", e))?;
-
-    let resolver = get_android_content_resolver(&mut env)?;
-    let uri = parse_android_uri(&mut env, uri_str)?;
-    let input_stream = env
-        .call_method(
-            &resolver,
-            "openInputStream",
-            "(Landroid/net/Uri;)Ljava/io/InputStream;",
-            &[(&uri).into()],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    if input_stream.is_null() {
-        return Err(format!(
-            "Failed to open InputStream for Android content URI: {}",
-            uri_str
-        ));
-    }
-
-    let result = (|| -> Result<Vec<u8>, String> {
-        const BUFFER_SIZE: i32 = 8192;
-
-        let java_buffer = env
-            .new_byte_array(BUFFER_SIZE)
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-        let mut rust_buffer = vec![0i8; BUFFER_SIZE as usize];
-        let mut bytes = Vec::new();
-
-        loop {
-            let read_count = env
-                .call_method(&input_stream, "read", "([B)I", &[(&java_buffer).into()])
-                .and_then(|value| value.i())
-                .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-            if read_count < 0 {
-                break;
-            }
-
-            if read_count == 0 {
-                continue;
-            }
-
-            let read_len = read_count as usize;
-            env.get_byte_array_region(&java_buffer, 0, &mut rust_buffer[..read_len])
-                .map_err(|e| map_android_jni_error(&mut env, e))?;
-            bytes.extend(rust_buffer[..read_len].iter().map(|byte| *byte as u8));
-        }
-
-        Ok(bytes)
-    })();
-
-    close_android_closeable(&mut env, &input_stream);
-    result
-}
-
 #[tauri::command]
 pub async fn read_exif_for_paths(
     paths: Vec<String>,
@@ -879,6 +207,46 @@ pub async fn read_exif_for_paths(
         .collect();
 
     Ok(exif_data)
+}
+
+#[tauri::command]
+pub async fn update_exif_fields(
+    paths: Vec<String>,
+    updates: HashMap<String, String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths.par_iter().for_each(|path| {
+            let original_path = Path::new(&path);
+            let rrexif_path = crate::exif_processing::get_rrexif_path(original_path);
+
+            let mut exif_data =
+                if let Some(sidecar) = crate::exif_processing::read_rrexif_sidecar(original_path) {
+                    sidecar
+                } else if let Ok(mmap) = read_file_mapped(original_path) {
+                    crate::exif_processing::read_exif_data(path, &mmap)
+                } else if let Ok(bytes) = fs::read(original_path) {
+                    crate::exif_processing::read_exif_data(path, &bytes)
+                } else {
+                    HashMap::new()
+                };
+
+            for (k, v) in &updates {
+                let trimmed = v.trim();
+                if trimmed.is_empty() {
+                    exif_data.remove(k);
+                } else {
+                    exif_data.insert(k.clone(), trimmed.to_string());
+                }
+            }
+
+            if let Ok(json) = serde_json::to_string_pretty(&exif_data) {
+                let _ = std::fs::write(&rrexif_path, json);
+            }
+        });
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -1579,7 +947,8 @@ pub fn generate_thumbnail_data(
             })
             .collect();
 
-        let gpu_adjustments = get_all_adjustments_from_json(&meta.adjustments, is_raw);
+        let tm_override = crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
+        let gpu_adjustments = get_all_adjustments_from_json(&meta.adjustments, is_raw, tm_override);
         let lut_path = meta.adjustments["lutPath"].as_str();
         let lut = lut_path.and_then(|p| {
             let mut cache = state.lut_cache.lock().unwrap();
@@ -1651,11 +1020,23 @@ pub fn generate_thumbnail_data(
         }
     };
 
-    if is_raw && adjustments.is_null() {
-        let default_tm = settings
-            .default_raw_tonemapper
-            .unwrap_or_else(|| "agx".to_string());
-        apply_cpu_default_raw_processing(&mut final_image, &default_tm); // FIXME: WE SOMEHOW ALSO NEED TO APPLY AGX FOR NON-RAW NON-ADJUSTED IMAGE THUMBNAILS!!!
+    if adjustments.is_null() {
+        let default_tm = if is_raw {
+            settings.default_raw_tonemapper.as_deref().unwrap_or("agx")
+        } else {
+            settings
+                .default_non_raw_tonemapper
+                .as_deref()
+                .unwrap_or("basic")
+        };
+        if default_tm == "agx" {
+            if !is_raw {
+                final_image = crate::image_processing::apply_srgb_to_linear(final_image);
+            }
+            crate::image_processing::apply_cpu_agx_tonemap(&mut final_image);
+        } else if is_raw {
+            apply_cpu_default_raw_processing(&mut final_image);
+        }
     }
 
     let fallback_orientation_steps = adjustments["orientationSteps"].as_u64().unwrap_or(0) as u8;
@@ -1878,6 +1259,20 @@ pub fn increment_thumbnail_progress(state: &AppState, app_handle: &AppHandle) {
             serde_json::json!({ "current": current, "total": total }),
         );
     }
+}
+
+#[tauri::command]
+pub fn get_supported_file_types() -> Result<serde_json::Value, String> {
+    let raw_extensions: Vec<&str> = crate::formats::RAW_EXTENSIONS
+        .iter()
+        .map(|(ext, _)| *ext)
+        .collect();
+    let non_raw_extensions: Vec<&str> = crate::formats::NON_RAW_EXTENSIONS.to_vec();
+
+    Ok(serde_json::json!({
+        "raw": raw_extensions,
+        "nonRaw": non_raw_extensions
+    }))
 }
 
 #[tauri::command]
@@ -2705,31 +2100,24 @@ pub fn save_presets(presets: Vec<PresetItem>, app_handle: AppHandle) -> Result<(
     fs::write(path, json_string).map_err(|e| e.to_string())
 }
 
-fn get_settings_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let settings_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
-
-    if !settings_dir.exists() {
-        fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
-    }
-
-    Ok(settings_dir.join("settings.json"))
-}
-
 fn get_internal_library_root_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let library_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("library");
+    #[cfg(not(target_os = "android"))]
+    {
+        let library_dir = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("library");
 
-    if !library_dir.exists() {
-        fs::create_dir_all(&library_dir).map_err(|e| e.to_string())?;
+        if !library_dir.exists() {
+            fs::create_dir_all(&library_dir).map_err(|e| e.to_string())?;
+        }
+        Ok(library_dir)
     }
-
-    Ok(library_dir)
+    #[cfg(target_os = "android")]
+    {
+        crate::android_integration::get_android_internal_library_root()
+    }
 }
 
 #[tauri::command]
@@ -2737,281 +2125,6 @@ pub fn get_or_create_internal_library_root(app_handle: AppHandle) -> Result<Stri
     let library_root = get_internal_library_root_path(&app_handle)?;
 
     Ok(library_root.to_string_lossy().to_string())
-}
-
-#[cfg(target_os = "android")]
-fn put_android_content_value_string<'local>(
-    env: &mut JNIEnv<'local>,
-    content_values: &JObject<'local>,
-    key: &str,
-    value: &str,
-) -> Result<(), String> {
-    let key_java = env
-        .new_string(key)
-        .map_err(|e| map_android_jni_error(env, e))?;
-    let value_java = env
-        .new_string(value)
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    env.call_method(
-        content_values,
-        "put",
-        "(Ljava/lang/String;Ljava/lang/String;)V",
-        &[(&key_java).into(), (&value_java).into()],
-    )
-    .map_err(|e| map_android_jni_error(env, e))?;
-
-    Ok(())
-}
-
-#[cfg(target_os = "android")]
-fn put_android_content_value_int<'local>(
-    env: &mut JNIEnv<'local>,
-    content_values: &JObject<'local>,
-    key: &str,
-    value: i32,
-) -> Result<(), String> {
-    let key_java = env
-        .new_string(key)
-        .map_err(|e| map_android_jni_error(env, e))?;
-    let value_java = env
-        .new_object("java/lang/Integer", "(I)V", &[JValue::from(value)])
-        .map_err(|e| map_android_jni_error(env, e))?;
-
-    env.call_method(
-        content_values,
-        "put",
-        "(Ljava/lang/String;Ljava/lang/Integer;)V",
-        &[(&key_java).into(), (&value_java).into()],
-    )
-    .map_err(|e| map_android_jni_error(env, e))?;
-
-    Ok(())
-}
-
-#[cfg(target_os = "android")]
-fn delete_android_media_store_item(
-    env: &mut JNIEnv<'_>,
-    resolver: &JObject<'_>,
-    item_uri: &JObject<'_>,
-) {
-    let null_string = JObject::null();
-    let null_args = JObject::null();
-    if let Err(err) = env.call_method(
-        resolver,
-        "delete",
-        "(Landroid/net/Uri;Ljava/lang/String;[Ljava/lang/String;)I",
-        &[item_uri.into(), (&null_string).into(), (&null_args).into()],
-    ) {
-        clear_pending_android_exception(env);
-        log::warn!(
-            "Failed to delete Android MediaStore item after write error: {}",
-            err
-        );
-    }
-}
-
-#[cfg(target_os = "android")]
-fn save_bytes_to_android_media_store(
-    file_name: &str,
-    mime_type: &str,
-    relative_path: &str,
-    collection_class: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
-    let vm = unsafe { JavaVM::from_raw(android_context().vm().cast()) }
-        .map_err(|e| format!("Failed to access Android JVM: {}", e))?;
-    let mut env = vm
-        .attach_current_thread()
-        .map_err(|e| format!("Failed to attach current thread to Android JVM: {}", e))?;
-    let resolver = get_android_content_resolver(&mut env)?;
-    let content_values = env
-        .new_object("android/content/ContentValues", "()V", &[])
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    put_android_content_value_string(&mut env, &content_values, "_display_name", file_name)?;
-    put_android_content_value_string(&mut env, &content_values, "mime_type", mime_type)?;
-    put_android_content_value_string(&mut env, &content_values, "relative_path", relative_path)?;
-    put_android_content_value_int(&mut env, &content_values, "is_pending", 1)?;
-
-    let collection_uri = env
-        .get_static_field(
-            collection_class,
-            "EXTERNAL_CONTENT_URI",
-            "Landroid/net/Uri;",
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-    let item_uri = env
-        .call_method(
-            &resolver,
-            "insert",
-            "(Landroid/net/Uri;Landroid/content/ContentValues;)Landroid/net/Uri;",
-            &[(&collection_uri).into(), (&content_values).into()],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    if item_uri.is_null() {
-        return Err(format!(
-            "Failed to create Android MediaStore item for {}",
-            file_name
-        ));
-    }
-
-    let output_stream = env
-        .call_method(
-            &resolver,
-            "openOutputStream",
-            "(Landroid/net/Uri;)Ljava/io/OutputStream;",
-            &[(&item_uri).into()],
-        )
-        .and_then(|value| value.l())
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    if output_stream.is_null() {
-        delete_android_media_store_item(&mut env, &resolver, &item_uri);
-        return Err(format!(
-            "Failed to open Android MediaStore output stream for {}",
-            file_name
-        ));
-    }
-
-    let write_result = (|| -> Result<(), String> {
-        let byte_array = env
-            .byte_array_from_slice(bytes)
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-        env.call_method(&output_stream, "write", "([B)V", &[(&byte_array).into()])
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-        env.call_method(&output_stream, "flush", "()V", &[])
-            .map_err(|e| map_android_jni_error(&mut env, e))?;
-        Ok(())
-    })();
-
-    close_android_closeable(&mut env, &output_stream);
-
-    if let Err(err) = write_result {
-        delete_android_media_store_item(&mut env, &resolver, &item_uri);
-        return Err(err);
-    }
-
-    let finalized_values = env
-        .new_object("android/content/ContentValues", "()V", &[])
-        .map_err(|e| map_android_jni_error(&mut env, e))?;
-    put_android_content_value_int(&mut env, &finalized_values, "is_pending", 0)?;
-
-    let null_string = JObject::null();
-    let null_args = JObject::null();
-    env.call_method(
-        &resolver,
-        "update",
-        "(Landroid/net/Uri;Landroid/content/ContentValues;Ljava/lang/String;[Ljava/lang/String;)I",
-        &[
-            (&item_uri).into(),
-            (&finalized_values).into(),
-            (&null_string).into(),
-            (&null_args).into(),
-        ],
-    )
-    .map_err(|e| map_android_jni_error(&mut env, e))?;
-
-    Ok(())
-}
-
-#[cfg(target_os = "android")]
-pub fn save_image_bytes_to_android_gallery(
-    file_name: &str,
-    mime_type: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
-    save_bytes_to_android_media_store(
-        file_name,
-        mime_type,
-        "Pictures/RapidRaw",
-        "android/provider/MediaStore$Images$Media",
-        bytes,
-    )
-}
-
-#[cfg(target_os = "android")]
-pub fn save_file_bytes_to_android_downloads(
-    file_name: &str,
-    mime_type: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
-    save_bytes_to_android_media_store(
-        file_name,
-        mime_type,
-        "Download/RapidRaw",
-        "android/provider/MediaStore$Downloads",
-        bytes,
-    )
-}
-
-#[tauri::command]
-pub fn load_settings(app_handle: AppHandle) -> Result<AppSettings, String> {
-    let path = get_settings_path(&app_handle)?;
-
-    let mut settings: AppSettings = if path.exists() {
-        let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| e.to_string())?
-    } else {
-        AppSettings::default()
-    };
-
-    let all_current_keys = all_available_adjustments();
-    let default_included = default_included_adjustments();
-    let mut settings_modified = false;
-
-    let is_first_migration = settings.copy_paste_settings.known_adjustments.is_empty();
-
-    if is_first_migration {
-        settings.copy_paste_settings.included_adjustments = default_included;
-        settings.copy_paste_settings.known_adjustments = all_current_keys.clone();
-        settings_modified = true;
-    } else {
-        let new_features: Vec<String> = all_current_keys
-            .difference(&settings.copy_paste_settings.known_adjustments)
-            .cloned()
-            .collect();
-
-        if !new_features.is_empty() {
-            for feature in new_features {
-                if default_included.contains(&feature) {
-                    settings
-                        .copy_paste_settings
-                        .included_adjustments
-                        .insert(feature.clone());
-                }
-                settings
-                    .copy_paste_settings
-                    .known_adjustments
-                    .insert(feature);
-            }
-            settings_modified = true;
-        }
-    }
-
-    if settings_modified && let Ok(json_string) = serde_json::to_string_pretty(&settings) {
-        let _ = fs::write(&path, json_string);
-    }
-
-    Ok(settings)
-}
-
-#[tauri::command]
-pub fn save_settings(settings: AppSettings, app_handle: AppHandle) -> Result<(), String> {
-    let path = get_settings_path(&app_handle)?;
-    let json_string = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(path, json_string).map_err(|e| e.to_string())?;
-    let state = app_handle.state::<AppState>();
-    let cache_size = settings.image_cache_size.unwrap_or(5) as usize;
-    state
-        .decoded_image_cache
-        .lock()
-        .unwrap()
-        .set_capacity(cache_size);
-    Ok(())
 }
 
 #[tauri::command]

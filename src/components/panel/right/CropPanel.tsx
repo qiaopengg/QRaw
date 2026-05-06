@@ -230,7 +230,7 @@ export default function CropPanel({
     if (activePreset?.value === ORIGINAL_RATIO) {
       const newOriginalRatio = getEffectiveOriginalRatio();
       if (newOriginalRatio !== null && aspectRatio && Math.abs(aspectRatio - newOriginalRatio) > RATIO_TOLERANCE) {
-        setAdjustments((prev: Adjustments) => ({ ...prev, aspectRatio: newOriginalRatio, crop: null }));
+        setAdjustments((prev: Adjustments) => ({ ...prev, aspectRatio: newOriginalRatio }));
       }
     }
   }, [orientationSteps, activePreset, aspectRatio, getEffectiveOriginalRatio, setAdjustments]);
@@ -257,7 +257,7 @@ export default function CropPanel({
       const newAspectRatio = numW / numH;
       lastSyncedRatio.current = newAspectRatio;
       if (!adjustments?.aspectRatio || Math.abs(adjustments.aspectRatio - newAspectRatio) > RATIO_TOLERANCE) {
-        setAdjustments((prev: Adjustments) => ({ ...prev, aspectRatio: newAspectRatio, crop: null }));
+        setAdjustments((prev: Adjustments) => ({ ...prev, aspectRatio: newAspectRatio }));
       }
     }
   };
@@ -284,7 +284,6 @@ export default function CropPanel({
       setAdjustments((prev: Adjustments) => ({
         ...prev,
         aspectRatio: getEffectiveOriginalRatio(),
-        crop: null,
       }));
       return;
     }
@@ -296,7 +295,6 @@ export default function CropPanel({
       setAdjustments((prev: Adjustments) => ({
         ...prev,
         aspectRatio: newRatio,
-        crop: null,
       }));
       return;
     }
@@ -310,7 +308,7 @@ export default function CropPanel({
       }
     }
 
-    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, aspectRatio: newAspectRatio, crop: null }));
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, aspectRatio: newAspectRatio }));
   };
 
   const handleOrientationToggle = useCallback(() => {
@@ -320,7 +318,6 @@ export default function CropPanel({
       setAdjustments((prev: Partial<Adjustments>) => ({
         ...prev,
         aspectRatio: newRatio,
-        crop: null,
       }));
     }
   }, [aspectRatio, setAdjustments]);
@@ -391,7 +388,6 @@ export default function CropPanel({
         aspectRatio: newAspectRatio,
         orientationSteps: ((prev.orientationSteps || 0) + increment) % 4,
         rotation: 0,
-        crop: null,
       };
     });
   };
@@ -420,6 +416,23 @@ export default function CropPanel({
     }
     return orientation === Orientation.Vertical ? 'Switch to landscape' : 'Switch to portrait';
   };
+  const handleDragStateChange = useCallback(
+    (isDragging: boolean) => {
+      if (isDragging) {
+        setIsRotationActive(true);
+        setGlobalRotationActive?.(true);
+      } else {
+        setIsRotationActive(false);
+        setGlobalRotationActive?.(false);
+        if (localRotationRef.current !== null) {
+          const finalRot = localRotationRef.current;
+          updateLocalRotation(null);
+          setAdjustments((prev: Adjustments) => ({ ...prev, rotation: finalRot }));
+        }
+      }
+    },
+    [setGlobalRotationActive, updateLocalRotation, setAdjustments],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -494,7 +507,6 @@ export default function CropPanel({
                     setAdjustments((prev: Partial<Adjustments>) => ({
                       ...prev,
                       aspectRatio: newAspectRatio,
-                      crop: null,
                     }));
                   }}
                   data-tooltip="Enter custom aspect ratio"
@@ -588,20 +600,7 @@ export default function CropPanel({
                   defaultValue={0}
                   suffix="°"
                   onChange={handleFineRotationChange}
-                  onDragStateChange={(isDragging) => {
-                    if (isDragging) {
-                      setIsRotationActive(true);
-                      setGlobalRotationActive?.(true);
-                    } else {
-                      setIsRotationActive(false);
-                      setGlobalRotationActive?.(false);
-                      if (localRotationRef.current !== null) {
-                        const finalRot = localRotationRef.current;
-                        updateLocalRotation(null);
-                        setAdjustments((prev: Adjustments) => ({ ...prev, rotation: finalRot }));
-                      }
-                    }
-                  }}
+                  onDragStateChange={handleDragStateChange}
                 />
               </div>
             </div>
@@ -723,7 +722,6 @@ export default function CropPanel({
             transformScale: newParams.scale,
             transformXOffset: newParams.x_offset,
             transformYOffset: newParams.y_offset,
-            crop: null,
           }));
         }}
         currentAdjustments={adjustments}
@@ -736,7 +734,6 @@ export default function CropPanel({
           setAdjustments((prev: Adjustments) => ({
             ...prev,
             ...newParams,
-            crop: null,
           }));
         }}
         currentAdjustments={adjustments}

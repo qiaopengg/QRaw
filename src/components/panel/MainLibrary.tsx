@@ -44,6 +44,7 @@ import { Color, COLOR_LABELS } from '../../utils/adjustments';
 import { ImportState, Status } from '../ui/ExportImportProperties';
 import Text from '../ui/Text';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../types/typography';
+import { useLibraryStore } from '../../store/useLibraryStore';
 
 export interface ColumnWidths {
   thumbnail: number;
@@ -82,7 +83,6 @@ interface MainLibraryProps {
   aiModelDownloadStatus: string | null;
   appSettings: AppSettings | null;
   currentFolderPath: string | null;
-  filterCriteria: FilterCriteria;
   imageList: Array<ImageFile>;
   imageRatings: Record<string, number>;
   importState: ImportState;
@@ -91,7 +91,6 @@ interface MainLibraryProps {
   isIndexing: boolean;
   isAndroid: boolean;
   isTreeLoading: boolean;
-  libraryScrollTop: number;
   libraryViewMode: LibraryViewMode;
   multiSelectedPaths: Array<string>;
   onClearSelection(): void;
@@ -109,21 +108,13 @@ interface MainLibraryProps {
   onThumbnailSizeChange(size: ThumbnailSize): void;
   onRequestThumbnails?(paths: string[]): void;
   rootPath: string | null;
-  searchCriteria: SearchCriteria;
-  setFilterCriteria(criteria: FilterCriteria): void;
-  setLibraryScrollTop(scrollTop: number): void;
   setLibraryViewMode(mode: LibraryViewMode): void;
-  setSearchCriteria(criteria: SearchCriteria | ((prev: SearchCriteria) => SearchCriteria)): void;
-  setSortCriteria(criteria: SortCriteria | ((prev: SortCriteria) => SortCriteria)): void;
-  sortCriteria: SortCriteria;
   theme: string;
   thumbnailAspectRatio: ThumbnailAspectRatio;
   thumbnails: Record<string, string>;
   thumbnailProgress: Progress;
   thumbnailSize: ThumbnailSize;
   onNavigateToCommunity(): void;
-  listColumnWidths: ColumnWidths;
-  setListColumnWidths: React.Dispatch<React.SetStateAction<ColumnWidths>>;
 }
 
 interface SearchInputProps {
@@ -959,10 +950,10 @@ function ViewOptionsDropdown({
         </>
       }
       buttonTitle="View Options"
-      contentClassName="w-[720px]"
+      contentClassName="library-view-options-menu w-[720px]"
     >
-      <div className="flex">
-        <div className="w-1/4 p-2 border-r border-border-color">
+      <div className="library-view-options-content flex">
+        <div className="library-view-options-section w-1/4 p-2 border-r border-border-color">
           <ThumbnailSizeOptions selectedSize={thumbnailSize} onSelectSize={onSelectSize} />
           <div className="pt-2">
             <ThumbnailAspectRatioOptions
@@ -974,10 +965,10 @@ function ViewOptionsDropdown({
             <ViewModeOptions mode={libraryViewMode} setMode={setLibraryViewMode} />
           </div>
         </div>
-        <div className="w-2/4 p-2 border-r border-border-color">
+        <div className="library-view-options-section w-2/4 p-2 border-r border-border-color">
           <FilterOptions filterCriteria={filterCriteria} setFilterCriteria={setFilterCriteria} />
         </div>
-        <div className="w-1/4 p-2">
+        <div className="library-view-options-section w-1/4 p-2">
           <SortOptions sortCriteria={sortCriteria} setSortCriteria={setSortCriteria} sortOptions={sortOptions} />
         </div>
       </div>
@@ -1380,8 +1371,19 @@ const Row = ({
   gap,
   isListView,
   columnWidths,
+  queueThumbnailRequest,
+  onToggleRecursiveFolder,
 }: any) => {
   const row = rows[index];
+
+  useEffect(() => {
+    if (row && row.type === 'images') {
+      row.images.forEach((img: ImageFile) => {
+        queueThumbnailRequest(img.path);
+      });
+    }
+  }, [row, queueThumbnailRequest]);
+
   if (row.type === 'footer') return null;
   const shiftedStyle = {
     ...style,
@@ -1414,7 +1416,17 @@ const Row = ({
         className="flex items-end pb-2 pt-2"
       >
         <div className="flex items-center gap-2 w-full border-b border-border-color/50 pb-1">
-          <FolderOpen size={16} className={TEXT_COLOR_KEYS[TextColors.secondary]} />
+          <button
+            type="button"
+            className={`${TEXT_COLOR_KEYS[TextColors.secondary]} p-0.5 rounded transition-colors hover:bg-surface-hover cursor-pointer`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleRecursiveFolder(row.path);
+            }}
+            data-tooltip={row.isExpanded ? 'Collapse Folder' : 'Expand Folder'}
+          >
+            {row.isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+          </button>
           <Text variant={TextVariants.label} weight={TextWeights.semibold} className="truncate" data-tooltip={row.path}>
             {displayPath}
           </Text>
@@ -1487,16 +1499,14 @@ export default function MainLibrary({
   aiModelDownloadStatus,
   appSettings,
   currentFolderPath,
-  filterCriteria,
   imageList,
   imageRatings,
   importState,
   indexingProgress,
+  isLoading,
   isIndexing,
   isAndroid,
-  isLoading,
   isTreeLoading: _isTreeLoading,
-  libraryScrollTop,
   libraryViewMode,
   multiSelectedPaths,
   onClearSelection,
@@ -1514,21 +1524,13 @@ export default function MainLibrary({
   onThumbnailSizeChange,
   onRequestThumbnails,
   rootPath,
-  searchCriteria,
-  setFilterCriteria,
-  setLibraryScrollTop,
   setLibraryViewMode,
-  setSearchCriteria,
-  setSortCriteria,
-  sortCriteria,
   theme,
   thumbnailAspectRatio,
   thumbnails,
   thumbnailProgress,
   thumbnailSize,
   onNavigateToCommunity,
-  listColumnWidths,
-  setListColumnWidths,
 }: MainLibraryProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -1558,7 +1560,49 @@ export default function MainLibrary({
   const [latestVersion, setLatestVersion] = useState('');
   const [isBusyDelayed, setIsBusyDelayed] = useState(false);
   const [isProgressHovered, setIsProgressHovered] = useState(false);
+  const [collapsedRecursiveFolders, setCollapsedRecursiveFolders] = useState<Set<string>>(new Set());
   const loadedThumbnailsRef = useRef(new Set<string>());
+  const requestQueueRef = useRef<Set<string>>(new Set());
+  const requestTimeoutRef = useRef<any>(null);
+  const thumbnailsRef = useRef(thumbnails);
+  thumbnailsRef.current = thumbnails;
+
+  const {
+    filterCriteria,
+    setFilterCriteria,
+    searchCriteria,
+    setSearchCriteria,
+    sortCriteria,
+    setSortCriteria,
+    libraryScrollTop,
+    listColumnWidths,
+    setLibrary,
+  } = useLibraryStore();
+
+  const setLibraryScrollTop = (top: number) => setLibrary({ libraryScrollTop: top });
+  const setListColumnWidths = (widths: any) =>
+    setLibrary((state) => ({
+      listColumnWidths: typeof widths === 'function' ? widths(state.listColumnWidths) : widths,
+    }));
+
+  const queueThumbnailRequest = useCallback(
+    (path: string) => {
+      if (!onRequestThumbnails || thumbnailsRef.current[path]) return;
+      requestQueueRef.current.add(path);
+      if (!requestTimeoutRef.current) {
+        requestTimeoutRef.current = setTimeout(() => {
+          const pathsToRequest = Array.from(requestQueueRef.current);
+          if (pathsToRequest.length > 0) {
+            onRequestThumbnails(pathsToRequest);
+            requestQueueRef.current.clear();
+          }
+
+          requestTimeoutRef.current = null;
+        }, 50);
+      }
+    },
+    [onRequestThumbnails],
+  );
 
   const handleHeaderSort = useCallback(
     (key: string) => {
@@ -1587,6 +1631,18 @@ export default function MainLibrary({
     if (libraryViewMode === LibraryViewMode.Flat) return null;
     return groupImagesByFolder(imageList, currentFolderPath);
   }, [imageList, currentFolderPath, libraryViewMode]);
+
+  const handleToggleRecursiveFolder = useCallback((path: string) => {
+    setCollapsedRecursiveFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
 
   const handleSortChange = useCallback(
     (criteria: SortCriteria | ((prev: SortCriteria) => SortCriteria)) => {
@@ -1881,7 +1937,7 @@ export default function MainLibrary({
 
   if (!rootPath) {
     if (!appSettings) {
-      return;
+      return null;
     }
     const hasLastPath = !!appSettings.lastRootPath;
     const currentThemeId = theme || DEFAULT_THEME_ID;
@@ -1890,146 +1946,168 @@ export default function MainLibrary({
       THEMES.find((t: ThemeProps) => t.id === DEFAULT_THEME_ID);
     const splashImage = selectedTheme?.splashImage;
     return (
-      <div className={`flex-1 flex h-full bg-bg-secondary overflow-hidden shadow-lg`}>
-        <div className="w-1/2 hidden md:block relative">
-          <AnimatePresence>
-            <motion.img
-              alt="Splash screen background"
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 w-full h-full object-cover"
-              exit={{ opacity: 0 }}
-              initial={{ opacity: 0 }}
-              key={splashImage}
-              src={splashImage}
-              transition={{ duration: 0.5, ease: 'easeInOut' }}
-            />
-          </AnimatePresence>
-        </div>
-        <div className="w-full md:w-1/2 flex flex-col p-8 lg:p-16 relative">
-          {showSettings ? (
-            <SettingsPanel
-              appSettings={appSettings}
-              onBack={() => setShowSettings(false)}
-              onLibraryRefresh={onLibraryRefresh}
-              onSettingsChange={onSettingsChange}
-              rootPath={rootPath}
-            />
-          ) : (
-            <>
-              <div className="my-auto text-left">
-                <Text variant={TextVariants.displayLarge}>RapidRAW</Text>
-                <Text
-                  variant={TextVariants.heading}
-                  color={TextColors.secondary}
-                  weight={TextWeights.normal}
-                  className="mb-10 max-w-md"
-                >
-                  {hasLastPath ? (
-                    <>
-                      Welcome back!
-                      <br />
-                      Continue where you left off or start a new session.
-                    </>
-                  ) : (
-                    `A blazingly fast, GPU-accelerated RAW image editor. ${
-                      isAndroid ? 'Open the library to begin.' : 'Open a folder to begin.'
-                    }`
-                  )}
-                </Text>
-                <div className="flex flex-col w-full max-w-xs gap-4">
-                  {hasLastPath && (
-                    <Button
-                      className="rounded-md h-11 w-full flex justify-center items-center"
-                      onClick={onContinueSession}
-                      size="lg"
-                    >
-                      <RefreshCw size={20} className="mr-2" /> Continue Session
-                    </Button>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      className={`rounded-md grow flex justify-center items-center h-11 ${
-                        hasLastPath ? 'bg-surface text-text-primary shadow-none' : ''
-                      }`}
-                      onClick={onOpenFolder}
-                      size="lg"
-                    >
-                      <Folder size={20} className="mr-2" />
-                      {isAndroid ? 'Open Library' : hasLastPath ? 'Change Folder' : 'Open Folder'}
-                    </Button>
-                    <Button
-                      className="px-3 bg-surface text-text-primary shadow-none h-11"
-                      onClick={() => setShowSettings(true)}
-                      size="lg"
-                      data-tooltip="Go to Settings"
-                      variant="ghost"
-                    >
-                      <Settings size={20} />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              <Text variant={TextVariants.small} as="div" className="absolute bottom-8 left-8 lg:left-16 space-y-1">
-                <p>
-                  Images by{' '}
-                  <a
-                    href="https://instagram.com/timonkaech.photography"
-                    className="hover:underline"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Timon Käch
-                  </a>
-                </p>
-                {appVersion && (
-                  <div className="flex items-center space-x-2">
-                    <p>
-                      <span
-                        className={`group transition-all duration-300 ease-in-out rounded-md py-1 ${
-                          isUpdateAvailable ? 'cursor-pointer border border-yellow-500 px-2 hover:bg-yellow-500/20' : ''
-                        }`}
-                        onClick={() => {
-                          if (isUpdateAvailable) {
-                            open('https://github.com/CyberTimon/RapidRAW/releases/latest');
-                          }
-                        }}
-                        data-tooltip={
-                          isUpdateAvailable
-                            ? `Click to download version ${latestVersion}`
-                            : `You are on the latest version`
-                        }
-                      >
-                        <span className={isUpdateAvailable ? 'group-hover:hidden' : ''}>Version {appVersion}</span>
-                        {isUpdateAvailable && (
-                          <span className="hidden group-hover:inline text-yellow-400">New version available!</span>
-                        )}
-                      </span>
-                    </p>
-                    <span>-</span>
-                    <p>
-                      <a
-                        href="https://ko-fi.com/cybertimon"
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Donate on Ko-Fi
-                      </a>
-                      <span className="mx-1">or</span>
-                      <a
-                        href="https://github.com/CyberTimon/RapidRAW"
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Contribute on GitHub
-                      </a>
-                    </p>
-                  </div>
+      <div className="flex-1 flex h-full p-2 bg-transparent">
+        <div className="flex w-full h-full bg-bg-secondary rounded-lg border border-border-color/25 overflow-hidden">
+          <div className="w-1/2 hidden md:block relative overflow-hidden bg-black">
+            <AnimatePresence>
+              <motion.img
+                alt="Splash screen background"
+                className="absolute inset-0 w-full h-full object-cover"
+                key={splashImage}
+                src={splashImage}
+              />
+            </AnimatePresence>
+          </div>
+
+          <div className="w-full md:w-1/2 relative overflow-hidden isolate">
+            <div className="absolute inset-0 -z-10 pointer-events-none">
+              <AnimatePresence>
+                {splashImage && (
+                  <motion.img
+                    key={splashImage + '-ambient'}
+                    src={splashImage}
+                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-50 pointer-events-none"
+                    aria-hidden="true"
+                  />
                 )}
-              </Text>
-            </>
-          )}
+              </AnimatePresence>
+              <div className="absolute inset-0 bg-bg-secondary/90"></div>
+            </div>
+
+            <div className="w-full h-full flex flex-col p-8 lg:p-16 overflow-y-auto custom-scrollbar relative z-10">
+              {showSettings ? (
+                <SettingsPanel
+                  appSettings={appSettings}
+                  onBack={() => setShowSettings(false)}
+                  onLibraryRefresh={onLibraryRefresh}
+                  onSettingsChange={onSettingsChange}
+                  rootPath={rootPath}
+                />
+              ) : (
+                <>
+                  <div className="my-auto text-left relative z-10">
+                    <Text variant={TextVariants.displayLarge}>RapidRAW</Text>
+                    <Text
+                      variant={TextVariants.heading}
+                      color={TextColors.secondary}
+                      weight={TextWeights.normal}
+                      className="mb-10 max-w-md drop-shadow-sm"
+                    >
+                      {hasLastPath ? (
+                        <>
+                          Welcome back!
+                          <br />
+                          Continue where you left off or start a new session.
+                        </>
+                      ) : (
+                        `A blazingly fast, GPU-accelerated RAW image editor. ${
+                          isAndroid ? 'Open the library to begin.' : 'Open a folder to begin.'
+                        }`
+                      )}
+                    </Text>
+                    <div className="flex flex-col w-full max-w-xs gap-4 relative z-10">
+                      {hasLastPath && (
+                        <Button
+                          className="rounded-md h-11 w-full flex justify-center items-center shadow-md"
+                          onClick={onContinueSession}
+                          size="lg"
+                        >
+                          <RefreshCw size={20} className="mr-2" /> Continue Session
+                        </Button>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          className={`rounded-md grow flex justify-center items-center shadow-md h-11 ${
+                            hasLastPath ? 'bg-surface text-text-primary' : ''
+                          }`}
+                          onClick={onOpenFolder}
+                          size="lg"
+                        >
+                          <Folder size={20} className="mr-2" />
+                          {isAndroid ? 'Open Library' : hasLastPath ? 'Change Folder' : 'Open Folder'}
+                        </Button>
+                        <Button
+                          className="px-3 bg-surface text-text-primary shadow-md h-11"
+                          onClick={() => setShowSettings(true)}
+                          size="lg"
+                          data-tooltip="Go to Settings"
+                          variant="ghost"
+                        >
+                          <Settings size={20} />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Text
+                    variant={TextVariants.small}
+                    as="div"
+                    className="absolute bottom-8 left-8 lg:left-16 space-y-1 z-10 drop-shadow-sm"
+                  >
+                    <p>
+                      Images by{' '}
+                      <a
+                        href="https://instagram.com/timonkaech.photography"
+                        className="hover:underline"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Timon Käch
+                      </a>
+                    </p>
+                    {appVersion && (
+                      <div className="flex items-center space-x-2">
+                        <p>
+                          <span
+                            className={`group transition-all duration-300 ease-in-out rounded-md py-1 ${
+                              isUpdateAvailable
+                                ? 'cursor-pointer border border-yellow-500 px-2 hover:bg-yellow-500/20'
+                                : ''
+                            }`}
+                            onClick={() => {
+                              if (isUpdateAvailable) {
+                                open('https://github.com/CyberTimon/RapidRAW/releases/latest');
+                              }
+                            }}
+                            data-tooltip={
+                              isUpdateAvailable
+                                ? `Click to download version ${latestVersion}`
+                                : `You are on the latest version`
+                            }
+                          >
+                            <span className={isUpdateAvailable ? 'group-hover:hidden' : ''}>Version {appVersion}</span>
+                            {isUpdateAvailable && (
+                              <span className="hidden group-hover:inline text-yellow-400">New version available!</span>
+                            )}
+                          </span>
+                        </p>
+                        <span>-</span>
+                        <p>
+                          <a
+                            href="https://ko-fi.com/cybertimon"
+                            className="hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Donate on Ko-Fi
+                          </a>
+                          <span className="mx-1">or</span>
+                          <a
+                            href="https://github.com/CyberTimon/RapidRAW"
+                            className="hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Contribute on GitHub
+                          </a>
+                        </p>
+                      </div>
+                    )}
+                  </Text>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -2041,37 +2119,39 @@ export default function MainLibrary({
       ref={libraryContainerRef}
     >
       <header
-        className="p-4 shrink-0 flex justify-between items-center border-b border-border-color gap-4"
+        className="p-4 shrink-0 flex justify-between items-center border-b border-surface gap-4"
         onMouseEnter={() => setIsProgressHovered(true)}
         onMouseLeave={() => setIsProgressHovered(false)}
       >
         <div className="min-w-0">
           <Text variant={TextVariants.headline}>Library</Text>
-          <div className="flex items-center gap-2">
-            {currentFolderPath ? (
-              <Text className="truncate">{currentFolderPath}</Text>
-            ) : (
-              <p className="text-sm invisible select-none pointer-events-none h-5 overflow-hidden"></p>
-            )}
-            <div
-              className={`flex items-center gap-2 overflow-hidden transition-all duration-300 whitespace-nowrap ${
-                isBusyDelayed ? 'max-w-xs opacity-100' : 'max-w-0 opacity-0'
-              }`}
-            >
-              <Loader2 size={14} className="animate-spin text-text-secondary shrink-0" />
+          {!isAndroid && (
+            <div className="flex items-center gap-2">
+              {currentFolderPath ? (
+                <Text className="truncate">{currentFolderPath}</Text>
+              ) : (
+                <p className="text-sm invisible select-none pointer-events-none h-5 overflow-hidden"></p>
+              )}
               <div
-                className={`flex items-center transition-all duration-300 ease-out overflow-hidden ${
-                  isProgressHovered && isBusyDelayed && (thumbnailProgress?.total ?? 0) > 0
-                    ? 'max-w-xs opacity-100'
-                    : 'max-w-0 opacity-0'
+                className={`flex items-center gap-2 overflow-hidden transition-all duration-300 whitespace-nowrap ${
+                  isBusyDelayed ? 'max-w-xs opacity-100' : 'max-w-0 opacity-0'
                 }`}
               >
-                <Text variant={TextVariants.small} color={TextColors.secondary} className="whitespace-nowrap">
-                  ({thumbnailProgress?.current ?? 0}/{thumbnailProgress?.total ?? 0})
-                </Text>
+                <Loader2 size={14} className="animate-spin text-text-secondary shrink-0" />
+                <div
+                  className={`flex items-center transition-all duration-300 ease-out overflow-hidden ${
+                    isProgressHovered && isBusyDelayed && (thumbnailProgress?.total ?? 0) > 0
+                      ? 'max-w-xs opacity-100'
+                      : 'max-w-0 opacity-0'
+                  }`}
+                >
+                  <Text variant={TextVariants.small} color={TextColors.secondary} className="whitespace-nowrap">
+                    ({thumbnailProgress?.current ?? 0}/{thumbnailProgress?.total ?? 0})
+                  </Text>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {importState.status === Status.Importing && (
@@ -2113,20 +2193,24 @@ export default function MainLibrary({
             thumbnailSize={thumbnailSize}
             thumbnailAspectRatio={thumbnailAspectRatio}
           />
-          <Button
-            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
-            onClick={onNavigateToCommunity}
-            data-tooltip="Community Presets"
-          >
-            <Users className="w-8 h-8" />
-          </Button>
-          <Button
-            className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
-            onClick={onOpenFolder}
-            data-tooltip="Open another folder"
-          >
-            <Folder className="w-8 h-8" />
-          </Button>
+          {!isAndroid && (
+            <>
+              <Button
+                className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+                onClick={onNavigateToCommunity}
+                data-tooltip="Community Presets"
+              >
+                <Users className="w-8 h-8" />
+              </Button>
+              <Button
+                className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
+                onClick={onOpenFolder}
+                data-tooltip="Open another folder"
+              >
+                <Folder className="w-8 h-8" />
+              </Button>
+            </>
+          )}
           <Button
             className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
             onClick={onGoHome}
@@ -2169,14 +2253,17 @@ export default function MainLibrary({
                 groups.forEach((group) => {
                   if (group.images.length === 0) return;
 
-                  rows.push({ type: 'header', path: group.path, count: group.images.length });
+                  const isExpanded = !collapsedRecursiveFolders.has(group.path);
+                  rows.push({ type: 'header', path: group.path, count: group.images.length, isExpanded });
 
-                  for (let i = 0; i < group.images.length; i += columnCount) {
-                    rows.push({
-                      type: 'images',
-                      images: group.images.slice(i, i + columnCount),
-                      startIndex: i,
-                    });
+                  if (isExpanded) {
+                    for (let i = 0; i < group.images.length; i += columnCount) {
+                      rows.push({
+                        type: 'images',
+                        images: group.images.slice(i, i + columnCount),
+                        startIndex: i,
+                      });
+                    }
                   }
                 });
               } else {
@@ -2219,25 +2306,6 @@ export default function MainLibrary({
                       rowCount={rows.length}
                       rowHeight={getItemSize}
                       onScroll={(e: React.UIEvent<HTMLElement>) => setLibraryScrollTop(e.currentTarget.scrollTop)}
-                      onRowsRendered={({ startIndex, stopIndex }) => {
-                        if (!onRequestThumbnails) return;
-                        const pathsToRequest: string[] = [];
-
-                        for (let i = startIndex; i <= stopIndex; i++) {
-                          const row = rows[i];
-                          if (row && row.type === 'images') {
-                            row.images.forEach((img: ImageFile) => {
-                              if (!thumbnails[img.path]) {
-                                pathsToRequest.push(img.path);
-                              }
-                            });
-                          }
-                        }
-
-                        if (pathsToRequest.length > 0) {
-                          onRequestThumbnails(pathsToRequest);
-                        }
-                      }}
                       className="custom-scrollbar"
                       rowComponent={Row}
                       rowProps={{
@@ -2258,6 +2326,8 @@ export default function MainLibrary({
                         gap: ITEM_GAP,
                         isListView,
                         columnWidths: listColumnWidths,
+                        queueThumbnailRequest,
+                        onToggleRecursiveFolder: handleToggleRecursiveFolder,
                       }}
                     />
                   </div>

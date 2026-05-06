@@ -4,14 +4,25 @@ import debounce from 'lodash.debounce';
 
 export function useThumbnails() {
   const generatedRef = useRef<Set<string>>(new Set());
+  const pendingQueueRef = useRef<Set<string>>(new Set());
 
-  const sendQueueToBackend = useMemo(
+  const flushQueueToBackend = useMemo(
     () =>
       debounce(
-        (paths: string[]) => {
-          invoke('update_thumbnail_queue', { paths }).catch((err) => {
+        () => {
+          const pathsToSend = Array.from(pendingQueueRef.current);
+          if (pathsToSend.length === 0) return;
+
+          for (let i = pathsToSend.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pathsToSend[i], pathsToSend[j]] = [pathsToSend[j], pathsToSend[i]];
+          }
+
+          invoke('update_thumbnail_queue', { paths: pathsToSend }).catch((err) => {
             console.error('Failed to update thumbnail queue:', err);
           });
+
+          pendingQueueRef.current.clear();
         },
         150,
         { maxWait: 300 },
@@ -21,33 +32,37 @@ export function useThumbnails() {
 
   const requestThumbnails = useCallback(
     (visiblePaths: string[]) => {
-      const neededPaths = visiblePaths.filter((p) => !generatedRef.current.has(p));
+      let addedToQueue = false;
 
-      if (neededPaths.length > 0) {
-        for (let i = neededPaths.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [neededPaths[i], neededPaths[j]] = [neededPaths[j], neededPaths[i]];
+      visiblePaths.forEach((p) => {
+        if (!generatedRef.current.has(p) && !pendingQueueRef.current.has(p)) {
+          pendingQueueRef.current.add(p);
+          addedToQueue = true;
         }
+      });
 
-        sendQueueToBackend(neededPaths);
+      if (addedToQueue) {
+        flushQueueToBackend();
       }
     },
-    [sendQueueToBackend],
+    [flushQueueToBackend],
   );
 
   const markGenerated = useCallback((path: string) => {
     generatedRef.current.add(path);
+    pendingQueueRef.current.delete(path);
   }, []);
 
   const clearThumbnailQueue = useCallback(() => {
     generatedRef.current.clear();
-    sendQueueToBackend.cancel();
+    pendingQueueRef.current.clear();
+    flushQueueToBackend.cancel();
     invoke('update_thumbnail_queue', { paths: [] }).catch(console.error);
-  }, [sendQueueToBackend]);
+  }, [flushQueueToBackend]);
 
   useEffect(() => {
-    return () => sendQueueToBackend.cancel();
-  }, [sendQueueToBackend]);
+    return () => flushQueueToBackend.cancel();
+  }, [flushQueueToBackend]);
 
   return { requestThumbnails, clearThumbnailQueue, markGenerated };
 }

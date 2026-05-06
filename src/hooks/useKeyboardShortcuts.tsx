@@ -543,8 +543,8 @@ export const useKeyboardShortcuts = ({
       },
       {
         match: (e) => {
-          if (osPlatform === 'macos') return e.code === 'Backspace';
-          return e.code === 'Delete';
+          const isDeleteKey = osPlatform === 'macos' ? e.code === 'Backspace' : e.code === 'Delete';
+          return isDeleteKey && (!!activeMaskContainerId || !!activeAiPatchContainerId);
         },
         execute: (e) => {
           e.preventDefault();

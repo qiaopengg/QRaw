@@ -38,6 +38,8 @@ const DEFAULT_PARAMETRIC_CURVE_SETTINGS: ParametricCurveSettings = {
   shadows: 0,
   highlights: 0,
   lights: 0,
+  whiteLevel: 0,
+  blackLevel: 0,
   split1: 25,
   split2: 50,
   split3: 75,
@@ -75,6 +77,9 @@ function buildParametricPoints(settings: ParametricCurveSettings): Array<Coord> 
   const vD = settings.darks / 100;
   const vS = settings.shadows / 100;
 
+  const blackYOffset = settings.blackLevel;
+  const whiteYOffset = settings.whiteLevel;
+
   const s1 = settings.split1 / 100;
   const s2 = settings.split2 / 100;
   const s3 = settings.split3 / 100;
@@ -105,10 +110,19 @@ function buildParametricPoints(settings: ParametricCurveSettings): Array<Coord> 
 
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
-  return xs.map((x, i) => ({
+  let points = xs.map((x, i) => ({
     x: x * 255,
     y: clamp(ys[i]) * 255,
   }));
+
+  if (points.length >= 2) {
+    points[0].y = Math.max(0, Math.min(255, points[0].y + blackYOffset));
+
+    const lastIndex = points.length - 1;
+    points[lastIndex].y = Math.max(0, Math.min(255, points[lastIndex].y + whiteYOffset));
+  }
+  
+  return points;
 }
 
 function getCurvePath(points: Array<Coord>) {
@@ -220,10 +234,31 @@ function isDefaultParametricCurve(settings: ParametricCurveSettings | undefined)
     settings.shadows === DEFAULT_PARAMETRIC_CURVE_SETTINGS.shadows &&
     settings.lights === DEFAULT_PARAMETRIC_CURVE_SETTINGS.lights &&
     settings.highlights === DEFAULT_PARAMETRIC_CURVE_SETTINGS.highlights &&
+    settings.whiteLevel === DEFAULT_PARAMETRIC_CURVE_SETTINGS.whiteLevel &&
+    settings.blackLevel === DEFAULT_PARAMETRIC_CURVE_SETTINGS.blackLevel &&
     settings.split1 === DEFAULT_PARAMETRIC_CURVE_SETTINGS.split1 &&
     settings.split2 === DEFAULT_PARAMETRIC_CURVE_SETTINGS.split2 &&
     settings.split3 === DEFAULT_PARAMETRIC_CURVE_SETTINGS.split3
   );
+}
+
+function getSplitterGradient(channel: ActiveChannel) {
+  switch(channel) {
+    case ActiveChannel.Luma:
+      return 'linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(64, 64, 64, 0.8) 25%, rgba(105, 101, 101, 0.8) 50%, rgba(158, 154, 154, 0.8) 75%, rgba(198, 195, 197, 0.8) 100%)';
+    case ActiveChannel.Red:
+      return 'linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(64, 0, 0, 0.8) 25%, rgba(105, 50, 50, 0.8) 50%, rgba(158, 100, 100, 0.8) 75%, rgba(255, 107, 107, 0.8) 100%)';
+    case ActiveChannel.Green:
+      return 'linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(0, 64, 0, 0.8) 25%, rgba(50, 105, 50, 0.8) 50%, rgba(100, 158, 100, 0.8) 75%, rgba(107, 203, 119, 0.8) 100%)';
+    case ActiveChannel.Blue:
+      return 'linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 64, 0.8) 25%, rgba(50, 50, 105, 0.8) 50%, rgba(100, 100, 158, 0.8) 75%, rgba(77, 150, 255, 0.8) 100%)';
+    default:
+      return 'linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(64, 64, 64, 0.8) 25%, rgba(105, 101, 101, 0.8) 50%, rgba(158, 154, 154, 0.8) 75%, rgba(198, 195, 197, 0.8) 100%)';
+  }
+}
+
+function convertParametricToPoints(settings: ParametricCurveSettings): Array<Coord> {
+  return buildParametricPoints(settings);
 }
 
 export default function CurveGraph({
@@ -641,6 +676,14 @@ export default function CurveGraph({
       setAdjustments((prev: any) => ({ ...prev, curves: { ...prev.curves, [activeChannel]: newPoints } }));
     };
 
+    const handlePasteFromParametric = () => {
+      if (!parametricClipboard) return;
+      const newPoints = convertParametricToPoints(parametricClipboard);
+      setLocalPoints(newPoints);
+      localPointsRef.current = newPoints;
+      setAdjustments((prev: any) => ({ ...prev, curves: { ...prev.curves, [activeChannel]: newPoints } }));
+    };
+
     const handleReset = () => {
       const defaultPoints = [
         { x: 0, y: 0 },
@@ -683,6 +726,12 @@ export default function CurveGraph({
         icon: ClipboardPaste,
         onClick: handlePaste,
         disabled: !curveClipboard,
+      },
+      {
+        label: 'Paste from Parametric Curve',
+        icon: ClipboardPaste,
+        onClick: handlePasteFromParametric,
+        disabled: !parametricClipboard,
       },
       { type: OPTION_SEPARATOR },
       { label: `Reset ${channelName} Point Curve`, icon: RotateCcw, onClick: handleReset },
@@ -812,6 +861,27 @@ export default function CurveGraph({
 
             <path d={getCurvePath(activePoints)} fill="none" stroke={color} strokeWidth="2.5" />
 
+            {isParametricMode && activePoints.length >= 2 && (
+              <>
+                <circle
+                  cx={activePoints[0]?.x || 0}
+                  cy={255 - (activePoints[0]?.y || 0)}
+                  fill={color}
+                  r="6"
+                  stroke="#1e1e1e"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx={activePoints[activePoints.length - 1]?.x || 255}
+                  cy={255 - (activePoints[activePoints.length - 1]?.y || 255)}
+                  fill={color}
+                  r="6"
+                  stroke="#1e1e1e"
+                  strokeWidth="2"
+                />
+              </>
+            )}
+
             {!isParametricMode &&
               activePoints.map((p: Coord, i: number) => (
                 <circle
@@ -848,7 +918,7 @@ export default function CurveGraph({
                     <div
                       className="absolute inset-0"
                       style={{
-                        background: `linear-gradient(to right, rgba(0, 0, 0, 0.8) 0%, rgba(64, 64, 64, 0.8) 25%, rgba(105, 101, 101, 0.8) 50%, rgba(158, 154, 154, 0.8) 75%, rgba(198, 195, 197, 0.8) 100%)`,
+                        background: getSplitterGradient(activeChannel),
                       }}
                     />
                     {splitPositions.map(({ key, value }) => (
@@ -884,6 +954,16 @@ export default function CurveGraph({
               </div>
 
               <div className="flex flex-col gap-2">
+                <Slider
+                  label="White Level"
+                  min={-100}
+                  max={0}
+                  step={1}
+                  defaultValue={0}
+                  value={activeParametricSettings.whiteLevel}
+                  onChange={(e: any) => updateParametricValue('whiteLevel', parseFloat(e.target.value))}
+                  onDragStateChange={onDragStateChange}
+                />
                 <Slider
                   label="Highlights"
                   min={-100}
@@ -922,6 +1002,16 @@ export default function CurveGraph({
                   defaultValue={0}
                   value={activeParametricSettings.shadows}
                   onChange={(e: any) => updateParametricValue('shadows', parseFloat(e.target.value))}
+                  onDragStateChange={onDragStateChange}
+                />
+                <Slider
+                  label="Black Level"
+                  min={0}
+                  max={100}
+                  step={1}
+                  defaultValue={0}
+                  value={activeParametricSettings.blackLevel}
+                  onChange={(e: any) => updateParametricValue('blackLevel', parseFloat(e.target.value))}
                   onDragStateChange={onDragStateChange}
                 />
               </div>
