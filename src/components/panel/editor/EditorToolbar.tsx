@@ -1,11 +1,12 @@
-import { memo, useState, useEffect, useRef, useMemo } from 'react';
-import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo, Waves, Target } from 'lucide-react';
+import { Fragment, memo, useState, useEffect, useRef, useMemo } from 'react';
+import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { SelectedImage } from '../../ui/AppProperties';
 import { IconAperture, IconCalendar, IconClock, IconFocalLength, IconIso, IconShutter } from './ExifIcons';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../../types/typography';
+import type { EditorFeatureSlots } from '../../../features/contracts';
 
 interface EditorToolbarProps {
   canRedo: boolean;
@@ -23,8 +24,7 @@ interface EditorToolbarProps {
   adjustmentsHistory: any[];
   adjustmentsHistoryIndex: number;
   goToAdjustmentsHistoryIndex(index: number): void;
-  showFocusAreas: boolean;
-  onToggleFocusAreas(): void;
+  editorFeatureSlots: EditorFeatureSlots;
 }
 
 const EditorToolbar = memo(
@@ -44,8 +44,7 @@ const EditorToolbar = memo(
     adjustmentsHistory,
     adjustmentsHistoryIndex,
     goToAdjustmentsHistoryIndex,
-    showFocusAreas,
-    onToggleFocusAreas,
+    editorFeatureSlots,
   }: EditorToolbarProps) => {
     const isAnyLoading = isLoading;
     const [isLoaderVisible, setIsLoaderVisible] = useState(false);
@@ -624,19 +623,11 @@ const EditorToolbar = memo(
           >
             {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
           </button>
-          <button
-            className={clsx(
-              'p-2 rounded-full transition-colors',
-              showFocusAreas
-                ? 'bg-accent text-button-text hover:bg-accent/90'
-                : 'bg-surface hover:bg-card-active text-text-primary',
-            )}
-            onClick={onToggleFocusAreas}
-            onKeyDown={handleButtonKeyDown}
-            data-tooltip={showFocusAreas ? '隐藏对焦区域 (Shift+F)' : '显示对焦区域 (Shift+F)'}
-          >
-            <Target size={20} />
-          </button>
+          {editorFeatureSlots.toolbarControls?.map((ToolbarControl, index) => (
+            <Fragment key={`editor-toolbar-feature-${index}`}>
+              <ToolbarControl onKeyDown={handleButtonKeyDown} />
+            </Fragment>
+          ))}
           <button
             className="bg-surface text-text-primary p-2 rounded-full hover:bg-card-active transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"
             onClick={onToggleFullScreen}

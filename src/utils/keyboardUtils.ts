@@ -1,14 +1,5 @@
-export interface KeybindDefinition {
-  action: string;
-  description: string;
-  defaultCombo: string[];
-  section: 'library' | 'view' | 'rating' | 'panels' | 'editing';
-}
-
-export interface KeybindSection {
-  id: KeybindDefinition['section'];
-  label: string;
-}
+import { FEATURE_KEYBIND_DEFINITIONS } from '../features/keybindDefinitions';
+import type { KeybindDefinition, KeybindSection } from './keybindContracts';
 
 export const KEYBIND_SECTIONS: KeybindSection[] = [
   { id: 'library', label: 'Library' },
@@ -64,7 +55,7 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
   { action: 'toggle_crop', description: 'Toggle Crop / Straighten', defaultCombo: ['KeyS'], section: 'editing' },
   { action: 'brush_size_up', description: 'Increase brush size', defaultCombo: ['ctrl', 'ArrowUp'], section: 'editing' },
   { action: 'brush_size_down', description: 'Decrease brush size', defaultCombo: ['ctrl', 'ArrowDown'], section: 'editing' },
-  { action: 'toggle_focus_areas', description: 'Toggle focus area overlay', defaultCombo: ['shift', 'KeyF'], section: 'view' },
+  ...FEATURE_KEYBIND_DEFINITIONS,
 ];
 
 const symMap: Record<string, string> = {

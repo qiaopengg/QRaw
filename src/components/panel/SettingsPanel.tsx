@@ -36,11 +36,11 @@ import {
   arraysEqual,
   codeToDisplayLabel,
   formatKeyCode,
-  KeybindDefinition,
   KEYBIND_DEFINITIONS,
   KEYBIND_SECTIONS,
   normalizeCombo,
 } from '../../utils/keyboardUtils';
+import type { KeybindDefinition } from '../../utils/keybindContracts';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useOsPlatform } from '../../hooks/useOsPlatform';

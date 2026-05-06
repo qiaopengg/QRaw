@@ -93,11 +93,11 @@ import GlobalTooltip from './components/ui/GlobalTooltip';
 import { THEMES, DEFAULT_THEME_ID, ThemeProps } from './utils/themes';
 import { SubMask, ToolType } from './components/panel/right/Masks';
 import { ExportState, IMPORT_TIMEOUT, ImportState, Status } from './components/ui/ExportImportProperties';
+import { useAppFeatures } from './features/appFeatures';
 import {
   AppSettings,
   BrushSettings,
   FilterCriteria,
-  FocusRegion,
   Invokes,
   ImageFile,
   Option,
@@ -353,9 +353,6 @@ function App() {
   const dragIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevAdjustmentsRef = useRef<{ path: string; adjustments: Adjustments } | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [showFocusAreas, setShowFocusAreas] = useState(false);
-  const [focusRegions, setFocusRegions] = useState<FocusRegion[]>([]);
-  const [focusAreasError, setFocusAreasError] = useState<string | null>(null);
   const [theme, setTheme] = useState(DEFAULT_THEME_ID);
   const [activeRightPanel, setActiveRightPanel] = useState<Panel | null>(Panel.Adjustments);
   const [slideDirection, setSlideDirection] = useState(1);
@@ -1511,10 +1508,10 @@ function App() {
       return null;
     }
 
-    let roiX = (intersectLeft - imgLeft) / baseW;
-    let roiY = (intersectTop - imgTop) / baseH;
-    let roiW = (intersectRight - intersectLeft) / baseW;
-    let roiH = (intersectBottom - intersectTop) / baseH;
+    const roiX = (intersectLeft - imgLeft) / baseW;
+    const roiY = (intersectTop - imgTop) / baseH;
+    const roiW = (intersectRight - intersectLeft) / baseW;
+    const roiH = (intersectBottom - intersectTop) / baseH;
 
     const newRoiX = roiX - paddingX;
     const newRoiY = roiY - paddingY;
@@ -1992,33 +1989,6 @@ function App() {
     setIsWaveformVisible((prev: boolean) => !prev);
   }, []);
 
-  // 对焦区域加载
-  useEffect(() => {
-    if (!selectedImage?.path || !showFocusAreas) {
-      setFocusRegions([]);
-      return;
-    }
-
-    invoke<FocusRegion[]>(Invokes.GetFocusRegions, {
-      params: {
-        path: selectedImage.path,
-        imageWidth: selectedImage.width,
-        imageHeight: selectedImage.height,
-      },
-    })
-      .then((regions) => {
-        setFocusRegions(regions);
-        setFocusAreasError(null);
-      })
-      .catch((err) => {
-        setFocusRegions([]);
-        setFocusAreasError(err);
-        toast.info(`对焦区域显示不可用\n${err}\n\n您可以提交样本文件帮助我们添加支持`, {
-          autoClose: 5000,
-        });
-      });
-  }, [selectedImage?.path, selectedImage?.width, selectedImage?.height, showFocusAreas]);
-
   useEffect(() => {
     if (isInitialMount.current || !appSettings) {
       return;
@@ -2099,7 +2069,7 @@ function App() {
       return;
     }
 
-    let finalCssVariables: any = { ...baseTheme.cssVariables };
+    const finalCssVariables: any = { ...baseTheme.cssVariables };
 
     Object.entries(finalCssVariables).forEach(([key, value]) => {
       root.style.setProperty(key, value as string);
@@ -2778,9 +2748,7 @@ function App() {
     }
   }, [isFullScreen, selectedImage, zoom]);
 
-  const handleToggleFocusAreas = useCallback(() => {
-    setShowFocusAreas((prev) => !prev);
-  }, []);
+  const appFeatures = useAppFeatures({ selectedImage });
 
   const handleCopyAdjustments = useCallback(() => {
     const sourceAdjustments = selectedImage ? adjustments : libraryActiveAdjustments;
@@ -3227,7 +3195,7 @@ function App() {
 
   useEffect(() => {
     if (showOriginal && selectedImage?.isReady && displaySize.width > 0 && !isSliderDragging) {
-      let targetRes = calculateTargetRes();
+      const targetRes = calculateTargetRes();
 
       if (targetRes > currentOriginalResRef.current) {
         requestHiFiOriginalZoom(adjustments, targetRes);
@@ -3345,7 +3313,7 @@ function App() {
     keybinds: appSettings?.keybinds,
     brushSettings: brushSettings,
     setBrushSettings: setBrushSettings,
-    handleToggleFocusAreas,
+    extraActions: appFeatures.keyboardActions,
   });
 
   useEffect(() => {
@@ -5364,9 +5332,7 @@ function App() {
           liveRotation={liveRotation}
           isInstantTransition={isInstantTransition}
           hasRenderedFirstFrame={hasRenderedFirstFrame}
-          showFocusAreas={showFocusAreas}
-          focusRegions={focusRegions}
-          onToggleFocusAreas={handleToggleFocusAreas}
+          editorFeatureSlots={appFeatures.editor ?? {}}
         />
       );
 

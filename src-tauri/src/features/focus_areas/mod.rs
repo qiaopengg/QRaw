@@ -1425,7 +1425,6 @@ pub struct GetFocusRegionsParams {
     image_height: Option<u32>,
 }
 
-#[tauri::command]
 pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegion>, String> {
     let (source_path, _sidecar) = parse_virtual_path(&params.path);
     let cache_key = format!("focus_{}", source_path.to_string_lossy());
