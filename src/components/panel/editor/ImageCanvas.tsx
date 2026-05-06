@@ -776,6 +776,7 @@ const MaskOverlay = memo(
 );
 
 interface TransformedFocusPoint {
+  rotation: number;
   x: number;
   y: number;
   width: number;
@@ -810,9 +811,20 @@ function transformFocusPoint(
     }
   }
 
-  // 3. 用户旋转（任意角度）
-  if (adjustments.rotation && adjustments.rotation !== 0) {
-    const angle = (adjustments.rotation * Math.PI) / 180;
+  // 3. 水平翻转
+  if (adjustments.flipHorizontal) {
+    x = imgW - x - w;
+  }
+
+  // 4. 垂直翻转
+  if (adjustments.flipVertical) {
+    y = imgH - y - h;
+  }
+
+  // 5. 用户旋转（任意角度）
+  const rotation = adjustments.rotation || 0;
+  if (rotation !== 0) {
+    const angle = (rotation * Math.PI) / 180;
     const cx = imgW / 2;
     const cy = imgH / 2;
     const cos = Math.cos(angle);
@@ -821,16 +833,6 @@ function transformFocusPoint(
     const dy = y + h / 2 - cy;
     x = cx + dx * cos - dy * sin - w / 2;
     y = cy + dx * sin + dy * cos - h / 2;
-  }
-
-  // 4. 水平翻转
-  if (adjustments.flipHorizontal) {
-    x = imgW - x - w;
-  }
-
-  // 5. 垂直翻转
-  if (adjustments.flipVertical) {
-    y = imgH - y - h;
   }
 
   // 6. 裁剪偏移
@@ -847,11 +849,29 @@ function transformFocusPoint(
   const safeScale = scale > 0 ? scale : 1.0;
 
   return {
+    rotation,
     x: x * safeScale,
     y: y * safeScale,
     width: w * safeScale,
     height: h * safeScale,
   };
+}
+
+function getFocusRegionStroke(region: FocusRegion): string {
+  if (region.kind === 'eye') {
+    return '#3b82f6';
+  }
+  if (region.kind === 'face') {
+    return '#22c55e';
+  }
+  if (region.is_primary) {
+    return '#ef4444';
+  }
+  return '#f97316';
+}
+
+function getFocusRegionDash(region: FocusRegion): number[] | undefined {
+  return region.kind === 'point' ? [6, 4] : undefined;
 }
 
 const ImageCanvas = memo(
@@ -2256,21 +2276,27 @@ const ImageCanvas = memo(
                     imageRenderSize.scale,
                   );
 
-                  // 以已变换后的中心点为锚，画40px固定正方形
+                  // 以已变换后的中心点为锚，保留厂商元数据给出的区域大小。
                   const centerX = transformed.x + transformed.width / 2;
                   const centerY = transformed.y + transformed.height / 2;
-                  const half = 20;
+                  const minSize = region.kind === 'point' ? 28 : 18;
+                  const drawWidth = Math.max(transformed.width, minSize);
+                  const drawHeight = Math.max(transformed.height, minSize);
+                  const stroke = getFocusRegionStroke(region);
 
                   return (
                     <Rect
                       key={`focus-${index}`}
-                      x={centerX - half}
-                      y={centerY - half}
-                      width={half * 2}
-                      height={half * 2}
-                      stroke="#22c55e"
-                      strokeWidth={2}
-                      dash={[5, 5]}
+                      x={centerX}
+                      y={centerY}
+                      width={drawWidth}
+                      height={drawHeight}
+                      offsetX={drawWidth / 2}
+                      offsetY={drawHeight / 2}
+                      rotation={transformed.rotation}
+                      stroke={stroke}
+                      strokeWidth={region.is_primary ? 2.5 : 2}
+                      dash={getFocusRegionDash(region)}
                       listening={false}
                       shadowColor="black"
                       shadowBlur={4}

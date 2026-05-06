@@ -2017,7 +2017,7 @@ function App() {
           autoClose: 5000,
         });
       });
-  }, [selectedImage?.path, showFocusAreas]);
+  }, [selectedImage?.path, selectedImage?.width, selectedImage?.height, showFocusAreas]);
 
   useEffect(() => {
     if (isInitialMount.current || !appSettings) {

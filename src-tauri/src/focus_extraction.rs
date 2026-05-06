@@ -14,7 +14,9 @@ use crate::file_management::{parse_virtual_path, read_file_mapped};
 fn read_native_sensor_size(file_bytes: &[u8]) -> Option<(u32, u32)> {
     let source = rawler::rawsource::RawSource::new_from_slice(file_bytes);
     let decoder = rawler::get_decoder(&source).ok()?;
-    let raw = decoder.raw_image(&source, &RawDecodeParams::default(), false).ok()?;
+    let raw = decoder
+        .raw_image(&source, &RawDecodeParams::default(), false)
+        .ok()?;
     let w = raw.width as u32;
     let h = raw.height as u32;
     Some((w, h))
@@ -48,7 +50,9 @@ pub enum FocusKind {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 fn parse_tiff_exif_fields(file_bytes: &[u8]) -> Option<Vec<exif::Field>> {
-    exif::parse_exif(file_bytes).ok().map(|(fields, _le)| fields)
+    exif::parse_exif(file_bytes)
+        .ok()
+        .map(|(fields, _le)| fields)
 }
 
 fn find_field_value<'a>(fields: &'a [exif::Field], tag: Tag) -> Option<&'a Value> {
@@ -102,7 +106,11 @@ fn parse_makernote_ifd(data: &[u8]) -> HashMap<u16, Vec<u8>> {
     } else if data.len() >= 8 && &data[0..8] == b"FUJIFILM" {
         off = 12;
     } else if data.len() >= 5 && &data[0..5] == b"OLYMP" {
-        off = if data.len() >= 7 && &data[0..7] == b"OLYMPUS" { 12 } else { 8 };
+        off = if data.len() >= 7 && &data[0..7] == b"OLYMPUS" {
+            12
+        } else {
+            8
+        };
     } else if data.len() >= 6 && &data[0..6] == b"PENTAX" {
         off = 8;
         if off + 2 <= data.len() {
@@ -154,9 +162,11 @@ fn parse_makernote_ifd(data: &[u8]) -> HashMap<u16, Vec<u8>> {
         };
         if maybe_magic == 0x002a && tiff_data.len() >= 8 {
             if little_endian {
-                u32::from_le_bytes([tiff_data[4], tiff_data[5], tiff_data[6], tiff_data[7]]) as usize
+                u32::from_le_bytes([tiff_data[4], tiff_data[5], tiff_data[6], tiff_data[7]])
+                    as usize
             } else {
-                u32::from_be_bytes([tiff_data[4], tiff_data[5], tiff_data[6], tiff_data[7]]) as usize
+                u32::from_be_bytes([tiff_data[4], tiff_data[5], tiff_data[6], tiff_data[7]])
+                    as usize
             }
         } else {
             0
@@ -189,9 +199,19 @@ fn parse_makernote_ifd(data: &[u8]) -> HashMap<u16, Vec<u8>> {
             u16::from_be_bytes([tiff_data[eo + 2], tiff_data[eo + 3]])
         };
         let count = if little_endian {
-            u32::from_le_bytes([tiff_data[eo + 4], tiff_data[eo + 5], tiff_data[eo + 6], tiff_data[eo + 7]])
+            u32::from_le_bytes([
+                tiff_data[eo + 4],
+                tiff_data[eo + 5],
+                tiff_data[eo + 6],
+                tiff_data[eo + 7],
+            ])
         } else {
-            u32::from_be_bytes([tiff_data[eo + 4], tiff_data[eo + 5], tiff_data[eo + 6], tiff_data[eo + 7]])
+            u32::from_be_bytes([
+                tiff_data[eo + 4],
+                tiff_data[eo + 5],
+                tiff_data[eo + 6],
+                tiff_data[eo + 7],
+            ])
         } as usize;
         let val_bytes = &tiff_data[eo + 8..eo + 12];
 
@@ -207,9 +227,11 @@ fn parse_makernote_ifd(data: &[u8]) -> HashMap<u16, Vec<u8>> {
             result.insert(tag, val_bytes[..total.min(4)].to_vec());
         } else {
             let val_off = if little_endian {
-                u32::from_le_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]) as usize
+                u32::from_le_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]])
+                    as usize
             } else {
-                u32::from_be_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]) as usize
+                u32::from_be_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]])
+                    as usize
             };
             if val_off + total <= tiff_data.len() {
                 result.insert(tag, tiff_data[val_off..val_off + total].to_vec());
@@ -360,9 +382,14 @@ fn extract_sony_af(
             let y_offset = ((uncropped_h - image_h) / 2.0).max(0.0);
             log::warn!(
                 "Sony 宽高比修正: sensor={}x{} ratio={:.3}, image={:.0}x{:.0} ratio={:.3}, y_offset={:.0}/{:.0}",
-                sensor_w, sensor_h, sensor_ratio,
-                image_w, image_h, image_ratio,
-                y_offset, uncropped_h
+                sensor_w,
+                sensor_h,
+                sensor_ratio,
+                image_w,
+                image_h,
+                image_ratio,
+                y_offset,
+                uncropped_h
             );
             (640.0, 480.0, Some((y_offset, uncropped_h)))
         } else {
@@ -404,11 +431,18 @@ fn extract_sony_af(
             if cx > 0.001 && cx < 0.999 && cy > 0.001 && cy < 0.999 {
                 log::info!(
                     "Sony 0x201d FlexibleSpot → AF: raw=({:.0},{:.0}), sensor=({:.4},{:.4}), display=({:.4},{:.4})",
-                    fx, fy, cx, cy, nx + marker, ny + marker
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    nx + marker,
+                    ny + marker
                 );
                 regions.push(FocusRegion {
-                    x: nx, y: ny,
-                    width: 0.03, height: 0.03,
+                    x: nx,
+                    y: ny,
+                    width: 0.03,
+                    height: 0.03,
                     kind: FocusKind::Point,
                     is_primary: true,
                 });
@@ -416,7 +450,10 @@ fn extract_sony_af(
             } else if y_correction.is_some() {
                 log::warn!(
                     "Sony 0x201d 经宽高比修正后超出图像范围: raw=({:.0},{:.0}), norm=({:.4},{:.4})",
-                    fx, fy, cx, cy
+                    fx,
+                    fy,
+                    cx,
+                    cy
                 );
             }
         }
@@ -436,7 +473,13 @@ fn extract_sony_af(
     if let Some(raw) = ifd.get(&SONY_AFPOINT) {
         log::info!("Sony 0xB040: {} bytes", raw.len());
         if let Some(r) = extract_sony_af_b040(raw, image_w, image_h) {
-            log::info!("Sony 0xB040 → AF: ({:.3},{:.3},{:.3},{:.3})", r.x, r.y, r.width, r.height);
+            log::info!(
+                "Sony 0xB040 → AF: ({:.3},{:.3},{:.3},{:.3})",
+                r.x,
+                r.y,
+                r.width,
+                r.height
+            );
             regions.push(r);
             return regions;
         }
@@ -450,7 +493,8 @@ fn extract_sony_af(
             if x > 0.01 && x < 0.98 && y > 0.01 && y < 0.98 {
                 log::info!("Sony 0xB701 → AF: ({:.3},{:.3})", x, y);
                 regions.push(FocusRegion {
-                    x, y,
+                    x,
+                    y,
                     width: 0.04,
                     height: 0.04,
                     kind: FocusKind::Point,
@@ -464,7 +508,11 @@ fn extract_sony_af(
     // 4. AFPointsUsed (0x2020) — bitmap, 记录对焦点使用情况 (仅用于诊断)
     if let Some(raw) = ifd.get(&SONY_AF_POINTS_USED) {
         let count = raw.iter().map(|&b| b.count_ones()).sum::<u32>();
-        log::info!("Sony 0x2020 AFPointsUsed: {} bytes, {} bits set", raw.len(), count);
+        log::info!(
+            "Sony 0x2020 AFPointsUsed: {} bytes, {} bits set",
+            raw.len(),
+            count
+        );
     }
 
     // 5. AFPointSelected (0x201e) — 选中的对焦点序号 (仅用于诊断)
@@ -520,7 +568,10 @@ fn extract_canon_af(ifd: &HashMap<u16, Vec<u8>>, image_w: f32, image_h: f32) -> 
 
                 if x < 1.0 && y < 1.0 && w > 0.0 && w < 0.9 && h > 0.0 && h < 0.9 {
                     regions.push(FocusRegion {
-                        x, y, width: w, height: h,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
                         kind: FocusKind::Area,
                         is_primary: i == 0,
                     });
@@ -560,7 +611,10 @@ fn extract_nikon_af(ifd: &HashMap<u16, Vec<u8>>, image_w: f32, image_h: f32) -> 
                     let h = pts[o + 3].max(1) as f32 / 255.0;
                     if x < 0.98 && y < 0.98 && w > 0.005 && w < 0.9 && h > 0.005 && h < 0.9 {
                         regions.push(FocusRegion {
-                            x, y, width: w, height: h,
+                            x,
+                            y,
+                            width: w,
+                            height: h,
                             kind: FocusKind::Area,
                             is_primary: i == 0,
                         });
@@ -579,8 +633,10 @@ fn extract_nikon_af(ifd: &HashMap<u16, Vec<u8>>, image_w: f32, image_h: f32) -> 
             let y = u16::from_le_bytes([data[2], data[3]]) as f32 / image_h;
             if x < 0.98 && y < 0.98 {
                 return vec![FocusRegion {
-                    x: x.max(0.0), y: y.max(0.0),
-                    width: 0.03, height: 0.03,
+                    x: x.max(0.0),
+                    y: y.max(0.0),
+                    width: 0.03,
+                    height: 0.03,
                     kind: FocusKind::Point,
                     is_primary: true,
                 }];
@@ -624,10 +680,18 @@ fn extract_subject_area(file_bytes: &[u8], image_w: f32, image_h: f32) -> Vec<Fo
                     };
                     log::info!(
                         "SubjectArea → AF: ({:.4},{:.4},{:.4},{:.4}), image={:.0}x{:.0}",
-                        x, y, w, h, image_w, image_h
+                        x,
+                        y,
+                        w,
+                        h,
+                        image_w,
+                        image_h
                     );
                     return vec![FocusRegion {
-                        x, y, width: w, height: h,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
                         kind: FocusKind::Area,
                         is_primary: true,
                     }];
@@ -644,8 +708,10 @@ fn extract_subject_area(file_bytes: &[u8], image_w: f32, image_h: f32) -> Vec<Fo
                 if x < 1.0 && y < 1.0 {
                     log::info!("SubjectLocation → AF: ({:.4},{:.4})", x, y);
                     return vec![FocusRegion {
-                        x, y,
-                        width: 0.05, height: 0.05,
+                        x,
+                        y,
+                        width: 0.05,
+                        height: 0.05,
                         kind: FocusKind::Point,
                         is_primary: true,
                     }];
@@ -739,7 +805,11 @@ impl FocusCache {
         }
     }
     pub fn get(&self, key: &str) -> Option<Vec<FocusRegion>> {
-        self.cache.lock().unwrap().get(key).map(|e| e.regions.clone())
+        self.cache
+            .lock()
+            .unwrap()
+            .get(key)
+            .map(|e| e.regions.clone())
     }
     pub fn insert(&self, key: String, regions: Vec<FocusRegion>) {
         let mut cache = self.cache.lock().unwrap();
@@ -753,7 +823,13 @@ impl FocusCache {
             }
         }
         order.push_back(key.clone());
-        cache.insert(key, CacheEntry { regions, modified: SystemTime::now() });
+        cache.insert(
+            key,
+            CacheEntry {
+                regions,
+                modified: SystemTime::now(),
+            },
+        );
     }
     #[allow(dead_code)]
     pub fn invalidate(&self, key: &str) {
@@ -774,14 +850,197 @@ impl FocusCache {
 //  优先级: FocusPixel(各品牌像素坐标) > FlexibleSpotPosition > FocalPlaneAFPoint > FocusLocation
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+fn push_number_token(token: &mut String, values: &mut Vec<f32>) {
+    if token.chars().any(|c| c.is_ascii_digit()) {
+        if let Ok(value) = token.parse::<f32>() {
+            values.push(value);
+        }
+    }
+    token.clear();
+}
+
+fn numbers_from_string(input: &str) -> Vec<f32> {
+    let mut values = Vec::new();
+    let mut token = String::new();
+
+    for ch in input.chars() {
+        if ch.is_ascii_digit() || ch == '-' || ch == '+' || ch == '.' {
+            token.push(ch);
+        } else {
+            push_number_token(&mut token, &mut values);
+        }
+    }
+    push_number_token(&mut token, &mut values);
+    values
+}
+
+fn numbers_from_json_value(value: &serde_json::Value) -> Vec<f32> {
+    match value {
+        serde_json::Value::Number(n) => n.as_f64().map(|v| vec![v as f32]).unwrap_or_default(),
+        serde_json::Value::String(s) => numbers_from_string(s),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .flat_map(numbers_from_json_value)
+            .collect::<Vec<_>>(),
+        serde_json::Value::Object(map) => map
+            .values()
+            .flat_map(numbers_from_json_value)
+            .collect::<Vec<_>>(),
+        serde_json::Value::Bool(v) => vec![if *v { 1.0 } else { 0.0 }],
+        serde_json::Value::Null => Vec::new(),
+    }
+}
+
+fn string_from_json_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(v) => Some(if *v { "1".into() } else { "0".into() }),
+        serde_json::Value::Array(items) => {
+            let joined = items
+                .iter()
+                .filter_map(string_from_json_value)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        serde_json::Value::Object(map) => {
+            let joined = map
+                .values()
+                .filter_map(string_from_json_value)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        serde_json::Value::Null => None,
+    }
+}
+
+fn normalized_focus_region(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    kind: FocusKind,
+    is_primary: bool,
+) -> Option<FocusRegion> {
+    if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+        return None;
+    }
+
+    let mut nx = x;
+    let mut ny = y;
+    let mut nw = width.abs();
+    let mut nh = height.abs();
+
+    if nw <= 0.0 || nh <= 0.0 {
+        return None;
+    }
+    if nx < 0.0 {
+        nw += nx;
+        nx = 0.0;
+    }
+    if ny < 0.0 {
+        nh += ny;
+        ny = 0.0;
+    }
+    if nx >= 1.0 || ny >= 1.0 {
+        return None;
+    }
+
+    nw = nw.min(1.0 - nx);
+    nh = nh.min(1.0 - ny);
+    if nw < 0.001 || nh < 0.001 {
+        return None;
+    }
+
+    Some(FocusRegion {
+        x: nx,
+        y: ny,
+        width: nw,
+        height: nh,
+        kind,
+        is_primary,
+    })
+}
+
+fn focus_kind_from_mode(mode: Option<&str>) -> FocusKind {
+    let mode = mode.unwrap_or_default().to_lowercase();
+    if mode.contains("eye") {
+        FocusKind::Eye
+    } else if mode.contains("face") {
+        FocusKind::Face
+    } else if mode.contains("spot") || mode.contains("single") || mode.contains("flexible") {
+        FocusKind::Point
+    } else {
+        FocusKind::Area
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_exiftool_numeric_text() {
+        assert_eq!(numbers_from_string("640x480"), vec![640.0, 480.0]);
+        assert_eq!(
+            numbers_from_string("-120 40, 320"),
+            vec![-120.0, 40.0, 320.0]
+        );
+        assert_eq!(numbers_from_string("E9 (Center)"), vec![9.0]);
+    }
+
+    #[test]
+    fn clamps_normalized_focus_region_to_visible_image() {
+        let region = normalized_focus_region(-0.01, 0.25, 0.05, 0.1, FocusKind::Point, true)
+            .expect("partially visible region should be kept");
+        assert_eq!(region.x, 0.0);
+        assert!((region.width - 0.04).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn infers_focus_kind_from_af_mode() {
+        assert_eq!(
+            focus_kind_from_mode(Some("Eye Detection AF")),
+            FocusKind::Eye
+        );
+        assert_eq!(
+            focus_kind_from_mode(Some("Face + Tracking")),
+            FocusKind::Face
+        );
+        assert_eq!(
+            focus_kind_from_mode(Some("Flexible Spot")),
+            FocusKind::Point
+        );
+        assert_eq!(focus_kind_from_mode(Some("Zone AF")), FocusKind::Area);
+    }
+}
+
 fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, String> {
     let output = Command::new("exiftool")
         .arg("-j")
+        .arg("-Make")
+        .arg("-Model")
         .arg("-ImageWidth")
         .arg("-ImageHeight")
         .arg("-ImageSize")
         .arg("-Orientation")
         .arg("-FocusPixel")
+        .arg("-AFAreaXPosition")
+        .arg("-AFAreaYPosition")
+        .arg("-AFAreaXPositions")
+        .arg("-AFAreaYPositions")
+        .arg("-AFAreaWidth")
+        .arg("-AFAreaHeight")
+        .arg("-AFAreaWidths")
+        .arg("-AFAreaHeights")
+        .arg("-AFImageWidth")
+        .arg("-AFImageHeight")
+        .arg("-AFPointsInFocus")
+        .arg("-AFPointsSelected")
+        .arg("-PrimaryAFPoint")
+        .arg("-AFDetectionMethod")
         .arg("-FocalPlaneAFPointArea")
         .arg("-FocalPlaneAFPointsUsed")
         .arg("-FocalPlaneAFPointLocation1")
@@ -792,6 +1051,13 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
         .arg("-FocalPlaneAFPointLocation6")
         .arg("-FocalPlaneAFPointLocation7")
         .arg("-FocalPlaneAFPointLocation8")
+        .arg("-FocalPlaneAFPointLocation9")
+        .arg("-FocalPlaneAFPointLocation10")
+        .arg("-FocalPlaneAFPointLocation11")
+        .arg("-FocalPlaneAFPointLocation12")
+        .arg("-FocalPlaneAFPointLocation13")
+        .arg("-FocalPlaneAFPointLocation14")
+        .arg("-FocalPlaneAFPointLocation15")
         .arg("-FlexibleSpotPosition")
         .arg("-FocusLocation")
         .arg("-FocusFrameSize")
@@ -813,19 +1079,55 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
         None => return Err("exiftool 返回空结果".into()),
     };
 
-    let string_or = |key: &str| -> Option<String> {
-        entry.get(key)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+    let string_or =
+        |key: &str| -> Option<String> { entry.get(key).and_then(string_from_json_value) };
+    let numbers_or = |keys: &[&str]| -> Vec<f32> {
+        keys.iter()
+            .find_map(|key| {
+                let nums = entry
+                    .get(*key)
+                    .map(numbers_from_json_value)
+                    .unwrap_or_default();
+                (!nums.is_empty()).then_some(nums)
+            })
+            .unwrap_or_default()
     };
+    let first_number =
+        |keys: &[&str]| -> Option<f32> { numbers_or(keys).into_iter().find(|v| v.is_finite()) };
+    let dimensions_or =
+        |width_keys: &[&str], height_keys: &[&str], size_keys: &[&str]| -> Option<(f32, f32)> {
+            if let (Some(w), Some(h)) = (first_number(width_keys), first_number(height_keys))
+                && w > 0.0
+                && h > 0.0
+            {
+                return Some((w, h));
+            }
+            let size = numbers_or(size_keys);
+            if size.len() >= 2 && size[0] > 0.0 && size[1] > 0.0 {
+                Some((size[0], size[1]))
+            } else {
+                None
+            }
+        };
 
     let af_mode = string_or("AFAreaMode");
     let orientation = string_or("Orientation");
-    let rot_270 = matches!(orientation.as_deref(), Some("Rotate 270 CW"));
-    let rot_90 = matches!(orientation.as_deref(), Some("Rotate 90 CW"));
+    let orientation_lc = orientation.clone().unwrap_or_default().to_lowercase();
+    let orientation_num = first_number(&["Orientation"]).map(|v| v.round() as i32);
+    let rot_270 = orientation_lc.contains("rotate 270") || orientation_num == Some(8);
+    let rot_90 = orientation_lc.contains("rotate 90") || orientation_num == Some(6);
+    let make_lc = string_or("Make").unwrap_or_default().to_lowercase();
+    let model_lc = string_or("Model").unwrap_or_default().to_lowercase();
+    let is_canon = make_lc.contains("canon");
+    let is_nikon = make_lc.contains("nikon");
+    let is_powershot = model_lc.contains("powershot");
     log::info!(
-        "ExifTool: AFAreaMode={:?}, Orientation={:?}, path={}",
-        af_mode, orientation, source_path.display()
+        "ExifTool: Make={:?}, Model={:?}, AFAreaMode={:?}, Orientation={:?}, path={}",
+        string_or("Make"),
+        string_or("Model"),
+        af_mode,
+        orientation,
+        source_path.display()
     );
 
     // 传感器AF网格基于横拍, 竖拍时旋转坐标到显示空间
@@ -843,65 +1145,168 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
         }
     };
 
-    // ── 0. FocusPixel (像素坐标, 品牌通用 — Fujifilm/Canon/Nikon) ──
-    // FocusPixel 是 MakerNotes 中的原生像素坐标, 基准尺寸是 ImageSize
-    if let (Some(fpx), Some(isize)) = (string_or("FocusPixel"), string_or("ImageSize")) {
-        let img_parts: Vec<f32> = isize.split('x')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if img_parts.len() >= 2 && img_parts[0] > 0.0 && img_parts[1] > 0.0 {
-            let px_parts: Vec<f32> = fpx.split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            if px_parts.len() >= 2 && px_parts[0] > 0.0 && px_parts[1] > 0.0 {
-                let iw = img_parts[0];
-                let ih = img_parts[1];
-                let cx = px_parts[0] / iw;
-                let cy = px_parts[1] / ih;
-                let marker = 0.02;
-                let lx = (cx - marker).max(0.0);
-                let ly = (cy - marker).max(0.0);
-                let sz = 0.04;
-                if cx > 0.001 && cx < 0.999 && cy > 0.001 && cy < 0.999 {
-                    let (nx, ny, nw, nh) = apply_orientation(lx, ly, sz, sz);
+    // ── 0. FocusPixel (像素坐标, 品牌通用 — Fujifilm等) ──
+    // FocusPixel 基准是 EXIF ImageWidth/ImageHeight (非 MakerNotes ImageSize)
+    let focus_pixel = numbers_or(&["FocusPixel"]);
+    if focus_pixel.len() >= 2 {
+        if let Some((iw, ih)) = dimensions_or(&["ImageWidth"], &["ImageHeight"], &["ImageSize"]) {
+            let cx = focus_pixel[0] / iw;
+            let cy = focus_pixel[1] / ih;
+            let marker = 0.02;
+            let lx = cx - marker;
+            let ly = cy - marker;
+            let sz = 0.04;
+            if cx >= 0.0 && cx <= 1.0 && cy >= 0.0 && cy <= 1.0 {
+                let (nx, ny, nw, nh) = apply_orientation(lx, ly, sz, sz);
+                if let Some(region) =
+                    normalized_focus_region(nx, ny, nw, nh, FocusKind::Point, true)
+                {
                     log::info!(
                         "ExifTool FocusPixel → AF: px=({:.0},{:.0})/{:.0}x{:.0}, display=({:.4},{:.4})",
-                        px_parts[0], px_parts[1], iw, ih, nx + nw/2.0, ny + nh/2.0
+                        focus_pixel[0],
+                        focus_pixel[1],
+                        iw,
+                        ih,
+                        region.x + region.width / 2.0,
+                        region.y + region.height / 2.0
                     );
-                    return Ok(vec![FocusRegion {
-                        x: nx, y: ny,
-                        width: nw, height: nh,
-                        kind: FocusKind::Point,
-                        is_primary: true,
-                    }]);
+                    return Ok(vec![region]);
+                }
+            }
+        }
+    }
+
+    // ── 0b. AFArea (Canon CR2/NEF, 中心原点坐标) ──
+    // Canon AFAreaXPositions/YPositions 值为图像中心偏移量(负=左/上), 配合 AFImageWidth/Height
+    // Nikon AFAreaXPosition/YPosition 为左上角原点像素坐标
+    // AFPointsInFocus 为逗号分隔的索引(如 "35" 或 "0,1,2"), 指示哪些点合焦
+    if let Some((iw, ih)) = dimensions_or(&["AFImageWidth"], &["AFImageHeight"], &[]) {
+        let xpos = numbers_or(&["AFAreaXPositions"]);
+        let ypos = numbers_or(&["AFAreaYPositions"]);
+        let xpos_alt = numbers_or(&["AFAreaXPosition"]);
+        let ypos_alt = numbers_or(&["AFAreaYPosition"]);
+        let xp = if !xpos.is_empty() { xpos } else { xpos_alt };
+        let yp = if !ypos.is_empty() { ypos } else { ypos_alt };
+        let npts = xp.len().min(yp.len());
+
+        if npts > 0 {
+            let widths = numbers_or(&["AFAreaWidths", "AFAreaWidth"]);
+            let heights = numbers_or(&["AFAreaHeights", "AFAreaHeight"]);
+            let default_w = (iw * 0.04).max(1.0);
+            let default_h = (ih * 0.04).max(1.0);
+            let value_at = |values: &[f32], index: usize, default_value: f32| -> f32 {
+                values
+                    .get(index)
+                    .copied()
+                    .or_else(|| values.first().copied())
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .unwrap_or(default_value)
+            };
+
+            let focus_index_numbers = {
+                let nums = numbers_or(&["AFPointsInFocus"]);
+                if nums.is_empty() {
+                    numbers_or(&["AFPointsSelected", "PrimaryAFPoint"])
+                } else {
+                    nums
+                }
+            };
+            let raw_indices = focus_index_numbers
+                .iter()
+                .filter_map(|v| {
+                    if v.is_finite() && *v >= 0.0 {
+                        Some(v.round() as usize)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let mut focus_indices = raw_indices
+                .iter()
+                .copied()
+                .filter(|&i| i < npts)
+                .collect::<Vec<_>>();
+            if focus_indices.is_empty() && raw_indices.iter().all(|&i| i > 0 && i <= npts) {
+                focus_indices = raw_indices.iter().map(|i| i - 1).collect();
+            }
+            if focus_indices.is_empty() && npts == 1 {
+                focus_indices.push(0);
+            }
+
+            if !focus_indices.is_empty() {
+                let af_detection = string_or("AFDetectionMethod")
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let nikon_center_position = is_nikon && af_detection.contains("contrast");
+                let center_origin =
+                    is_canon || xp.iter().any(|&v| v < 0.0) || yp.iter().any(|&v| v < 0.0);
+                let kind = focus_kind_from_mode(af_mode.as_deref());
+                let mut regions = Vec::new();
+
+                for (rank, &fi) in focus_indices.iter().enumerate() {
+                    if fi >= npts {
+                        continue;
+                    }
+                    let pw = value_at(&widths, fi, default_w);
+                    let ph = value_at(&heights, fi, default_h);
+                    let half_w = pw / 2.0;
+                    let half_h = ph / 2.0;
+                    let x_off = xp[fi];
+                    let y_off = yp[fi];
+
+                    let (lx, ly) = if center_origin {
+                        let y = if is_canon && !is_powershot {
+                            ih / 2.0 - y_off - half_h
+                        } else {
+                            ih / 2.0 + y_off - half_h
+                        };
+                        (iw / 2.0 + x_off - half_w, y)
+                    } else if nikon_center_position {
+                        (x_off - half_w, y_off - half_h)
+                    } else {
+                        (x_off, y_off)
+                    };
+
+                    let (nx, ny, nw, nh) = apply_orientation(lx / iw, ly / ih, pw / iw, ph / ih);
+                    if let Some(region) =
+                        normalized_focus_region(nx, ny, nw, nh, kind.clone(), rank == 0)
+                    {
+                        regions.push(region);
+                    }
+                }
+
+                if !regions.is_empty() {
+                    log::info!(
+                        "ExifTool AFArea → AF: {} of {} pts, mode={:?}",
+                        regions.len(),
+                        npts,
+                        af_mode
+                    );
+                    return Ok(regions);
                 }
             }
         }
     }
 
     // ── 1. FlexibleSpotPosition (640×428 网格, 用户对焦点中心 → 输出左上角) ──
-    if let Some(fpos) = string_or("FlexibleSpotPosition") {
-        let parts: Vec<f32> = fpos.split_whitespace()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if parts.len() >= 2 && parts[0] > 0.0 && parts[1] > 0.0 {
-            let cx = parts[0] / 640.0;
-            let cy = parts[1] / 480.0;
-            let marker = 0.015;
-            let lx = (cx - marker).max(0.0);
-            let ly = (cy - marker).max(0.0);
-            if cx > 0.001 && cx < 0.999 && cy > 0.001 && cy < 0.999 {
-                let (nx, ny, nw, nh) = apply_orientation(lx, ly, 0.03, 0.03);
+    let flexible_spot = numbers_or(&["FlexibleSpotPosition"]);
+    if flexible_spot.len() >= 2 && flexible_spot[0] > 0.0 && flexible_spot[1] > 0.0 {
+        let cx = flexible_spot[0] / 640.0;
+        let cy = flexible_spot[1] / 480.0;
+        let marker = 0.015;
+        let lx = cx - marker;
+        let ly = cy - marker;
+        if cx > 0.001 && cx < 0.999 && cy > 0.001 && cy < 0.999 {
+            let (nx, ny, nw, nh) = apply_orientation(lx, ly, 0.03, 0.03);
+            if let Some(region) = normalized_focus_region(nx, ny, nw, nh, FocusKind::Point, true) {
                 log::info!(
                     "ExifTool FlexibleSpotPosition → AF: sensor=({:.4},{:.4}), display=({:.4},{:.4})",
-                    cx, cy, nx + nw/2.0, ny + nh/2.0
+                    cx,
+                    cy,
+                    region.x + region.width / 2.0,
+                    region.y + region.height / 2.0
                 );
-                return Ok(vec![FocusRegion {
-                    x: nx, y: ny,
-                    width: nw, height: nh,
-                    kind: FocusKind::Point,
-                    is_primary: true,
-                }]);
+                return Ok(vec![region]);
             }
         }
     }
@@ -909,24 +1314,16 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
     // ── 2. FocalPlaneAFPoint (640×428 网格, AF传感器区域 → 输出包围盒左上角) ──
     // grid_h 来自 ExifTool(FocalPlaneAFPointArea), 为物理428行
     // Y归一化必须用 norm_h=480(等效高度), 而非 grid_h=428
-    let grid_w: f32 = string_or("FocalPlaneAFPointArea")
-        .and_then(|s| {
-            let p: Vec<f32> = s.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-            if p.len() >= 2 { Some(p[0]) } else { None }
-        })
-        .unwrap_or(640.0);
+    let focal_plane_area = numbers_or(&["FocalPlaneAFPointArea"]);
+    let grid_w: f32 = focal_plane_area.first().copied().unwrap_or(640.0);
     let norm_h: f32 = 480.0;
 
     let mut af_points: Vec<(f32, f32)> = Vec::new();
-    for i in 1..=8 {
+    for i in 1..=15 {
         let key = format!("FocalPlaneAFPointLocation{}", i);
-        if let Some(val) = string_or(&key) {
-            let parts: Vec<f32> = val.split_whitespace()
-                .filter_map(|x| x.parse().ok())
-                .collect();
-            if parts.len() >= 2 && parts[0] > 0.0 && parts[1] > 0.0 {
-                af_points.push((parts[0], parts[1]));
-            }
+        let parts = numbers_or(&[key.as_str()]);
+        if parts.len() >= 2 && parts[0] > 0.0 && parts[1] > 0.0 {
+            af_points.push((parts[0], parts[1]));
         }
     }
 
@@ -944,58 +1341,67 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
 
         log::info!(
             "ExifTool FocalPlaneAFPoint → AF: sensor_tl=({:.0},{:.0})_{:.0}x480, {} pts, display=({:.4},{:.4},{:.4},{:.4})",
-            min_x, min_y, grid_w, af_points.len(), nx, ny, nw, nh
+            min_x,
+            min_y,
+            grid_w,
+            af_points.len(),
+            nx,
+            ny,
+            nw,
+            nh
         );
 
-        return Ok(vec![FocusRegion {
-            x: nx, y: ny,
-            width: nw, height: nh,
-            kind: FocusKind::Area,
-            is_primary: true,
-        }]);
+        if let Some(region) = normalized_focus_region(nx, ny, nw, nh, FocusKind::Area, true) {
+            return Ok(vec![region]);
+        }
     }
 
     // ── 3. FocusLocation (像素坐标系, 焦点框中心 → 输出左上角) ──
     // FocusLocation 基于 IFD ImageWidth/Height(传感器横拍), 竖拍需旋转
-    if let Some(floc) = string_or("FocusLocation") {
-        let parts: Vec<f32> = floc.split_whitespace()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if parts.len() >= 4 && parts[0] > 0.0 && parts[1] > 0.0 {
-            let img_w = parts[0];
-            let img_h = parts[1];
-            let fx = parts[2];
-            let fy = parts[3];
+    let focus_location = numbers_or(&["FocusLocation"]);
+    if focus_location.len() >= 4 && focus_location[0] > 0.0 && focus_location[1] > 0.0 {
+        let img_w = focus_location[0];
+        let img_h = focus_location[1];
+        let fx = focus_location[2];
+        let fy = focus_location[3];
 
-            let cenx = fx / img_w;
-            let ceny = fy / img_h;
+        let cenx = fx / img_w;
+        let ceny = fy / img_h;
 
-            let mut fw = 0.05;
-            let mut fh = 0.05;
-            if let Some(fsize) = string_or("FocusFrameSize") {
-                if let Some((ws, hs)) = fsize.split_once('x') {
-                    if let (Ok(ww), Ok(hh)) = (ws.parse::<f32>(), hs.parse::<f32>()) {
-                        fw = (ww / img_w).max(0.01);
-                        fh = (hh / img_h).max(0.01);
-                    }
-                }
-            }
+        let focus_frame_size = numbers_or(&["FocusFrameSize"]);
+        let fw = focus_frame_size
+            .first()
+            .map(|v| (*v / img_w).max(0.01))
+            .unwrap_or(0.05);
+        let fh = focus_frame_size
+            .get(1)
+            .map(|v| (*v / img_h).max(0.01))
+            .unwrap_or(0.05);
 
-            let lx = (cenx - fw / 2.0).max(0.0);
-            let ly = (ceny - fh / 2.0).max(0.0);
-            let (nx, ny, nw, nh) = apply_orientation(lx, ly, fw, fh);
+        let lx = cenx - fw / 2.0;
+        let ly = ceny - fh / 2.0;
+        let (nx, ny, nw, nh) = apply_orientation(lx, ly, fw, fh);
 
+        if let Some(region) = normalized_focus_region(
+            nx,
+            ny,
+            nw,
+            nh,
+            focus_kind_from_mode(af_mode.as_deref()),
+            true,
+        ) {
             log::info!(
                 "ExifTool FocusLocation → AF: sensor=({:.4},{:.4},{:.4},{:.4}), display=({:.4},{:.4},{:.4},{:.4})",
-                cenx, ceny, fw, fh, nx, ny, nw, nh
+                cenx,
+                ceny,
+                fw,
+                fh,
+                region.x,
+                region.y,
+                region.width,
+                region.height
             );
-
-            return Ok(vec![FocusRegion {
-                x: nx, y: ny,
-                width: nw, height: nh,
-                kind: FocusKind::Area,
-                is_primary: true,
-            }]);
+            return Ok(vec![region]);
         }
     }
 
@@ -1047,23 +1453,28 @@ pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegio
     // ── 2. 内置回退: 标准 EXIF SubjectArea / SubjectLocation ──
     let file_bytes = match read_file_mapped(&source_path) {
         Ok(mmap) => mmap.to_vec(),
-        Err(_) => std::fs::read(&source_path)
-            .map_err(|e| format!("无法读取文件: {}", e))?,
+        Err(_) => std::fs::read(&source_path).map_err(|e| format!("无法读取文件: {}", e))?,
     };
 
-    let raw_metadata = exif_processing::read_raw_metadata(&file_bytes)
-        .ok_or("不是 RAW 文件或元数据不可用")?;
+    let raw_metadata =
+        exif_processing::read_raw_metadata(&file_bytes).ok_or("不是 RAW 文件或元数据不可用")?;
 
     let (image_w, image_h) = if let (Some(w), Some(h)) = (params.image_width, params.image_height) {
         if w > 0 && h > 0 {
             (w as f32, h as f32)
         } else {
             let (ew, eh) = get_exif_dimensions(&file_bytes);
-            (if ew > 0 { ew as f32 } else { 6000.0 }, if eh > 0 { eh as f32 } else { 4000.0 })
+            (
+                if ew > 0 { ew as f32 } else { 6000.0 },
+                if eh > 0 { eh as f32 } else { 4000.0 },
+            )
         }
     } else {
         let (ew, eh) = get_exif_dimensions(&file_bytes);
-        (if ew > 0 { ew as f32 } else { 6000.0 }, if eh > 0 { eh as f32 } else { 4000.0 })
+        (
+            if ew > 0 { ew as f32 } else { 6000.0 },
+            if eh > 0 { eh as f32 } else { 4000.0 },
+        )
     };
 
     let regions = extract_subject_area(&file_bytes, image_w, image_h);
