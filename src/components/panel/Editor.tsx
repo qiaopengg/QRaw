@@ -17,7 +17,7 @@ import { useEditorStore } from '../../store/useEditorStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
-import { useShallow } from 'zustand/react/shallow';
+import { useShallow } from 'zustand/shallow';
 
 const parseRgb = (rgbStr: string): [number, number, number, number] => {
   const match = rgbStr.match(/[\d.]+/g);

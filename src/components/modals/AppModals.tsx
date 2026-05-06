@@ -1,4 +1,4 @@
-import { useShallow } from 'zustand/react/shallow';
+import { useShallow } from 'zustand/shallow';
 import { useUIStore } from '../../store/useUIStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useProcessStore } from '../../store/useProcessStore';

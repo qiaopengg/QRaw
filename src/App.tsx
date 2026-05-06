@@ -67,7 +67,7 @@ import { useLibraryStore } from './store/useLibraryStore';
 import { useEditorStore } from './store/useEditorStore';
 import { useProcessStore } from './store/useProcessStore';
 import { useTauriListeners } from './hooks/useTauriListeners';
-import { useShallow } from 'zustand/react/shallow';
+import { useShallow } from 'zustand/shallow';
 import { useAiMasking } from './hooks/useAiMasking';
 import { useImageProcessing } from './hooks/useImageProcessing';
 import AppModals from './components/modals/AppModals';
