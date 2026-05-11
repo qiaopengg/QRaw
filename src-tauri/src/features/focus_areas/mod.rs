@@ -2,10 +2,13 @@ use exif::{Tag, Value};
 use rawler::decoders::{RawDecodeParams, RawMetadata};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
-use std::process::Command;
+use std::env;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::exif_processing;
 use crate::file_management::{parse_virtual_path, read_file_mapped};
@@ -43,6 +46,102 @@ pub enum FocusKind {
     Area,
     Face,
     Eye,
+}
+
+fn apply_orientation_to_box(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    orientation: u16,
+) -> (f32, f32, f32, f32) {
+    match orientation {
+        2 => (1.0 - x - width, y, width, height),
+        3 => (1.0 - x - width, 1.0 - y - height, width, height),
+        4 => (x, 1.0 - y - height, width, height),
+        5 => (1.0 - y - height, 1.0 - x - width, height, width),
+        6 => (1.0 - y - height, x, height, width),
+        7 => (y, x, height, width),
+        8 => (y, 1.0 - x - width, height, width),
+        _ => (x, y, width, height),
+    }
+}
+
+fn orientation_from_value(value: &Value) -> Option<u16> {
+    match value {
+        Value::Short(vals) if !vals.is_empty() => Some(vals[0]),
+        Value::Long(vals) if !vals.is_empty() => u16::try_from(vals[0]).ok(),
+        _ => None,
+    }
+}
+
+fn get_exif_orientation(file_bytes: &[u8]) -> u16 {
+    parse_tiff_exif_fields(file_bytes)
+        .and_then(|fields| {
+            find_field_value(&fields, Tag::Orientation).and_then(orientation_from_value)
+        })
+        .filter(|code| (1..=8).contains(code))
+        .unwrap_or(1)
+}
+
+fn orientation_from_exiftool_text(orientation: Option<&str>) -> u16 {
+    let text = orientation.unwrap_or_default().trim();
+    if let Ok(code) = text.parse::<u16>()
+        && (1..=8).contains(&code)
+    {
+        return code;
+    }
+
+    let lower = text.to_lowercase();
+    let nums = numbers_from_string(text);
+    if nums.len() == 1 {
+        let code = nums[0].round() as u16;
+        if (1..=8).contains(&code) && !lower.contains("rotate") {
+            return code;
+        }
+    }
+
+    let mirror_horizontal =
+        lower.contains("mirror horizontal") || lower.contains("mirrored horizontal");
+    let mirror_vertical = lower.contains("mirror vertical") || lower.contains("mirrored vertical");
+    let rotate_270 = lower.contains("rotate 270");
+    let rotate_180 = lower.contains("rotate 180");
+    let rotate_90 = lower.contains("rotate 90");
+
+    if mirror_horizontal && rotate_270 {
+        5
+    } else if mirror_horizontal && rotate_90 {
+        7
+    } else if rotate_270 {
+        8
+    } else if rotate_90 {
+        6
+    } else if rotate_180 {
+        3
+    } else if mirror_horizontal {
+        2
+    } else if mirror_vertical {
+        4
+    } else {
+        1
+    }
+}
+
+fn orient_focus_region(region: FocusRegion, orientation: u16) -> Option<FocusRegion> {
+    let (x, y, width, height) =
+        apply_orientation_to_box(region.x, region.y, region.width, region.height, orientation);
+    normalized_focus_region(x, y, width, height, region.kind.clone(), region.is_primary)
+}
+
+fn orient_focus_regions(regions: Vec<FocusRegion>, orientation: u16) -> Vec<FocusRegion> {
+    if orientation <= 1 {
+        return regions;
+    }
+
+    regions
+        .into_iter()
+        .filter_map(|region| orient_focus_region(region, orientation))
+        .collect()
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -786,7 +885,6 @@ impl FocusAdapter for NikonAdapter {
 #[derive(Clone, Debug)]
 struct CacheEntry {
     regions: Vec<FocusRegion>,
-    #[allow(dead_code)]
     modified: SystemTime,
 }
 
@@ -804,18 +902,29 @@ impl FocusCache {
             max_size,
         }
     }
-    pub fn get(&self, key: &str) -> Option<Vec<FocusRegion>> {
-        self.cache
-            .lock()
-            .unwrap()
-            .get(key)
-            .map(|e| e.regions.clone())
+    pub fn get(&self, key: &str, modified: SystemTime) -> Option<Vec<FocusRegion>> {
+        let mut cache = self.cache.lock().unwrap();
+        match cache.get(key) {
+            Some(entry) if entry.modified == modified => Some(entry.regions.clone()),
+            Some(_) => {
+                cache.remove(key);
+                drop(cache);
+
+                let mut order = self.order.lock().unwrap();
+                if let Some(pos) = order.iter().position(|k| k == key) {
+                    order.remove(pos);
+                }
+                None
+            }
+            None => None,
+        }
     }
-    pub fn insert(&self, key: String, regions: Vec<FocusRegion>) {
+    pub fn insert(&self, key: String, regions: Vec<FocusRegion>, modified: SystemTime) {
         let mut cache = self.cache.lock().unwrap();
         let mut order = self.order.lock().unwrap();
         if let Some(pos) = order.iter().position(|k| k == &key) {
             order.remove(pos);
+            cache.remove(&key);
         }
         if cache.len() >= self.max_size {
             if let Some(oldest) = order.pop_front() {
@@ -823,13 +932,7 @@ impl FocusCache {
             }
         }
         order.push_back(key.clone());
-        cache.insert(
-            key,
-            CacheEntry {
-                regions,
-                modified: SystemTime::now(),
-            },
-        );
+        cache.insert(key, CacheEntry { regions, modified });
     }
     #[allow(dead_code)]
     pub fn invalidate(&self, key: &str) {
@@ -977,6 +1080,150 @@ fn focus_kind_from_mode(mode: Option<&str>) -> FocusKind {
     }
 }
 
+const EXIFTOOL_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Debug)]
+struct TimedCommandOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn exiftool_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    for var in ["RAPIDRAW_EXIFTOOL", "EXIFTOOL_PATH"] {
+        if let Some(value) = env::var_os(var) {
+            push_unique_path(&mut candidates, PathBuf::from(value));
+        }
+    }
+
+    if let Ok(exe_path) = env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        for name in ["exiftool", "exiftool.exe"] {
+            push_unique_path(&mut candidates, exe_dir.join(name));
+        }
+        if let Some(contents_dir) = exe_dir.parent()
+            && contents_dir
+                .file_name()
+                .is_some_and(|name| name == "Contents")
+        {
+            for name in ["exiftool", "exiftool.exe"] {
+                push_unique_path(&mut candidates, contents_dir.join("Resources").join(name));
+            }
+        }
+    }
+
+    for path in [
+        "/opt/homebrew/bin/exiftool",
+        "/usr/local/bin/exiftool",
+        "/usr/bin/exiftool",
+        "C:\\Program Files\\ExifTool\\exiftool.exe",
+    ] {
+        push_unique_path(&mut candidates, PathBuf::from(path));
+    }
+
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            for name in ["exiftool", "exiftool.exe"] {
+                push_unique_path(&mut candidates, dir.join(name));
+            }
+        }
+    }
+
+    candidates
+}
+
+fn probe_exiftool(path: &Path) -> bool {
+    Command::new(path)
+        .arg("-ver")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn resolve_exiftool_path() -> Result<PathBuf, String> {
+    static EXIFTOOL_PATH: once_cell::sync::Lazy<Option<PathBuf>> =
+        once_cell::sync::Lazy::new(|| {
+            exiftool_candidates()
+                .into_iter()
+                .find(|path| probe_exiftool(path))
+        });
+
+    EXIFTOOL_PATH.as_ref().cloned().ok_or_else(|| {
+        "未找到 exiftool，请安装 ExifTool 或通过 RAPIDRAW_EXIFTOOL/EXIFTOOL_PATH 指定路径"
+            .to_string()
+    })
+}
+
+fn read_child_pipe<R>(mut pipe: R) -> thread::JoinHandle<Vec<u8>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = pipe.read_to_end(&mut buffer);
+        buffer
+    })
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<TimedCommandOutput, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("exiftool 进程启动失败: {}", e))?;
+    let stdout_handle = child.stdout.take().map(read_child_pipe);
+    let stderr_handle = child.stderr.take().map(read_child_pipe);
+    let started_at = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = stdout_handle
+                    .and_then(|handle| handle.join().ok())
+                    .unwrap_or_default();
+                let stderr = stderr_handle
+                    .and_then(|handle| handle.join().ok())
+                    .unwrap_or_default();
+                return Ok(TimedCommandOutput {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) if started_at.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(handle) = stdout_handle {
+                    let _ = handle.join();
+                }
+                if let Some(handle) = stderr_handle {
+                    let _ = handle.join();
+                }
+                return Err(format!("exiftool 超时超过 {} 秒", timeout.as_secs()));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("exiftool 状态检查失败: {}", e));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1015,10 +1262,80 @@ mod tests {
         );
         assert_eq!(focus_kind_from_mode(Some("Zone AF")), FocusKind::Area);
     }
+
+    #[test]
+    fn maps_all_exif_orientation_boxes() {
+        let source = (0.1, 0.2, 0.3, 0.4);
+        let cases = [
+            (1, (0.1, 0.2, 0.3, 0.4)),
+            (2, (0.6, 0.2, 0.3, 0.4)),
+            (3, (0.6, 0.4, 0.3, 0.4)),
+            (4, (0.1, 0.4, 0.3, 0.4)),
+            (5, (0.4, 0.6, 0.4, 0.3)),
+            (6, (0.4, 0.1, 0.4, 0.3)),
+            (7, (0.2, 0.1, 0.4, 0.3)),
+            (8, (0.2, 0.6, 0.4, 0.3)),
+        ];
+
+        for (orientation, expected) in cases {
+            let actual =
+                apply_orientation_to_box(source.0, source.1, source.2, source.3, orientation);
+            assert!((actual.0 - expected.0).abs() < 0.0001, "{orientation}: x");
+            assert!((actual.1 - expected.1).abs() < 0.0001, "{orientation}: y");
+            assert!(
+                (actual.2 - expected.2).abs() < 0.0001,
+                "{orientation}: width"
+            );
+            assert!(
+                (actual.3 - expected.3).abs() < 0.0001,
+                "{orientation}: height"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_exiftool_orientation_text() {
+        assert_eq!(orientation_from_exiftool_text(Some("6")), 6);
+        assert_eq!(orientation_from_exiftool_text(Some("Rotate 90 CW")), 6);
+        assert_eq!(orientation_from_exiftool_text(Some("Rotate 270 CW")), 8);
+        assert_eq!(orientation_from_exiftool_text(Some("Rotate 180")), 3);
+        assert_eq!(orientation_from_exiftool_text(Some("Mirror horizontal")), 2);
+        assert_eq!(
+            orientation_from_exiftool_text(Some("Mirror horizontal and rotate 270 CW")),
+            5
+        );
+        assert_eq!(
+            orientation_from_exiftool_text(Some("Horizontal (normal)")),
+            1
+        );
+    }
+
+    #[test]
+    fn invalidates_cache_when_file_modified_time_changes() {
+        let cache = FocusCache::new(10);
+        let key = "focus_sample".to_string();
+        let first_modified = UNIX_EPOCH + Duration::from_secs(10);
+        let second_modified = UNIX_EPOCH + Duration::from_secs(20);
+        let regions = vec![FocusRegion {
+            x: 0.1,
+            y: 0.2,
+            width: 0.03,
+            height: 0.03,
+            kind: FocusKind::Point,
+            is_primary: true,
+        }];
+
+        cache.insert(key.clone(), regions.clone(), first_modified);
+        assert_eq!(cache.get(&key, first_modified).unwrap().len(), 1);
+        assert!(cache.get(&key, second_modified).is_none());
+        assert!(cache.get(&key, first_modified).is_none());
+    }
 }
 
 fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, String> {
-    let output = Command::new("exiftool")
+    let exiftool_path = resolve_exiftool_path()?;
+    let mut command = Command::new(exiftool_path);
+    command
         .arg("-j")
         .arg("-Make")
         .arg("-Model")
@@ -1062,9 +1379,9 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
         .arg("-FocusLocation")
         .arg("-FocusFrameSize")
         .arg("-AFAreaMode")
-        .arg(source_path)
-        .output()
-        .map_err(|e| format!("exiftool 进程启动失败: {}", e))?;
+        .arg(source_path);
+
+    let output = run_command_with_timeout(command, EXIFTOOL_TIMEOUT)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1112,37 +1429,24 @@ fn try_extract_via_exiftool(source_path: &Path) -> Result<Vec<FocusRegion>, Stri
 
     let af_mode = string_or("AFAreaMode");
     let orientation = string_or("Orientation");
-    let orientation_lc = orientation.clone().unwrap_or_default().to_lowercase();
-    let orientation_num = first_number(&["Orientation"]).map(|v| v.round() as i32);
-    let rot_270 = orientation_lc.contains("rotate 270") || orientation_num == Some(8);
-    let rot_90 = orientation_lc.contains("rotate 90") || orientation_num == Some(6);
+    let orientation_code = orientation_from_exiftool_text(orientation.as_deref());
     let make_lc = string_or("Make").unwrap_or_default().to_lowercase();
     let model_lc = string_or("Model").unwrap_or_default().to_lowercase();
     let is_canon = make_lc.contains("canon");
     let is_nikon = make_lc.contains("nikon");
     let is_powershot = model_lc.contains("powershot");
     log::info!(
-        "ExifTool: Make={:?}, Model={:?}, AFAreaMode={:?}, Orientation={:?}, path={}",
+        "ExifTool: Make={:?}, Model={:?}, AFAreaMode={:?}, Orientation={:?}({}), path={}",
         string_or("Make"),
         string_or("Model"),
         af_mode,
         orientation,
+        orientation_code,
         source_path.display()
     );
 
-    // 传感器AF网格基于横拍, 竖拍时旋转坐标到显示空间
-    // Rotate 270 CW: 传感器横轴上端→显示右端, 传感器纵轴不变方向→显示横轴
-    //   (x,y,w,h) → (y, 1-x-w, h, w)
-    // Rotate 90 CW: 传感器横轴下端→显示右端, 传感器纵轴翻转→显示横轴
-    //   (x,y,w,h) → (1-y-h, x, h, w)
     let apply_orientation = |x: f32, y: f32, w: f32, h: f32| -> (f32, f32, f32, f32) {
-        if rot_270 {
-            (y, 1.0 - x - w, h, w)
-        } else if rot_90 {
-            (1.0 - y - h, x, h, w)
-        } else {
-            (x, y, w, h)
-        }
+        apply_orientation_to_box(x, y, w, h, orientation_code)
     };
 
     // ── 0. FocusPixel (像素坐标, 品牌通用 — Fujifilm等) ──
@@ -1428,8 +1732,11 @@ pub struct GetFocusRegionsParams {
 pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegion>, String> {
     let (source_path, _sidecar) = parse_virtual_path(&params.path);
     let cache_key = format!("focus_{}", source_path.to_string_lossy());
+    let file_modified = std::fs::metadata(&source_path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(UNIX_EPOCH);
 
-    if let Some(cached) = FOCUS_CACHE.get(&cache_key) {
+    if let Some(cached) = FOCUS_CACHE.get(&cache_key, file_modified) {
         log::debug!("对焦区域缓存命中: {:?}", source_path);
         return Ok(cached);
     }
@@ -1438,7 +1745,7 @@ pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegio
     match try_extract_via_exiftool(&source_path) {
         Ok(regions) if !regions.is_empty() => {
             log::info!("ExifTool → {} 个对焦区域", regions.len());
-            FOCUS_CACHE.insert(cache_key, regions.clone());
+            FOCUS_CACHE.insert(cache_key, regions.clone(), file_modified);
             return Ok(regions);
         }
         Ok(_) => {
@@ -1450,47 +1757,55 @@ pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegio
     }
 
     // ── 2. 内置回退: 标准 EXIF SubjectArea / SubjectLocation ──
-    let file_bytes = match read_file_mapped(&source_path) {
-        Ok(mmap) => mmap.to_vec(),
-        Err(_) => std::fs::read(&source_path).map_err(|e| format!("无法读取文件: {}", e))?,
+    let mapped_bytes = read_file_mapped(&source_path).ok();
+    let owned_bytes;
+    let file_bytes: &[u8] = if let Some(ref mmap) = mapped_bytes {
+        &mmap[..]
+    } else {
+        owned_bytes = std::fs::read(&source_path).map_err(|e| format!("无法读取文件: {}", e))?;
+        &owned_bytes
     };
 
     let raw_metadata =
-        exif_processing::read_raw_metadata(&file_bytes).ok_or("不是 RAW 文件或元数据不可用")?;
+        exif_processing::read_raw_metadata(file_bytes).ok_or("不是 RAW 文件或元数据不可用")?;
 
-    let (image_w, image_h) = if let (Some(w), Some(h)) = (params.image_width, params.image_height) {
+    let orientation_code = get_exif_orientation(file_bytes);
+    let (exif_w, exif_h) = get_exif_dimensions(file_bytes);
+    let swaps_axes = matches!(orientation_code, 5 | 6 | 7 | 8);
+    let (image_w, image_h) = if exif_w > 0 && exif_h > 0 {
+        (exif_w as f32, exif_h as f32)
+    } else if let (Some(w), Some(h)) = (params.image_width, params.image_height) {
         if w > 0 && h > 0 {
-            (w as f32, h as f32)
+            if swaps_axes {
+                (h as f32, w as f32)
+            } else {
+                (w as f32, h as f32)
+            }
         } else {
-            let (ew, eh) = get_exif_dimensions(&file_bytes);
-            (
-                if ew > 0 { ew as f32 } else { 6000.0 },
-                if eh > 0 { eh as f32 } else { 4000.0 },
-            )
+            (6000.0, 4000.0)
         }
     } else {
-        let (ew, eh) = get_exif_dimensions(&file_bytes);
-        (
-            if ew > 0 { ew as f32 } else { 6000.0 },
-            if eh > 0 { eh as f32 } else { 4000.0 },
-        )
+        (6000.0, 4000.0)
     };
 
-    let regions = extract_subject_area(&file_bytes, image_w, image_h);
+    let regions = orient_focus_regions(
+        extract_subject_area(file_bytes, image_w, image_h),
+        orientation_code,
+    );
     if !regions.is_empty() {
         log::info!("内置 SubjectArea → {} 个对焦区域", regions.len());
-        FOCUS_CACHE.insert(cache_key, regions.clone());
+        FOCUS_CACHE.insert(cache_key, regions.clone(), file_modified);
         return Ok(regions);
     }
 
     // ── 3. 内置回退: MakerNote 品牌特定 AF 标签 ──
     let mut regions = Vec::new();
-    let maker_note = extract_makernote_tiff(&file_bytes);
+    let maker_note = extract_makernote_tiff(file_bytes);
 
     if let Some(ref mn) = maker_note {
         let ifd = parse_makernote_ifd(mn);
         if !ifd.is_empty() {
-            let native_sensor = read_native_sensor_size(&file_bytes);
+            let native_sensor = read_native_sensor_size(file_bytes);
             let (sensor_w, sensor_h) = native_sensor.unwrap_or((0, 0));
 
             if SonyAdapter::supports(&raw_metadata) {
@@ -1503,13 +1818,15 @@ pub fn get_focus_regions(params: GetFocusRegionsParams) -> Result<Vec<FocusRegio
         }
     }
 
+    let regions = orient_focus_regions(regions, orientation_code);
     if !regions.is_empty() {
         log::info!("内置 MakerNote → {} 个对焦区域", regions.len());
-        FOCUS_CACHE.insert(cache_key, regions.clone());
+        FOCUS_CACHE.insert(cache_key, regions.clone(), file_modified);
         return Ok(regions);
     }
 
     // ── 4. 不支持的相机 → 静默返回空 ──
     log::info!("{} {} → 无对焦数据", raw_metadata.make, raw_metadata.model);
+    FOCUS_CACHE.insert(cache_key, Vec::new(), file_modified);
     Ok(Vec::new())
 }

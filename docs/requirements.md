@@ -2,7 +2,7 @@
 
 ## 简介
 
-本文档规定了 RapidRAW 图像编辑器中**相机对焦区域标注功能**的需求。该功能使摄影师能够通过从 RAW 文件中提取对焦点元数据并将其作为叠加层渲染在图像画布上,来可视化相机捕获的实际对焦区域。这是一个元数据驱动的功能,不使用 AI 推理,仅支持 RAW 文件格式。
+本文档规定了 QRaw 在 `CyberTimon/RapidRAW` 基础上二次开发的**相机对焦区域标注功能**需求。该功能通过从 RAW 文件中提取对焦点元数据,并将其作为叠加层渲染在图像画布上,帮助摄影师可视化相机拍摄时捕获的实际对焦区域。这是一个元数据驱动的功能,不使用 AI 推理,主要面向 RAW 文件格式。
 
 该功能满足了摄影师了解相机在拍摄时对焦位置的需求,这对于检查对焦准确性、理解自动对焦行为和改进拍摄技术非常有价值。
 
@@ -11,12 +11,14 @@
 - **对焦区域提取器 (Focus_Region_Extractor)**: 负责解析 RAW 文件元数据并提取对焦点信息的后端 Rust 组件
 - **对焦叠加层渲染器 (Focus_Overlay_Renderer)**: 负责将对焦区域作为视觉叠加层渲染在图像画布上的前端 React/Konva 组件
 - **对焦适配器 (Focus_Adapter)**: 基于 trait 的抽象,定义了从不同相机制造商提取对焦元数据的相机特定逻辑
+- **二开 Feature (Custom_Feature)**: 位于 `src/features/<feature-name>/` 和 `src-tauri/src/features/<feature-name>/` 的独立二次开发模块
+- **Feature 插槽 (Feature_Slot)**: 上游组件暴露给二开功能的通用挂载点,例如工具栏按钮插槽和画布叠加层插槽
 - **归一化坐标 (Normalized_Coordinates)**: 对焦区域坐标表示为 0.0 到 1.0 之间的浮点值,相对于完整图像尺寸
 - **变换管道 (Transform_Pipeline)**: 应用于图像和对焦区域的几何变换序列(EXIF 旋转、用户旋转、翻转、裁剪)
 - **制造商备注 (MakerNotes)**: 特定于每个相机制造商的专有 EXIF 元数据字段,包含对焦点信息
 - **对焦类型 (Focus_Kind)**: 对焦区域的类型(点、区域、人脸、眼睛)
 - **主对焦点 (Primary_Focus_Point)**: 相机或摄影师选择的主要对焦点
-- **RAW 文件 (RAW_File)**: 未处理的图像文件格式(例如 ARW、CR2、NEF),包含传感器数据和完整元数据
+- **RAW 文件 (RAW_File)**: 未处理的图像文件格式(例如 ARW、CR2、CR3、NEF、NRW、RAF、ORF、RW2、DNG),包含传感器数据和完整元数据
 
 ## 需求
 
@@ -26,7 +28,7 @@
 
 #### 验收标准
 
-1. 当加载 RAW 文件时,对焦区域提取器应使用现有的 `kamadak-exif` 和 `rawler` 库解析文件
+1. 当加载 RAW 文件时,对焦区域提取器应优先使用 ExifTool 获取常见厂商对焦标签,并使用 `kamadak-exif`、`rawler` 作为内置回退解析能力
 2. 当成功提取对焦元数据时,对焦区域提取器应返回具有归一化坐标(0.0-1.0 范围)的对焦区域列表
 3. 当不支持相机制造商时,对焦区域提取器应返回错误消息,指示不支持的制造商和型号
 4. 当 RAW 文件不包含对焦元数据时,对焦区域提取器应返回空列表
@@ -35,16 +37,15 @@
 
 ### 需求 2: 支持多个相机制造商
 
-**用户故事:** 作为使用不同相机品牌的摄影师,我希望系统支持来自 Sony、Canon 和 Nikon 相机的对焦元数据,以便无论我使用哪个相机品牌都可以使用此功能。
+**用户故事:** 作为使用不同相机品牌的摄影师,我希望系统支持 Sony、Canon、Nikon、Fujifilm 等常见相机 RAW 的对焦元数据,以便无论我使用哪个主流相机品牌都可以使用此功能。
 
 #### 验收标准
 
-1. 对焦区域提取器应实现一个 Focus_Adapter trait,定义相机特定提取逻辑的通用接口
-2. 对焦区域提取器应提供 Sony_Adapter 实现,从 Sony RAW 文件中提取对焦元数据
-3. 当启用 Canon 支持时,对焦区域提取器应提供 Canon_Adapter 实现
-4. 当启用 Nikon 支持时,对焦区域提取器应提供 Nikon_Adapter 实现
-5. 当选择适配器时,对焦区域提取器应从 EXIF `Make` 字段匹配相机制造商
-6. 当没有适配器匹配相机制造商时,对焦区域提取器应返回包含不支持制造商名称的错误
+1. 对焦区域提取器应支持 Sony、Canon、Nikon 等常见厂商的公开或可由 ExifTool 解析的对焦标签
+2. 当 ExifTool 无法返回可用坐标时,对焦区域提取器应回退到标准 EXIF `SubjectArea` / `SubjectLocation`
+3. 当标准 EXIF 也不可用时,对焦区域提取器可回退到内置 MakerNote 品牌解析逻辑
+4. 当无法提取对焦信息时,对焦区域提取器应返回空列表或清晰错误,不得导致前端崩溃
+5. 新增厂商支持时,真实实现必须位于 `src-tauri/src/features/focus_areas/`
 
 ### 需求 3: 表示对焦区域数据
 
@@ -69,6 +70,7 @@
 3. 当提取失败时,`get_focus_regions` 命令应返回描述失败原因的错误字符串
 4. `get_focus_regions` 命令应通过 `parse_virtual_path` 提取源文件路径（返回 `(source_path, sidecar_path)` 元组，忽略 sidecar）来处理虚拟副本路径
 5. 当多次请求同一文件时,对焦区域提取器应缓存解析结果以避免冗余解析
+6. `src-tauri/src/lib.rs` 只允许注册 `features::get_focus_regions`,不得直接实现对焦提取业务逻辑
 
 ### 需求 5: 切换对焦区域显示
 
@@ -76,8 +78,8 @@
 
 #### 验收标准
 
-1. 编辑器工具栏应提供带有目标图标的"显示对焦区域"按钮
-2. 当单击按钮时,编辑器工具栏应切换 `showFocusAreas` 状态
+1. `src/features/focus-areas/` 应通过工具栏 feature 插槽提供带有目标图标的"显示对焦区域"按钮
+2. 当单击按钮时,`useFocusAreas` 应切换 `showFocusAreas` 状态
 3. 当 `showFocusAreas` 状态为 true 时,按钮应显示为活动/高亮外观
 4. 当 `showFocusAreas` 状态为 false 时,按钮应显示为非活动外观
 5. 按钮应显示工具提示,在非活动时指示"显示对焦区域 (Shift+F)",在活动时指示"隐藏对焦区域 (Shift+F)"
@@ -89,8 +91,8 @@
 
 #### 验收标准
 
-1. 当 `showFocusAreas` 更改为 true 时,系统应使用当前图像路径调用 `get_focus_regions` Tauri 命令
-2. 当成功加载对焦区域时,系统应将它们存储在 `focusRegions` 状态中
+1. 当 `showFocusAreas` 更改为 true 时,`useFocusAreas` 应使用当前图像路径调用 `get_focus_regions` Tauri 命令
+2. 当成功加载对焦区域时,`useFocusAreas` 应将它们存储在 `focusRegions` 状态中
 3. 当对焦区域加载失败时,系统应显示带有错误消息的 toast 通知
 4. 当 `showFocusAreas` 更改为 false 时,系统应清除 `focusRegions` 状态
 5. 当所选图像更改时,如果 `showFocusAreas` 为 true,系统应重新加载对焦区域
@@ -104,9 +106,9 @@
 
 1. 对焦叠加层渲染器应实现 `transformFocusPoint` 函数,将所有活动变换应用于对焦坐标
 2. `transformFocusPoint` 函数应首先应用 EXIF 方向旋转(基于 `orientationSteps` 的 0°、90°、180°、270°)
-3. `transformFocusPoint` 函数应其次应用用户旋转(来自 `adjustments.rotation` 的任意角度)
-4. `transformFocusPoint` 函数应第三应用水平翻转(如果 `adjustments.flipHorizontal` 为 true)
-5. `transformFocusPoint` 函数应第四应用垂直翻转(如果 `adjustments.flipVertical` 为 true)
+3. `transformFocusPoint` 函数应其次应用水平翻转(如果 `adjustments.flipHorizontal` 为 true)
+4. `transformFocusPoint` 函数应第三应用垂直翻转(如果 `adjustments.flipVertical` 为 true)
+5. `transformFocusPoint` 函数应第四应用用户旋转(来自 `adjustments.rotation` 的任意角度)
 6. `transformFocusPoint` 函数应第五应用裁剪偏移(从对焦坐标中减去裁剪 x/y)
 7. `transformFocusPoint` 函数应最后应用画布缩放(乘以当前缩放比例)
 8. 对于所有变换,函数应将坐标精度保持在预期位置的 2 像素内
@@ -117,7 +119,7 @@
 
 #### 验收标准
 
-1. 当 `showFocusAreas` 为 true 且 `focusRegions` 不为空时,对焦叠加层渲染器应为每个对焦区域渲染一个 Konva Rect
+1. 当 `showFocusAreas` 为 true 且 `focusRegions` 不为空时,`FocusAreasOverlay` 应为每个对焦区域渲染一个 Konva Rect
 2. 当对焦区域是主对焦点时,对焦叠加层渲染器应使用红色描边 (#ef4444) 渲染它
 3. 当对焦区域类型为 Face 时,对焦叠加层渲染器应使用绿色描边 (#22c55e) 渲染它
 4. 当对焦区域类型为 Eye 时,对焦叠加层渲染器应使用蓝色描边 (#3b82f6) 渲染它
@@ -170,10 +172,10 @@
 
 #### 验收标准
 
-1. 对焦叠加层渲染器应在与其他图像叠加层相同的 Konva Layer 中渲染对焦叠加层
-2. 对焦叠加层渲染器应在图像上方但在交互元素(蒙版、裁剪手柄)下方渲染对焦叠加层
-3. 对焦叠加层渲染代码应遵循 ImageCanvas.tsx 中现有叠加层代码的相同模式
-4. 对焦区域切换按钮应遵循 EditorToolbar.tsx 中其他工具栏按钮的相同样式模式
+1. 对焦叠加层应通过 `imageCanvasOverlays` feature 插槽接入,而不是直接写入 `ImageCanvas.tsx`
+2. 对焦叠加层渲染器应在图像上方但不拦截鼠标或触控事件
+3. 对焦叠加层渲染代码应集中在 `src/features/focus-areas/FocusAreasOverlay.tsx`
+4. 对焦区域切换按钮应集中在 `src/features/focus-areas/FocusAreaToolbarButton.tsx`,并通过 `toolbarControls` 插槽接入
 
 ### 需求 13: 处理坐标变换中的边界情况
 
@@ -211,3 +213,18 @@
 3. 前端应将 TypeScript 类型 `FocusKind` 定义为 "point" | "area" | "face" | "eye" 的联合
 4. `invoke<FocusRegion[]>` 调用应使用泛型类型参数以确保类型安全
 5. 如果使用不正确的属性名称访问对焦区域数据,TypeScript 编译器应报告错误
+
+### 需求 16: 保持二开功能非侵入式管理
+
+**用户故事:** 作为维护者,我希望对焦区域标注作为独立 feature 管理,以便后续同步 CyberTimon/RapidRAW 上游更新时尽量减少冲突。
+
+#### 验收标准
+
+1. 前端主体实现应集中在 `src/features/focus-areas/`
+2. Rust 主体实现应集中在 `src-tauri/src/features/focus_areas/`
+3. `App.tsx` 只允许通过 `useAppFeatures` 接入二开 feature
+4. `Editor.tsx`、`EditorToolbar.tsx`、`ImageCanvas.tsx` 只允许保留通用 feature slot,不得包含对焦业务逻辑
+5. 快捷键定义应由 feature 目录声明,再通过 `src/features/keybindDefinitions.ts` 聚合
+6. `useKeyboardShortcuts.tsx` 只允许合并通用 `extraActions`,不得写死对焦区域动作
+7. 不得新建或恢复 `src-tauri/src/focus_extraction.rs`
+8. 全局扫描排除 feature 目录后,对焦相关关键字只应出现在统一入口、通用插槽或文档中
