@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
+import { toast } from 'react-toastify';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useEditorStore } from '../store/useEditorStore';
 import { useUIStore } from '../store/useUIStore';
@@ -9,14 +10,12 @@ import { useProcessStore } from '../store/useProcessStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { Invokes, LibraryViewMode, ImageFile } from '../components/ui/AppProperties';
 import { INITIAL_ADJUSTMENTS, normalizeLoadedAdjustments } from '../utils/adjustments';
+import { globalImageCache } from '../utils/ImageLRUCache';
+import { debouncedSave, debouncedSetHistory } from './useEditorActions';
 
 export interface AppNavigationProps {
-  setError: (msg: string | null) => void;
   clearThumbnailQueue: () => void;
-  debouncedSave: any;
-  debouncedSetHistory: any;
   refs: {
-    imageCacheRef: React.RefObject<any>;
     transformWrapperRef: React.RefObject<any>;
     preloadedDataRef: React.RefObject<any>;
     cachedEditStateRef: React.RefObject<any>;
@@ -29,15 +28,8 @@ export interface AppNavigationProps {
   };
 }
 
-export function useAppNavigation({
-  setError,
-  clearThumbnailQueue,
-  debouncedSave,
-  debouncedSetHistory,
-  refs,
-}: AppNavigationProps) {
+export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationProps) {
   const {
-    imageCacheRef,
     transformWrapperRef,
     preloadedDataRef,
     cachedEditStateRef,
@@ -49,27 +41,8 @@ export function useAppNavigation({
     prevAdjustmentsRef,
   } = refs;
 
-  const setLibrary = useLibraryStore((state) => state.setLibrary);
-  const setEditor = useEditorStore((state) => state.setEditor);
-  const setUI = useUIStore((state) => state.setUI);
-  const setProcess = useProcessStore((state) => state.setProcess);
-  const handleSettingsChange = useSettingsStore((state) => state.handleSettingsChange);
-
-  const appSettings = useSettingsStore((state) => state.appSettings);
-  const osPlatform = useSettingsStore((state) => state.osPlatform);
-  const isAndroid = osPlatform === 'android';
-
-  const rootPath = useLibraryStore((state) => state.rootPath);
-  const currentFolderPath = useLibraryStore((state) => state.currentFolderPath);
-  const pinnedFolders = appSettings?.pinnedFolders || [];
-  const libraryViewMode = appSettings?.libraryViewMode;
-  const sortCriteria = useLibraryStore((state) => state.sortCriteria);
-  const selectedImage = useEditorStore((state) => state.selectedImage);
-  const isSliderDragging = useEditorStore((state) => state.isSliderDragging);
-  const resetHistory = useEditorStore((state) => state.resetHistory);
-
   const handleGoHome = useCallback(() => {
-    setLibrary({
+    useLibraryStore.getState().setLibrary({
       rootPath: null,
       currentFolderPath: null,
       imageList: [],
@@ -79,12 +52,16 @@ export function useAppNavigation({
       libraryActivePath: null,
       expandedFolders: new Set(),
     });
-    setUI({ isLibraryExportPanelVisible: false });
-  }, [setLibrary, setUI]);
+    useUIStore.getState().setUI({ isLibraryExportPanelVisible: false });
+  }, []);
 
   const handleBackToLibrary = useCallback(() => {
+    const { selectedImage, resetHistory, setEditor } = useEditorStore.getState();
+    const { setLibrary } = useLibraryStore.getState();
+    const { setUI } = useUIStore.getState();
+
     if (selectedImage?.path && cachedEditStateRef.current) {
-      imageCacheRef.current.set(selectedImage.path, cachedEditStateRef.current);
+      globalImageCache.set(selectedImage.path, cachedEditStateRef.current);
     }
     if (transformWrapperRef.current) {
       transformWrapperRef.current.resetTransform(0);
@@ -124,20 +101,24 @@ export function useAppNavigation({
       if (state.interactivePatch?.url) URL.revokeObjectURL(state.interactivePatch.url);
       return { interactivePatch: null };
     });
-  }, [selectedImage?.path, resetHistory, debouncedSave, debouncedSetHistory, setUI, setLibrary, setEditor, refs]);
+  }, [refs]);
 
   const handleImageSelect = useCallback(
     async (path: string) => {
+      const { selectedImage, isSliderDragging, resetHistory, setEditor } = useEditorStore.getState();
+      const { setLibrary } = useLibraryStore.getState();
+      const { setUI } = useUIStore.getState();
+
       if (selectedImage?.path === path) return;
 
       debouncedSave.flush();
       debouncedSetHistory.cancel();
 
       if (selectedImage?.path && cachedEditStateRef.current) {
-        imageCacheRef.current.set(selectedImage.path, cachedEditStateRef.current);
+        globalImageCache.set(selectedImage.path, cachedEditStateRef.current);
       }
 
-      const cached = imageCacheRef.current.get(path);
+      const cached = globalImageCache.get(path);
       const isFrontendCached = Boolean(cached && cached.selectedImage?.isReady);
       const isCachedInBackend = isFrontendCached
         ? await invoke<boolean>('is_image_cached', { path }).catch(() => false)
@@ -154,7 +135,6 @@ export function useAppNavigation({
 
       selectedImagePathRef.current = path;
       setLibrary({ multiSelectedPaths: [path], libraryActivePath: null, selectionAnchorPath: path });
-      setError(null);
 
       setEditor({
         showOriginal: false,
@@ -222,7 +202,7 @@ export function useAppNavigation({
               setEditor({ adjustments: freshAdjustments });
               resetHistory(freshAdjustments);
               prevAdjustmentsRef.current = { path, adjustments: freshAdjustments };
-              imageCacheRef.current.set(path, { ...cached, adjustments: freshAdjustments });
+              globalImageCache.set(path, { ...cached, adjustments: freshAdjustments });
             }
           })
           .catch((err) => console.error('Failed background metadata sync on cache hit:', err));
@@ -255,9 +235,9 @@ export function useAppNavigation({
 
       setEditor((state) => {
         const prev = state.finalPreviewUrl;
-        if (prev?.startsWith('blob:') && !imageCacheRef.current.isProtected(prev)) {
+        if (prev?.startsWith('blob:') && !globalImageCache.isProtected(prev)) {
           setTimeout(() => {
-            if (!imageCacheRef.current.isProtected(prev)) {
+            if (!globalImageCache.isProtected(prev)) {
               URL.revokeObjectURL(prev);
             }
           }, 250);
@@ -270,29 +250,26 @@ export function useAppNavigation({
         return { interactivePatch: null };
       });
     },
-    [
-      selectedImage?.path,
-      debouncedSave,
-      debouncedSetHistory,
-      resetHistory,
-      isSliderDragging,
-      setUI,
-      setLibrary,
-      setEditor,
-      refs,
-      setError,
-    ],
+    [refs],
   );
 
   const handleSelectSubfolder = useCallback(
     async (path: string | null, isNewRoot = false, preloadedImages?: ImageFile[], expandParents = true) => {
+      const { appSettings, handleSettingsChange } = useSettingsStore.getState();
+      const { pinnedFolders } = appSettings || { pinnedFolders: [] };
+      const { setLibrary, sortCriteria } = useLibraryStore.getState();
+      const { setUI } = useUIStore.getState();
+      const { setProcess } = useProcessStore.getState();
+      const { selectedImage, resetHistory, setEditor } = useEditorStore.getState();
+      const libraryViewMode = appSettings?.libraryViewMode;
+
       await invoke('cancel_thumbnail_generation');
       clearThumbnailQueue();
       setLibrary({ isViewLoading: true });
       useLibraryStore.getState().setSearchCriteria({ tags: [], text: '', mode: 'OR' });
       setLibrary({ libraryScrollTop: 0 });
       setProcess({ thumbnails: {} });
-      imageCacheRef.current.clear();
+      globalImageCache.clear();
 
       try {
         setLibrary({ currentFolderPath: path });
@@ -305,7 +282,7 @@ export function useAppNavigation({
         } else if (path && expandParents) {
           setLibrary((state) => {
             const newSet = new Set(state.expandedFolders);
-            const allRoots = [state.rootPath, ...pinnedFolders].filter(Boolean) as string[];
+            const allRoots = [state.rootPath, ...(pinnedFolders || [])].filter(Boolean) as string[];
             const relevantRoot = allRoots.find((r) => path.startsWith(r));
 
             if (relevantRoot) {
@@ -328,10 +305,6 @@ export function useAppNavigation({
         }
 
         if (isNewRoot) {
-          if (path && !pinnedFolders.includes(path)) {
-            // handleActiveTreeSectionChange('current');
-            // Note: Update activeTreeSection via UI if needed, but here we just ensure state
-          }
           setLibrary({ isTreeLoading: true });
           handleSettingsChange({ ...appSettings, lastRootPath: path } as any);
           try {
@@ -343,14 +316,14 @@ export function useAppNavigation({
             setLibrary({ folderTree: treeData });
           } catch (err) {
             console.error('Failed to load folder tree:', err);
-            setError(`Failed to load folder tree: ${err}. Some sub-folders might be inaccessible.`);
+            toast.error(`Failed to load folder tree: ${err}. Some sub-folders might be inaccessible.`);
           } finally {
             setLibrary({ isTreeLoading: false });
           }
         }
 
         setLibrary({ imageList: [], multiSelectedPaths: [], libraryActivePath: null });
-        if (useEditorStore.getState().selectedImage) {
+        if (selectedImage) {
           debouncedSave.flush();
           debouncedSetHistory.cancel();
           setEditor({ selectedImage: null, finalPreviewUrl: null, uncroppedAdjustedPreviewUrl: null, histogram: null });
@@ -414,54 +387,42 @@ export function useAppNavigation({
         });
       } catch (err) {
         console.error('Failed to load folder contents:', err);
-        setError('Failed to load images from the selected folder.');
-        setLibrary({ isTreeLoading: false });
+        toast.error('Failed to load images from the selected folder.');
+        useLibraryStore.getState().setLibrary({ isTreeLoading: false });
       } finally {
-        setLibrary({ isViewLoading: false });
+        useLibraryStore.getState().setLibrary({ isViewLoading: false });
       }
     },
-    [
-      appSettings,
-      handleSettingsChange,
-      rootPath,
-      sortCriteria.key,
-      pinnedFolders,
-      libraryViewMode,
-      debouncedSave,
-      debouncedSetHistory,
-      resetHistory,
-      setUI,
-      clearThumbnailQueue,
-      setLibrary,
-      setEditor,
-      setProcess,
-      refs,
-      setError,
-    ],
+    [clearThumbnailQueue, refs],
   );
 
   const handleOpenFolder = async () => {
+    const { osPlatform } = useSettingsStore.getState();
+    const isAndroid = osPlatform === 'android';
     try {
       if (isAndroid) {
         const libraryRoot = await invoke<string>(Invokes.GetOrCreateInternalLibraryRoot);
-        setLibrary({ rootPath: libraryRoot });
+        useLibraryStore.getState().setLibrary({ rootPath: libraryRoot });
         await handleSelectSubfolder(libraryRoot, true);
         return;
       }
 
       const selected = await open({ directory: true, multiple: false, defaultPath: await homeDir() });
       if (typeof selected === 'string') {
-        setLibrary({ rootPath: selected });
+        useLibraryStore.getState().setLibrary({ rootPath: selected });
         await handleSelectSubfolder(selected, true);
       }
     } catch (err) {
       console.error(isAndroid ? 'Failed to open Android library root:' : 'Failed to open directory dialog:', err);
-      setError(isAndroid ? 'Failed to open library.' : 'Failed to open folder selection dialog.');
+      toast.error(isAndroid ? 'Failed to open library.' : 'Failed to open folder selection dialog.');
     }
   };
 
   const handleContinueSession = () => {
     const restore = async () => {
+      const { appSettings, handleSettingsChange } = useSettingsStore.getState();
+      const { setLibrary } = useLibraryStore.getState();
+
       if (!appSettings?.lastRootPath) return;
 
       const root = appSettings.lastRootPath;
@@ -511,12 +472,13 @@ export function useAppNavigation({
 
     restore().catch((err) => {
       console.error('Failed to restore session, folder might be missing:', err);
-      setError('Failed to restore session. The last used folder may have been moved or deleted.');
+      toast.error('Failed to restore session. The last used folder may have been moved or deleted.');
+      const { appSettings, handleSettingsChange } = useSettingsStore.getState();
       if (appSettings) {
         handleSettingsChange({ ...appSettings, lastRootPath: null, lastFolderState: null });
       }
       handleGoHome();
-      setLibrary({ isTreeLoading: false });
+      useLibraryStore.getState().setLibrary({ isTreeLoading: false });
     });
   };
 

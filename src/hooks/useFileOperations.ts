@@ -1,5 +1,7 @@
 import { useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
+import { toast } from 'react-toastify';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { useEditorStore } from '../store/useEditorStore';
 import { useUIStore } from '../store/useUIStore';
@@ -9,36 +11,12 @@ import { Invokes } from '../components/ui/AppProperties';
 import { Status } from '../components/ui/ExportImportProperties';
 
 export function useFileOperations(
-  setError: (msg: string) => void,
   refreshImageList: () => Promise<void>,
   refreshAllFolderTrees: () => Promise<void>,
   handleImageSelect: (path: string) => void,
   handleBackToLibrary: () => void,
   sortedImageList: any[],
 ) {
-  const libraryActivePath = useLibraryStore((state) => state.libraryActivePath);
-  const currentFolderPath = useLibraryStore((state) => state.currentFolderPath);
-  const rootPath = useLibraryStore((state) => state.rootPath);
-  const setLibrary = useLibraryStore((state) => state.setLibrary);
-
-  const selectedImage = useEditorStore((state) => state.selectedImage);
-
-  const folderActionTarget = useUIStore((state) => state.folderActionTarget);
-  const renameTargetPaths = useUIStore((state) => state.renameTargetPaths);
-  const importSourcePaths = useUIStore((state) => state.importSourcePaths);
-  const importTargetFolder = useUIStore((state) => state.importTargetFolder);
-  const setUI = useUIStore((state) => state.setUI);
-
-  const copiedFilePaths = useProcessStore((state) => state.copiedFilePaths);
-  const setProcess = useProcessStore((state) => state.setProcess);
-  const setImportState = useProcessStore((state) => state.setImportState);
-
-  const appSettings = useSettingsStore((state) => state.appSettings);
-  const handleSettingsChange = useSettingsStore((state) => state.handleSettingsChange);
-
-  const multiSelectedPaths = useLibraryStore((state) => state.multiSelectedPaths);
-  const imageList = useLibraryStore((state) => state.imageList);
-
   const getParentDir = (filePath: string): string => {
     const separator = filePath.includes('/') ? '/' : '\\';
     const lastSeparatorIndex = filePath.lastIndexOf(separator);
@@ -49,6 +27,9 @@ export function useFileOperations(
   const executeDelete = useCallback(
     async (pathsToDelete: Array<string>, options = { includeAssociated: false }) => {
       if (!pathsToDelete || pathsToDelete.length === 0) return;
+
+      const { libraryActivePath, setLibrary } = useLibraryStore.getState();
+      const { selectedImage } = useEditorStore.getState();
 
       const activePath = selectedImage ? selectedImage.path : libraryActivePath;
       let nextImagePath: string | null = null;
@@ -107,22 +88,16 @@ export function useFileOperations(
         }
       } catch (err) {
         console.error('Failed to delete files:', err);
-        setError(`Failed to delete files: ${err}`);
+        toast.error(`Failed to delete files: ${err}`);
       }
     },
-    [
-      refreshImageList,
-      selectedImage,
-      handleBackToLibrary,
-      libraryActivePath,
-      sortedImageList,
-      handleImageSelect,
-      setLibrary,
-      setError,
-    ],
+    [refreshImageList, handleBackToLibrary, sortedImageList, handleImageSelect],
   );
 
   const handleDeleteSelected = useCallback(() => {
+    const { multiSelectedPaths, imageList } = useLibraryStore.getState();
+    const { setUI } = useUIStore.getState();
+
     const pathsToDelete = multiSelectedPaths;
     if (pathsToDelete.length === 0) {
       return;
@@ -161,66 +136,82 @@ export function useFileOperations(
         title: modalTitle,
       },
     });
-  }, [multiSelectedPaths, executeDelete, imageList, setUI]);
+  }, [executeDelete]);
 
-  const handleCreateFolder = async (folderName: string) => {
-    if (folderName && folderName.trim() !== '' && folderActionTarget) {
-      try {
-        await invoke(Invokes.CreateFolder, { path: `${folderActionTarget}/${folderName.trim()}` });
-        refreshAllFolderTrees();
-      } catch (err) {
-        setError(`Failed to create folder: ${err}`);
+  const handleCreateFolder = useCallback(
+    async (folderName: string) => {
+      const { folderActionTarget } = useUIStore.getState();
+
+      if (folderName && folderName.trim() !== '' && folderActionTarget) {
+        try {
+          await invoke(Invokes.CreateFolder, { path: `${folderActionTarget}/${folderName.trim()}` });
+          await refreshAllFolderTrees();
+        } catch (err) {
+          toast.error(`Failed to create folder: ${err}`);
+        }
       }
-    }
-  };
+    },
+    [refreshAllFolderTrees],
+  );
 
-  const handleRenameFolder = async (newName: string) => {
-    if (newName && newName.trim() !== '' && folderActionTarget) {
-      try {
-        const oldPath = folderActionTarget;
-        const trimmedNewName = newName.trim();
+  const handleRenameFolder = useCallback(
+    async (newName: string) => {
+      const { folderActionTarget } = useUIStore.getState();
+      const { rootPath, currentFolderPath, setLibrary } = useLibraryStore.getState();
+      const { appSettings, handleSettingsChange } = useSettingsStore.getState();
 
-        await invoke(Invokes.RenameFolder, { path: oldPath, newName: trimmedNewName });
+      if (newName && newName.trim() !== '' && folderActionTarget) {
+        try {
+          const oldPath = folderActionTarget;
+          const trimmedNewName = newName.trim();
 
-        const parentDir = getParentDir(oldPath);
-        const separator = oldPath.includes('/') ? '/' : '\\';
-        const newPath = parentDir ? `${parentDir}${separator}${trimmedNewName}` : trimmedNewName;
+          await invoke(Invokes.RenameFolder, { path: oldPath, newName: trimmedNewName });
 
-        const newAppSettings = { ...appSettings } as any;
-        let settingsChanged = false;
+          const parentDir = getParentDir(oldPath);
+          const separator = oldPath.includes('/') ? '/' : '\\';
+          const newPath = parentDir ? `${parentDir}${separator}${trimmedNewName}` : trimmedNewName;
 
-        if (rootPath === oldPath) {
-          setLibrary({ rootPath: newPath });
-          newAppSettings.lastRootPath = newPath;
-          settingsChanged = true;
+          const newAppSettings = { ...appSettings } as any;
+          let settingsChanged = false;
+
+          if (rootPath === oldPath) {
+            setLibrary({ rootPath: newPath });
+            newAppSettings.lastRootPath = newPath;
+            settingsChanged = true;
+          }
+          if (currentFolderPath?.startsWith(oldPath)) {
+            const newCurrentPath = currentFolderPath.replace(oldPath, newPath);
+            setLibrary({ currentFolderPath: newCurrentPath });
+          }
+
+          const currentPins = appSettings?.pinnedFolders || [];
+          if (currentPins.includes(oldPath)) {
+            const newPins = currentPins
+              .map((p: string) => (p === oldPath ? newPath : p))
+              .sort((a: string, b: string) => a.localeCompare(b));
+            newAppSettings.pinnedFolders = newPins;
+            settingsChanged = true;
+          }
+
+          if (settingsChanged) {
+            handleSettingsChange(newAppSettings);
+          }
+
+          await refreshAllFolderTrees();
+        } catch (err) {
+          toast.error(`Failed to rename folder: ${err}`);
         }
-        if (currentFolderPath?.startsWith(oldPath)) {
-          const newCurrentPath = currentFolderPath.replace(oldPath, newPath);
-          setLibrary({ currentFolderPath: newCurrentPath });
-        }
-
-        const currentPins = appSettings?.pinnedFolders || [];
-        if (currentPins.includes(oldPath)) {
-          const newPins = currentPins
-            .map((p: string) => (p === oldPath ? newPath : p))
-            .sort((a: string, b: string) => a.localeCompare(b));
-          newAppSettings.pinnedFolders = newPins;
-          settingsChanged = true;
-        }
-
-        if (settingsChanged) {
-          handleSettingsChange(newAppSettings);
-        }
-
-        await refreshAllFolderTrees();
-      } catch (err) {
-        setError(`Failed to rename folder: ${err}`);
       }
-    }
-  };
+    },
+    [refreshAllFolderTrees],
+  );
 
   const handleSaveRename = useCallback(
     async (nameTemplate: string) => {
+      const { renameTargetPaths, setUI } = useUIStore.getState();
+      const { selectedImage } = useEditorStore.getState();
+      const { libraryActivePath, setLibrary } = useLibraryStore.getState();
+
       if (renameTargetPaths.length > 0 && nameTemplate) {
         try {
           const newPaths: Array<string> = await invoke(Invokes.RenameFiles, {
@@ -250,45 +241,135 @@ export function useFileOperations(
 
           setLibrary({ multiSelectedPaths: newPaths });
         } catch (err) {
-          setError(`Failed to rename files: ${err}`);
+          toast.error(`Failed to rename files: ${err}`);
         }
       }
       setUI({ renameTargetPaths: [] });
     },
-    [
-      renameTargetPaths,
-      refreshImageList,
-      selectedImage,
-      libraryActivePath,
-      handleImageSelect,
-      handleBackToLibrary,
-      setUI,
-      setLibrary,
-      setError,
-    ],
+    [refreshImageList, handleImageSelect, handleBackToLibrary],
   );
 
-  const startImportFiles = useCallback(
-    async (sourcePaths: string[], destinationFolder: string, settings: any) => {
-      if (sourcePaths.length === 0 || !destinationFolder) return;
+  const handleRenameFiles = useCallback((paths: Array<string>) => {
+    if (paths && paths.length > 0) {
+      useUIStore.getState().setUI({ renameTargetPaths: paths, isRenameFileModalOpen: true });
+    }
+  }, []);
+
+  const startImportFiles = useCallback(async (sourcePaths: string[], destinationFolder: string, settings: any) => {
+    if (sourcePaths.length === 0 || !destinationFolder) return;
+
+    try {
+      await invoke(Invokes.ImportFiles, { destinationFolder, settings, sourcePaths });
+    } catch (err) {
+      console.error('Failed to start import:', err);
+      useProcessStore
+        .getState()
+        .setImportState({ status: Status.Error, errorMessage: `Failed to start import: ${err}` });
+    }
+  }, []);
+
+  const handleStartImport = useCallback(
+    async (settings: any) => {
+      const { importTargetFolder, importSourcePaths } = useUIStore.getState();
+      if (!importTargetFolder) return;
+      await startImportFiles(importSourcePaths, importTargetFolder, settings);
+    },
+    [startImportFiles],
+  );
+
+  const handleImportClick = useCallback(
+    async (targetPath: string) => {
+      const { supportedTypes, osPlatform } = useSettingsStore.getState();
+      const { setUI } = useUIStore.getState();
+      const isAndroid = osPlatform === 'android';
 
       try {
-        await invoke(Invokes.ImportFiles, { destinationFolder, settings, sourcePaths });
+        const nonRaw = supportedTypes?.nonRaw || [];
+        const raw = supportedTypes?.raw || [];
+
+        const expandExtensions = (exts: string[]) => {
+          return Array.from(new Set(exts.flatMap((ext) => [ext.toLowerCase(), ext.toUpperCase()])));
+        };
+
+        const processedNonRaw = expandExtensions(nonRaw);
+        const processedRaw = expandExtensions(raw);
+        const allImageExtensions = [...processedNonRaw, ...processedRaw];
+
+        const typeFilters = isAndroid
+          ? []
+          : [
+              { name: 'All Supported Images', extensions: allImageExtensions },
+              { name: 'RAW Images', extensions: processedRaw },
+              { name: 'Standard Images (JPEG, PNG, etc.)', extensions: processedNonRaw },
+              { name: 'All Files', extensions: ['*'] },
+            ];
+
+        const selected = await open({
+          filters: typeFilters,
+          multiple: true,
+          title: 'Select files to import',
+        });
+
+        if (Array.isArray(selected) && selected.length > 0) {
+          const invalidExtensions = new Set<string>();
+          const allowedExtensions = new Set(allImageExtensions.map((e) => e.toLowerCase()));
+
+          const resolvedFiles = await Promise.all(
+            selected.map(async (path) => {
+              if (isAndroid) {
+                try {
+                  return await invoke<string>('resolve_android_content_uri_name', { uriStr: path });
+                } catch (e) {
+                  console.error('Failed to resolve URI:', e);
+                  return path;
+                }
+              }
+              return path;
+            }),
+          );
+
+          const validFiles = selected.filter((originalPath, index) => {
+            const resolvedName = resolvedFiles[index];
+            const ext = resolvedName.split('.').pop()?.toLowerCase() || 'unknown';
+
+            if (!allowedExtensions.has(ext)) {
+              invalidExtensions.add(`.${ext}`);
+              return false;
+            }
+            return true;
+          });
+
+          if (invalidExtensions.size > 0) {
+            const extList = Array.from(invalidExtensions).join(', ');
+            toast.error(`Unsupported file format(s) detected: ${extList}`);
+            return;
+          }
+
+          if (isAndroid) {
+            const DEFAULT_IMPORT_SETTINGS = {
+              filenameTemplate: '{original_filename}',
+              organizeByDate: false,
+              dateFolderFormat: 'YYYY/MM-DD',
+              deleteAfterImport: false,
+            };
+            await startImportFiles(validFiles, targetPath, DEFAULT_IMPORT_SETTINGS);
+            return;
+          }
+
+          setUI({ importSourcePaths: validFiles, importTargetFolder: targetPath, isImportModalOpen: true });
+        }
       } catch (err) {
-        console.error('Failed to start import:', err);
-        setImportState({ status: Status.Error, errorMessage: `Failed to start import: ${err}` });
+        console.error('Failed to open file dialog for import:', err);
       }
     },
-    [setImportState],
+    [startImportFiles],
   );
-
-  const handleStartImport = async (settings: any) => {
-    if (!importTargetFolder) return;
-    await startImportFiles(importSourcePaths, importTargetFolder, settings);
-  };
 
   const handlePasteFiles = useCallback(
     async (mode = 'copy') => {
+      const { copiedFilePaths, setProcess } = useProcessStore.getState();
+      const { currentFolderPath, setLibrary } = useLibraryStore.getState();
+
       if (copiedFilePaths.length === 0 || !currentFolderPath) return;
 
       try {
@@ -297,13 +378,15 @@ export function useFileOperations(
         } else {
           await invoke(Invokes.MoveFiles, { sourcePaths: copiedFilePaths, destinationFolder: currentFolderPath });
           setProcess({ copiedFilePaths: [] });
+          setLibrary({ multiSelectedPaths: [] });
+          await refreshAllFolderTrees();
         }
         await refreshImageList();
       } catch (err) {
-        setError(`Failed to ${mode} files: ${err}`);
+        toast.error(`Failed to ${mode} files: ${err}`);
       }
     },
-    [copiedFilePaths, currentFolderPath, refreshImageList, setProcess, setError],
+    [refreshImageList, refreshAllFolderTrees],
   );
 
   return {
@@ -312,8 +395,10 @@ export function useFileOperations(
     handleCreateFolder,
     handleRenameFolder,
     handleSaveRename,
+    handleRenameFiles,
     handleStartImport,
     startImportFiles,
+    handleImportClick,
     handlePasteFiles,
   };
 }

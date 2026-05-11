@@ -7,17 +7,16 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Adjustments, COPYABLE_ADJUSTMENT_KEYS } from '../utils/adjustments';
 import { Invokes, Panel } from '../components/ui/AppProperties';
+import { debouncedSave } from './useEditorActions';
+import { globalImageCache } from '../utils/ImageLRUCache';
 
 export function useImageProcessing(
   transformWrapperRef: any,
-  imageCacheRef: any,
-  patchesSentToBackend: React.RefObject<Set<string>>,
-  debouncedSave: any,
   prevAdjustmentsRef: React.RefObject<any>,
   renderRefs: {
-    previewJobIdRef: React.MutableRefObject<number>;
-    latestRenderedJobIdRef: React.MutableRefObject<number>;
-    currentResRef: React.MutableRefObject<number>;
+    previewJobIdRef: React.RefObject<number>;
+    latestRenderedJobIdRef: React.RefObject<number>;
+    currentResRef: React.RefObject<number>;
   },
 ) {
   const { previewJobIdRef, latestRenderedJobIdRef, currentResRef } = renderRefs;
@@ -124,6 +123,7 @@ export function useImageProcessing(
       if (!currentPath) return;
 
       const payload = JSON.parse(JSON.stringify(currentAdjustments));
+      const { patchesSentToBackend } = useEditorStore.getState();
 
       const processSubMasks = (subMasks: any[]) => {
         if (!Array.isArray(subMasks)) return;
@@ -135,13 +135,13 @@ export function useImageProcessing(
             for (const key of keys) {
               if (sm.parameters[key] !== undefined && sm.parameters[key] !== null) {
                 foundMaskData = true;
-                if (patchesSentToBackend.current?.has(sm.id)) {
+                if (patchesSentToBackend.has(sm.id)) {
                   sm.parameters[key] = null;
                 }
               }
             }
-            if (foundMaskData && !patchesSentToBackend.current?.has(sm.id)) {
-              patchesSentToBackend.current?.add(sm.id);
+            if (foundMaskData && !patchesSentToBackend.has(sm.id)) {
+              patchesSentToBackend.add(sm.id);
             }
           }
         });
@@ -150,10 +150,10 @@ export function useImageProcessing(
       if (payload.aiPatches && Array.isArray(payload.aiPatches)) {
         payload.aiPatches.forEach((p: any) => {
           if (p.id && p.patchData && !p.isLoading) {
-            if (patchesSentToBackend.current?.has(p.id)) {
+            if (patchesSentToBackend.has(p.id)) {
               p.patchData = null;
             } else {
-              patchesSentToBackend.current?.add(p.id);
+              patchesSentToBackend.add(p.id);
             }
           }
           if (p.subMasks) processSubMasks(p.subMasks);
@@ -231,9 +231,9 @@ export function useImageProcessing(
 
             setEditor((state) => {
               const prevUrl = state.finalPreviewUrl;
-              if (prevUrl && prevUrl.startsWith('blob:') && !imageCacheRef.current.isProtected(prevUrl)) {
+              if (prevUrl && prevUrl.startsWith('blob:') && !globalImageCache.isProtected(prevUrl)) {
                 setTimeout(() => {
-                  if (!imageCacheRef.current.isProtected(prevUrl)) {
+                  if (!globalImageCache.isProtected(prevUrl)) {
                     URL.revokeObjectURL(prevUrl);
                   }
                 }, 250);
@@ -261,16 +261,7 @@ export function useImageProcessing(
         }
       }
     },
-    [
-      selectedImage?.path,
-      calculateROI,
-      isWaveformVisible,
-      setEditor,
-      patchesSentToBackend,
-      imageCacheRef,
-      previewJobIdRef,
-      latestRenderedJobIdRef,
-    ],
+    [selectedImage?.path, calculateROI, isWaveformVisible, setEditor, previewJobIdRef, latestRenderedJobIdRef],
   );
 
   const flushPipeline = useCallback(() => {
@@ -448,7 +439,7 @@ export function useImageProcessing(
               }
             }
             if (Object.keys(delta).length > 0) {
-              otherPaths.forEach((p) => imageCacheRef.current.delete(p));
+              otherPaths.forEach((p) => globalImageCache.delete(p));
               invoke(Invokes.ApplyAdjustmentsToPaths, { paths: otherPaths, adjustments: delta }).catch((err) => {
                 console.error('Failed to apply adjustments to multi-selection:', err);
               });
@@ -471,7 +462,7 @@ export function useImageProcessing(
     multiSelectedPaths,
     appSettings?.enableLivePreviews,
     appSettings?.copyPasteSettings?.includedAdjustments,
-    debouncedSave,
+    isWaveformVisible,
   ]);
 
   useEffect(() => {
