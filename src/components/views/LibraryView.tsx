@@ -1,4 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
+import type { MouseEvent } from 'react';
 
 import CommunityPage from '../panel/CommunityPage';
 import MainLibrary from '../panel/MainLibrary';
@@ -11,6 +12,7 @@ import { useProcessStore } from '../../store/useProcessStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 
 import { ImageFile, LibraryViewMode, ThumbnailAspectRatio, ThumbnailSize } from '../ui/AppProperties';
+import type { LibraryFeatureSlots } from '../../features/contracts';
 
 interface LibraryViewProps {
   sortedImageList: ImageFile[];
@@ -22,20 +24,21 @@ interface LibraryViewProps {
   setThumbnailAspectRatio: (ratio: ThumbnailAspectRatio) => void;
   setLibraryViewMode: (mode: LibraryViewMode) => void;
   handleClearSelection: () => void;
-  handleLibraryImageSingleClick: (...args: any) => void;
-  handleImageSelect: (...args: any) => void;
-  handleRate: (...args: any) => void;
-  handleThumbnailContextMenu: (...args: any) => void;
-  handleMainLibraryContextMenu: (...args: any) => void;
-  handleContinueSession: (...args: any) => void;
-  handleGoHome: (...args: any) => void;
-  handleOpenFolder: (...args: any) => void;
+  handleLibraryImageSingleClick: (path: string, event: MouseEvent) => void;
+  handleImageSelect: (path: string) => void;
+  handleRate: (rating: number, paths?: string[]) => void;
+  handleThumbnailContextMenu: (event: MouseEvent, path: string) => void;
+  handleMainLibraryContextMenu: (event: MouseEvent) => void;
+  handleContinueSession: () => void;
+  handleGoHome: () => void;
+  handleOpenFolder: () => void;
   handleImportClick: (path: string) => void;
   handleLibraryRefresh: () => Promise<void>;
   handleCopyAdjustments: () => void;
   handlePasteAdjustments: () => void;
   handleResetAdjustments: () => void;
-  requestThumbnails: any;
+  requestThumbnails: (paths: string[]) => void;
+  libraryFeatureSlots: LibraryFeatureSlots;
 }
 
 export default function LibraryView({
@@ -62,6 +65,7 @@ export default function LibraryView({
   handlePasteAdjustments,
   handleResetAdjustments,
   requestThumbnails,
+  libraryFeatureSlots,
 }: LibraryViewProps) {
   const { activeView, setUI } = useUIStore(
     useShallow((state) => ({
@@ -114,6 +118,15 @@ export default function LibraryView({
       })),
     );
 
+  const FeatureView = libraryFeatureSlots.views?.[activeView];
+  const libraryFeatureContext = {
+    currentFolderPath,
+    imageList: sortedImageList,
+    allImageList: imageList,
+    selectedPaths: multiSelectedPaths,
+    onLibraryRefresh: handleLibraryRefresh,
+  };
+
   return (
     <div className="flex flex-row grow h-full min-h-0">
       <div className="flex-1 flex flex-col min-w-0 gap-2">
@@ -124,12 +137,15 @@ export default function LibraryView({
             imageList={sortedImageList}
             currentFolderPath={currentFolderPath}
           />
+        ) : FeatureView ? (
+          <FeatureView {...libraryFeatureContext} onBackToLibrary={() => setUI({ activeView: 'library' })} />
         ) : (
           <MainLibrary
             activePath={libraryActivePath}
             aiModelDownloadStatus={aiModelDownloadStatus}
             appSettings={appSettings}
             currentFolderPath={currentFolderPath}
+            allImageList={imageList}
             imageList={sortedImageList}
             imageRatings={imageRatings}
             importState={importState}
@@ -161,9 +177,10 @@ export default function LibraryView({
             thumbnailProgress={thumbnailProgress}
             thumbnailSize={thumbnailSize}
             onNavigateToCommunity={() => setUI({ activeView: 'community' })}
+            libraryFeatureSlots={libraryFeatureSlots}
           />
         )}
-        {rootPath && (
+        {rootPath && activeView === 'library' && (
           <BottomBar
             isCopied={isCopied}
             isCopyDisabled={multiSelectedPaths.length !== 1}

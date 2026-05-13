@@ -165,6 +165,7 @@ export default function LibraryGrid(props: any) {
     onRequestThumbnails,
     thumbnailSizeOptions,
     onThumbnailSizeChange,
+    libraryFeatureSlots,
   } = props;
 
   const { libraryScrollTop, listColumnWidths, setLibrary, sortCriteria, setSortCriteria } = useLibraryStore();
@@ -531,6 +532,7 @@ export default function LibraryGrid(props: any) {
               isListView: gridData.isListView,
               columnWidths: listColumnWidths,
               queueThumbnailRequest,
+              thumbnailBadges: libraryFeatureSlots?.thumbnailBadges ?? [],
               onToggleRecursiveFolder: (path: string) =>
                 setCollapsedRecursiveFolders((prev) => {
                   const next = new Set(prev);

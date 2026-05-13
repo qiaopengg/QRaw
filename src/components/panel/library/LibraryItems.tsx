@@ -8,6 +8,7 @@ import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights, TEXT_COLOR_KEYS } from '../../../types/typography';
 import { ColumnWidths } from '../MainLibrary';
 import { useProcessStore } from '../../../store/useProcessStore';
+import type { LibraryThumbnailBadgeSlotProps } from '../../../features/contracts';
 
 interface ImageLayer {
   id: string;
@@ -25,6 +26,8 @@ const ThumbnailComponent = ({
   path,
   rating,
   tags,
+  image,
+  thumbnailBadges = [],
   aspectRatio: thumbnailAspectRatio,
 }: any) => {
   const data = useProcessStore((s) => s.thumbnails[path]);
@@ -191,6 +194,13 @@ const ThumbnailComponent = ({
           </Text>
         )}
       </div>
+      {thumbnailBadges.length > 0 && (
+        <div className="absolute left-2 top-2 flex flex-col gap-1 pointer-events-none">
+          {thumbnailBadges.map((Badge: React.ComponentType<LibraryThumbnailBadgeSlotProps>, index: number) => (
+            <Badge key={index} image={image} />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -205,6 +215,8 @@ const ListItemComponent = ({
   path,
   rating,
   tags,
+  image,
+  thumbnailBadges = [],
   modified,
   aspectRatio: thumbnailAspectRatio,
   columnWidths,
@@ -356,6 +368,13 @@ const ListItemComponent = ({
             VC
           </Text>
         )}
+        {thumbnailBadges.length > 0 && (
+          <div className="flex items-center gap-1 shrink-0">
+            {thumbnailBadges.map((Badge: React.ComponentType<LibraryThumbnailBadgeSlotProps>, index: number) => (
+              <Badge key={index} image={image} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ width: `${columnWidths.date}%` }} className="flex items-center px-3 h-full overflow-hidden">
@@ -415,6 +434,7 @@ const RowComponent = ({
   isListView,
   columnWidths,
   queueThumbnailRequest,
+  thumbnailBadges,
   onToggleRecursiveFolder,
 }: any) => {
   const row = rows[index];
@@ -511,6 +531,8 @@ const RowComponent = ({
               path={imageFile.path}
               rating={imageRatings?.[imageFile.path] || 0}
               tags={imageFile.tags || []}
+              image={imageFile}
+              thumbnailBadges={thumbnailBadges}
               aspectRatio={thumbnailAspectRatio}
               modified={imageFile.modified}
               columnWidths={columnWidths}
@@ -526,6 +548,8 @@ const RowComponent = ({
               path={imageFile.path}
               rating={imageRatings?.[imageFile.path] || 0}
               tags={imageFile.tags || []}
+              image={imageFile}
+              thumbnailBadges={thumbnailBadges}
               aspectRatio={thumbnailAspectRatio}
             />
           )}
@@ -556,6 +580,7 @@ function rowAreEqual(prev: any, next: any) {
       if ((prev.activePath === path) !== (next.activePath === path)) return false;
       if (prev.multiSelectedPaths.includes(path) !== next.multiSelectedPaths.includes(path)) return false;
       if (prev.imageRatings?.[path] !== next.imageRatings?.[path]) return false;
+      if (prevRow.images[i].featureData !== nextRow.images[i].featureData) return false;
     }
   } else if (prevRow.type === 'header') {
     if (prevRow.isExpanded !== nextRow.isExpanded || prevRow.count !== nextRow.count) return false;

@@ -16,8 +16,8 @@ mod cache_utils;
 mod culling;
 mod denoising;
 mod exif_processing;
-mod features;
 mod export_processing;
+mod features;
 mod file_management;
 mod formats;
 mod gpu_processing;
@@ -2239,6 +2239,20 @@ pub fn run() {
             generate_uncropped_preview,
             preview_geometry_transform,
             features::get_focus_regions,
+            features::smart_culling_apply_task_result,
+            features::smart_culling_cancel_task,
+            features::smart_culling_check_models,
+            features::smart_culling_delete_preset,
+            features::smart_culling_discard_task_result,
+            features::smart_culling_download_models,
+            features::smart_culling_export_report_pdf,
+            features::smart_culling_get_task_result,
+            features::smart_culling_list_presets,
+            features::smart_culling_list_recent_tasks,
+            features::smart_culling_open_models_dir,
+            features::smart_culling_save_preset,
+            features::smart_culling_start_task,
+            features::smart_culling_undo_task,
             get_log_file_path,
             frontend_log,
             save_collage,

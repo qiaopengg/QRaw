@@ -54,6 +54,7 @@ tempfile = "3.26.0"
 num_cpus = "1.17.0"
 mimalloc = "0.1.48"
 image_hasher = "3.1.1"
+ab_glyph = "0.2"
 regex = "1.12.3"
 memmap2 = "0.9.10"
 half = { version = "2.7.1", features = ["bytemuck"] }

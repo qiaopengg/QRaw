@@ -1,11 +1,36 @@
 import { useMemo } from 'react';
 import { useLibraryStore } from '../store/useLibraryStore';
+import type { SearchCriteria } from '../store/useLibraryStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { RawStatus, SortDirection, ImageFile } from '../components/ui/AppProperties';
+import {
+  RawStatus,
+  SortDirection,
+  ImageFile,
+  FilterCriteria,
+  SortCriteria,
+  SupportedTypes,
+} from '../components/ui/AppProperties';
+import type { LibraryFeatureFilterGroup } from '../features/contracts';
 
-export function computeSortedLibrary(libraryState: any, settingsState: any): ImageFile[] {
+interface LibrarySortState {
+  imageList: ImageFile[];
+  imageRatings: Record<string, number>;
+  filterCriteria: FilterCriteria;
+  searchCriteria: SearchCriteria;
+  sortCriteria: SortCriteria;
+}
+
+interface SortSettingsState {
+  supportedTypes: SupportedTypes | null;
+}
+
+export function computeSortedLibrary(
+  libraryState: LibrarySortState,
+  settingsState: SortSettingsState,
+  featureFilterGroups: LibraryFeatureFilterGroup[] = [],
+): ImageFile[] {
   const { imageList, imageRatings, filterCriteria, searchCriteria, sortCriteria } = libraryState;
-  const { appSettings, supportedTypes } = settingsState;
+  const { supportedTypes } = settingsState;
 
   const getParentDir = (filePath: string): string => {
     const separator = filePath.includes('/') ? '/' : '\\';
@@ -97,6 +122,19 @@ export function computeSortedLibrary(libraryState: any, settingsState: any): Ima
       }
     }
 
+    const featureFilters = filterCriteria.featureFilters || {};
+    for (const group of featureFilterGroups) {
+      const selectedValues = featureFilters[group.key] || [];
+      if (selectedValues.length === 0) continue;
+
+      const matchesGroup = selectedValues.some((value: string) => {
+        const option = group.options.find((item) => item.value === value);
+        return option?.predicate({ image, imageRatings }) ?? false;
+      });
+
+      if (!matchesGroup) return false;
+    }
+
     return true;
   });
 
@@ -167,7 +205,7 @@ export function computeSortedLibrary(libraryState: any, settingsState: any): Ima
     const { key, order } = sortCriteria;
     let comparison = 0;
 
-    const compareNullable = (valA: any, valB: any) => {
+    const compareNullable = (valA: number | string | null, valB: number | string | null) => {
       if (valA !== null && valB !== null) {
         if (valA < valB) return -1;
         if (valA > valB) return 1;
@@ -238,22 +276,22 @@ export function computeSortedLibrary(libraryState: any, settingsState: any): Ima
   return list;
 }
 
-export function useSortedLibrary() {
+export function useSortedLibrary(featureFilterGroups: LibraryFeatureFilterGroup[] = []) {
   const imageList = useLibraryStore((state) => state.imageList);
   const imageRatings = useLibraryStore((state) => state.imageRatings);
   const filterCriteria = useLibraryStore((state) => state.filterCriteria);
   const searchCriteria = useLibraryStore((state) => state.searchCriteria);
   const sortCriteria = useLibraryStore((state) => state.sortCriteria);
 
-  const appSettings = useSettingsStore((state) => state.appSettings);
   const supportedTypes = useSettingsStore((state) => state.supportedTypes);
 
   const sortedImageList = useMemo(() => {
     return computeSortedLibrary(
       { imageList, imageRatings, filterCriteria, searchCriteria, sortCriteria },
-      { appSettings, supportedTypes },
+      { supportedTypes },
+      featureFilterGroups,
     );
-  }, [imageList, sortCriteria, imageRatings, filterCriteria, supportedTypes, searchCriteria, appSettings]);
+  }, [imageList, sortCriteria, imageRatings, filterCriteria, supportedTypes, searchCriteria, featureFilterGroups]);
 
   return sortedImageList;
 }

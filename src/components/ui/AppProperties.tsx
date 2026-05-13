@@ -106,6 +106,20 @@ export enum Invokes {
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
   SaveCommunityPreset = 'save_community_preset',
   SaveTempFile = 'save_temp_file',
+  SmartCullingApplyTaskResult = 'smart_culling_apply_task_result',
+  SmartCullingCancelTask = 'smart_culling_cancel_task',
+  SmartCullingCheckModels = 'smart_culling_check_models',
+  SmartCullingDeletePreset = 'smart_culling_delete_preset',
+  SmartCullingDiscardTaskResult = 'smart_culling_discard_task_result',
+  SmartCullingDownloadModels = 'smart_culling_download_models',
+  SmartCullingExportReportPdf = 'smart_culling_export_report_pdf',
+  SmartCullingGetTaskResult = 'smart_culling_get_task_result',
+  SmartCullingListPresets = 'smart_culling_list_presets',
+  SmartCullingListRecentTasks = 'smart_culling_list_recent_tasks',
+  SmartCullingOpenModelsDir = 'smart_culling_open_models_dir',
+  SmartCullingSavePreset = 'smart_culling_save_preset',
+  SmartCullingStartTask = 'smart_culling_start_task',
+  SmartCullingUndoTask = 'smart_culling_undo_task',
 }
 
 export enum Panel {
@@ -205,6 +219,7 @@ export enum LibraryViewMode {
 
 export interface FilterCriteria {
   colors: Array<string>;
+  featureFilters?: Record<string, string[]>;
   rating: number;
   rawStatus: RawStatus;
 }
@@ -222,6 +237,21 @@ export interface ImageFile {
   path: string;
   rating: number;
   tags: Array<string> | null;
+  featureData?: {
+    smartCulling?: {
+      degraded?: boolean;
+      groupId?: string | null;
+      groupRank?: number | null;
+      groupSize?: number | null;
+      rating?: number;
+      colorLabel?: string | null;
+      reasonCodes?: string[];
+      reasonText?: string;
+      status?: string;
+      taskId?: string;
+    };
+    [key: string]: unknown;
+  };
   exif: { [key: string]: string } | null;
   is_virtual_copy: boolean;
 }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import {
   AlertTriangle,
@@ -22,19 +21,17 @@ import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
 import {
   AppSettings,
   ImageFile,
-  Invokes,
   LibraryViewMode,
   Progress,
-  SupportedTypes,
   ThumbnailSize,
   ThumbnailAspectRatio,
   RawStatus,
-  SortDirection,
 } from '../ui/AppProperties';
 import { ImportState, Status } from '../ui/ExportImportProperties';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { useLibraryStore } from '../../store/useLibraryStore';
+import type { LibraryFeatureSlots } from '../../features/contracts';
 
 import LibraryGrid from './library/LibraryGrid';
 import { SearchInput, ViewOptionsDropdown } from './library/LibraryHeader';
@@ -44,6 +41,7 @@ interface MainLibraryProps {
   aiModelDownloadStatus: string | null;
   appSettings: AppSettings | null;
   currentFolderPath: string | null;
+  allImageList?: Array<ImageFile>;
   imageList: Array<ImageFile>;
   imageRatings: Record<string, number>;
   importState: ImportState;
@@ -55,11 +53,11 @@ interface MainLibraryProps {
   libraryViewMode: LibraryViewMode;
   multiSelectedPaths: Array<string>;
   onClearSelection(): void;
-  onContextMenu(event: any, path: string): void;
+  onContextMenu(event: React.MouseEvent, path: string): void;
   onContinueSession(): void;
-  onEmptyAreaContextMenu(event: any): void;
+  onEmptyAreaContextMenu(event: React.MouseEvent): void;
   onGoHome(): void;
-  onImageClick(path: string, event: any): void;
+  onImageClick(path: string, event: React.MouseEvent): void;
   onImageDoubleClick(path: string): void;
   onImportClick(): void;
   onLibraryRefresh(): void;
@@ -75,6 +73,7 @@ interface MainLibraryProps {
   thumbnailProgress: Progress;
   thumbnailSize: ThumbnailSize;
   onNavigateToCommunity(): void;
+  libraryFeatureSlots?: LibraryFeatureSlots;
 }
 
 const ratingFilterOptions = [
@@ -438,7 +437,18 @@ export default function MainLibrary(props: MainLibraryProps) {
             ratingFilterOptions={ratingFilterOptions}
             rawStatusOptions={rawStatusOptions}
             sortOptions={sortOptions}
+            libraryFeatureSlots={props.libraryFeatureSlots}
           />
+          {(props.libraryFeatureSlots?.headerActions ?? []).map((Action, index) => (
+            <Action
+              key={index}
+              currentFolderPath={props.currentFolderPath}
+              imageList={props.imageList}
+              allImageList={props.allImageList ?? props.imageList}
+              selectedPaths={props.multiSelectedPaths}
+              onLibraryRefresh={props.onLibraryRefresh}
+            />
+          ))}
           {!props.isAndroid && (
             <>
               <Button

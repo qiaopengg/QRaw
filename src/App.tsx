@@ -291,7 +291,8 @@ function App() {
     handleTogglePinFolder,
   } = useLibraryActions(handleImageSelect);
 
-  const sortedImageList = useSortedLibrary();
+  const appFeatures = useAppFeatures({ selectedImage });
+  const sortedImageList = useSortedLibrary(appFeatures.library?.filterGroups ?? []);
 
   const handleLibraryRefresh = useCallback(async () => {
     if (currentFolderPath) {
@@ -368,8 +369,6 @@ function App() {
       setTimeout(() => setUI({ isInstantTransition: false }), 100);
     }
   }, [isFullScreen, setUI]);
-
-  const appFeatures = useAppFeatures({ selectedImage });
 
   useKeyboardShortcuts({
     sortedImageList,
@@ -685,6 +684,7 @@ function App() {
                   handlePasteAdjustments={handlePasteAdjustments}
                   handleResetAdjustments={handleResetAdjustments}
                   requestThumbnails={requestThumbnails}
+                  libraryFeatureSlots={appFeatures.library ?? {}}
                 />
               )}
             </div>

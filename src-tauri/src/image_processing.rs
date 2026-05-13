@@ -55,6 +55,12 @@ pub struct ImageMetadata {
     pub adjustments: Value,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    #[serde(
+        default,
+        rename = "featureData",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub feature_data: Option<Value>,
 }
 
 impl Default for ImageMetadata {
@@ -64,6 +70,7 @@ impl Default for ImageMetadata {
             rating: 0,
             adjustments: Value::Null,
             tags: None,
+            feature_data: None,
         }
     }
 }

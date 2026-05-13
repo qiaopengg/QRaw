@@ -11,19 +11,28 @@ import {
   LibraryViewMode,
   SortCriteria,
   SortDirection,
+  Progress,
 } from '../../ui/AppProperties';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
 import Text from '../../ui/Text';
 import { TextColors, TextVariants, TextWeights, TEXT_COLOR_KEYS } from '../../../types/typography';
 import Button from '../../ui/Button';
+import type { LibraryFeatureSlots } from '../../../features/contracts';
 
-function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName = 'w-56' }: any) {
+interface DropdownMenuProps {
+  buttonContent: React.ReactNode;
+  buttonTitle: string;
+  children: React.ReactNode;
+  contentClassName?: string;
+}
+
+function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName = 'w-56' }: DropdownMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<any>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: any) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -65,7 +74,7 @@ function DropdownMenu({ buttonContent, buttonTitle, children, contentClassName =
   );
 }
 
-export function SearchInput({ indexingProgress, isIndexing }: any) {
+export function SearchInput({ indexingProgress, isIndexing }: { indexingProgress: Progress; isIndexing: boolean }) {
   const { searchCriteria, setSearchCriteria } = useLibraryStore(
     useShallow((state) => ({ searchCriteria: state.searchCriteria, setSearchCriteria: state.setSearchCriteria })),
   );
@@ -84,8 +93,8 @@ export function SearchInput({ indexingProgress, isIndexing }: any) {
   }, [isSearchActive]);
 
   useEffect(() => {
-    function handleClickOutside(event: any) {
-      if (containerRef.current && !containerRef.current.contains(event.target) && tags.length === 0 && !text) {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node) && tags.length === 0 && !text) {
         setIsSearchActive(false);
       }
     }
@@ -296,7 +305,21 @@ export function ViewOptionsDropdown({
   ratingFilterOptions,
   rawStatusOptions,
   sortOptions,
-}: any) {
+  libraryFeatureSlots,
+}: {
+  libraryViewMode: LibraryViewMode;
+  onSelectSize(size: ThumbnailSize): void;
+  onSelectAspectRatio(aspectRatio: ThumbnailAspectRatio): void;
+  setLibraryViewMode(mode: LibraryViewMode): void;
+  thumbnailSize: ThumbnailSize;
+  thumbnailAspectRatio: ThumbnailAspectRatio;
+  thumbnailSizeOptions: Array<{ id: ThumbnailSize; label: string; size: number }>;
+  thumbnailAspectRatioOptions: Array<{ id: ThumbnailAspectRatio; label: string }>;
+  ratingFilterOptions: Array<{ value: number; label: string }>;
+  rawStatusOptions: Array<{ key: RawStatus; label: string }>;
+  sortOptions: Array<{ key: string; label: string; disabled?: boolean }>;
+  libraryFeatureSlots?: LibraryFeatureSlots;
+}) {
   const { filterCriteria, setFilterCriteria, sortCriteria, setSortCriteria } = useLibraryStore(
     useShallow((state) => ({
       filterCriteria: state.filterCriteria,
@@ -309,12 +332,13 @@ export function ViewOptionsDropdown({
   const isFilterActive =
     filterCriteria.rating > 0 ||
     (filterCriteria.rawStatus && filterCriteria.rawStatus !== RawStatus.All) ||
-    (filterCriteria.colors && filterCriteria.colors.length > 0);
+    (filterCriteria.colors && filterCriteria.colors.length > 0) ||
+    Object.values(filterCriteria.featureFilters || {}).some((values) => values.length > 0);
 
   const [lastClickedColor, setLastClickedColor] = useState<string | null>(null);
   const allColors = useMemo(() => [...COLOR_LABELS, { name: 'none', color: '#9ca3af' }], []);
 
-  const handleColorClick = (colorName: string, event: any) => {
+  const handleColorClick = (colorName: string, event: React.MouseEvent<HTMLButtonElement>) => {
     const { ctrlKey, metaKey, shiftKey } = event;
     const isCtrlPressed = ctrlKey || metaKey;
     const currentColors = filterCriteria.colors || [];
@@ -342,6 +366,18 @@ export function ViewOptionsDropdown({
     setLastClickedColor(colorName);
   };
 
+  const handleFeatureFilterClick = (groupKey: string, value: string) => {
+    const currentValues = filterCriteria.featureFilters?.[groupKey] || [];
+    const nextValues = currentValues.includes(value) ? [] : [value];
+    setFilterCriteria((prev: FilterCriteria) => ({
+      ...prev,
+      featureFilters: {
+        ...(prev.featureFilters || {}),
+        [groupKey]: nextValues,
+      },
+    }));
+  };
+
   return (
     <DropdownMenu
       buttonContent={
@@ -360,7 +396,7 @@ export function ViewOptionsDropdown({
             <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
               Thumbnail Size
             </Text>
-            {thumbnailSizeOptions.map((option: any) => {
+            {thumbnailSizeOptions.map((option) => {
               const isSelected = thumbnailSize === option.id;
               return (
                 <button
@@ -390,7 +426,7 @@ export function ViewOptionsDropdown({
               <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
                 Thumbnail Fit
               </Text>
-              {thumbnailAspectRatioOptions.map((option: any) => {
+              {thumbnailAspectRatioOptions.map((option) => {
                 const isSelected = thumbnailAspectRatio === option.id;
                 return (
                   <button
@@ -468,7 +504,7 @@ export function ViewOptionsDropdown({
               <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
                 Filter by Rating
               </Text>
-              {ratingFilterOptions.map((option: any) => {
+              {ratingFilterOptions.map((option) => {
                 const isSelected = filterCriteria.rating === option.value;
                 return (
                   <button
@@ -502,7 +538,7 @@ export function ViewOptionsDropdown({
               <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
                 Filter by File Type
               </Text>
-              {rawStatusOptions.map((option: any) => {
+              {rawStatusOptions.map((option) => {
                 const isSelected = (filterCriteria.rawStatus || RawStatus.All) === option.key;
                 return (
                   <button
@@ -545,7 +581,7 @@ export function ViewOptionsDropdown({
                   <button
                     key={color.name}
                     data-tooltip={title}
-                    onClick={(e: any) => handleColorClick(color.name, e)}
+                    onClick={(e) => handleColorClick(color.name, e)}
                     className="w-6 h-6 rounded-full focus:outline-hidden focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-surface transition-transform hover:scale-110"
                     role="menuitem"
                   >
@@ -562,6 +598,36 @@ export function ViewOptionsDropdown({
               })}
             </div>
           </div>
+
+          {(libraryFeatureSlots?.filterGroups ?? []).map((group) => (
+            <div key={group.key} className="pt-3">
+              <Text as="div" variant={TextVariants.small} weight={TextWeights.semibold} className="px-3 py-2 uppercase">
+                {group.label}
+              </Text>
+              {group.options.map((option) => {
+                const isSelected = (filterCriteria.featureFilters?.[group.key] || []).includes(option.value);
+                return (
+                  <button
+                    className={`w-full text-left px-3 py-2 rounded-md flex items-center justify-between transition-colors duration-150 ${
+                      isSelected ? 'bg-card-active' : 'hover:bg-bg-primary'
+                    }`}
+                    key={option.value}
+                    onClick={() => handleFeatureFilterClick(group.key, option.value)}
+                    role="menuitem"
+                  >
+                    <Text
+                      variant={TextVariants.label}
+                      color={TextColors.primary}
+                      weight={isSelected ? TextWeights.semibold : TextWeights.normal}
+                    >
+                      {option.label}
+                    </Text>
+                    {isSelected && <Check size={16} className={TEXT_COLOR_KEYS[TextColors.primary]} />}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
         <div className="library-view-options-section w-1/4 p-2">
@@ -584,7 +650,7 @@ export function ViewOptionsDropdown({
                 {sortCriteria.order === SortDirection.Ascending ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </button>
             </div>
-            {sortOptions.map((option: any) => {
+            {sortOptions.map((option) => {
               const isSelected = sortCriteria.key === option.key;
               return (
                 <button
