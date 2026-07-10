@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import {
   DndContext,
   DragOverlay,
@@ -56,17 +57,13 @@ import { OPTION_SEPARATOR } from '../../ui/AppProperties';
 import { createSubMask } from '../../../utils/maskUtils';
 import Text from '../../ui/Text';
 import { TEXT_COLOR_KEYS, TextColors, TextVariants, TextWeights } from '../../../types/typography';
-
-// NEW IMPORTS
+import { useUser, useAuth } from '@clerk/react';
+import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useEditorStore } from '../../../store/useEditorStore';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { useUIStore } from '../../../store/useUIStore';
 import { useEditorActions } from '../../../hooks/useEditorActions';
 import { useAiMasking } from '../../../hooks/useAiMasking';
-
-interface ConnectionStatusProps {
-  isConnected: boolean;
-}
 
 interface DragData {
   type: 'Container' | 'SubMask' | 'Creation';
@@ -80,134 +77,206 @@ const PLACEHOLDER_PATCH: AiPatch = {
   invert: false,
   isLoading: false,
   name: '',
-  patchData: null,
   prompt: '',
   subMasks: [],
   visible: true,
+  patchData: null,
 };
 
 const SUB_MASK_CONFIG: any = {
   [Mask.Radial]: {
-    parameters: [{ key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 }],
+    parameters: [{ key: 'feather', min: 0, max: 100, step: 1, multiplier: 100, defaultValue: 50 }],
   },
   [Mask.Brush]: { showBrushTools: true },
   [Mask.Linear]: { parameters: [] },
   [Mask.AiSubject]: {
     parameters: [
-      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 25 },
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiForeground]: {
     parameters: [
-      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 50 },
-      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 25 },
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 50 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 25 },
     ],
   },
   [Mask.AiSky]: {
     parameters: [
-      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 0 },
-      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 0 },
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 0 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 0 },
     ],
   },
   [Mask.QuickEraser]: {
     parameters: [
-      { key: 'grow', label: 'Grow', min: -100, max: 100, step: 1, defaultValue: 75 },
-      { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1, defaultValue: 75 },
+      { key: 'grow', min: -100, max: 100, step: 1, defaultValue: 75 },
+      { key: 'feather', min: 0, max: 100, step: 1, defaultValue: 75 },
     ],
   },
 };
 
-const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => (
-  <div>
-    <Slider
-      defaultValue={100}
-      label="Brush Size"
-      max={200}
-      min={1}
-      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
-      step={1}
-      value={settings.size}
-      fillOrigin="min"
-    />
-    <Slider
-      defaultValue={50}
-      label="Brush Feather"
-      max={100}
-      min={0}
-      onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
-      step={1}
-      value={settings.feather}
-      fillOrigin="min"
-    />
-    <div className="grid grid-cols-2 gap-2 pt-2">
-      <button
-        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-          settings.tool === ToolType.Brush
-            ? 'text-primary bg-surface'
-            : 'bg-surface text-text-secondary hover:bg-card-active'
-        }`}
-        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Brush }))}
-      >
-        Add
-      </button>
-      <button
-        className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-          settings.tool === ToolType.Eraser
-            ? 'text-primary bg-surface'
-            : 'bg-surface text-text-secondary hover:bg-card-active'
-        }`}
-        onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Eraser }))}
-      >
-        Erase
-      </button>
-    </div>
-  </div>
-);
+const BrushTools = ({ settings, onSettingsChange }: { settings: any; onSettingsChange: any }) => {
+  const { t } = useTranslation();
 
-const ConnectionStatus = ({ isConnected }: ConnectionStatusProps) => {
-  const [isHovered, setIsHovered] = useState(false);
-  if (isConnected) {
-    return (
-      <div className="flex items-center gap-2 px-4 py-2 bg-surface rounded-lg">
-        <div className={'w-2.5 h-2.5 rounded-full bg-green-500'} />
-        <Text variant={TextVariants.label}>AI Connector:</Text>
-        <Text variant={TextVariants.label} weight={TextWeights.bold} color={TextColors.success}>
-          Ready
-        </Text>
+  return (
+    <div>
+      <Slider
+        defaultValue={100}
+        label={t('editor.ai.brush.size')}
+        max={200}
+        min={1}
+        onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, size: Number(e.target.value) }))}
+        step={1}
+        value={settings.size}
+        fillOrigin="min"
+      />
+      <Slider
+        defaultValue={50}
+        label={t('editor.ai.brush.feather')}
+        max={100}
+        min={0}
+        onChange={(e: any) => onSettingsChange((s: any) => ({ ...s, feather: Number(e.target.value) }))}
+        step={1}
+        value={settings.feather}
+        fillOrigin="min"
+      />
+      <div className="grid grid-cols-2 gap-2 pt-2">
+        <button
+          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            settings.tool === ToolType.Brush
+              ? 'text-primary bg-surface'
+              : 'bg-surface text-text-secondary hover:bg-card-active'
+          }`}
+          onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Brush }))}
+        >
+          {t('editor.ai.brush.add')}
+        </button>
+        <button
+          className={`p-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            settings.tool === ToolType.Eraser
+              ? 'text-primary bg-surface'
+              : 'bg-surface text-text-secondary hover:bg-card-active'
+          }`}
+          onClick={() => onSettingsChange((s: any) => ({ ...s, tool: ToolType.Eraser }))}
+        >
+          {t('editor.ai.brush.erase')}
+        </button>
       </div>
-    );
+    </div>
+  );
+};
+
+interface ConnectionStatusProps {
+  aiProvider: string;
+  isAIConnectorConnected: boolean;
+  isSignedIn: boolean;
+  isPro: boolean;
+  cloudUsage: { requests: number; limit: number; month: string } | null;
+}
+
+const ConnectionStatus = ({
+  aiProvider,
+  isAIConnectorConnected,
+  isSignedIn,
+  isPro,
+  cloudUsage,
+}: ConnectionStatusProps) => {
+  const { t } = useTranslation();
+  const [isHovered, setIsHovered] = useState(false);
+
+  let statusColor = 'bg-green-500';
+  let statusText = t('editor.ai.connection.ready');
+  let titleText = t('editor.ai.connection.backendLabel');
+  let hoverContent: React.ReactNode = null;
+
+  if (aiProvider === 'cloud') {
+    titleText = t('editor.ai.connection.cloudLabel');
+    if (isSignedIn && isPro) {
+      statusColor = 'bg-green-500';
+      statusText = t('editor.ai.connection.ready');
+
+      const reqs = cloudUsage?.requests ?? 0;
+      const limit = cloudUsage?.limit ?? 500;
+      const percent = Math.min(100, (reqs / limit) * 100);
+
+      hoverContent = (
+        <div className="w-full mt-1">
+          <div className="flex justify-between items-center mb-1.5">
+            <Text variant={TextVariants.small}>{t('editor.ai.connection.monthlyUsage')}</Text>
+            <Text variant={TextVariants.small}>
+              {t('settings.processing.ai.cloud.signedIn.usageStats', { requests: reqs, limit: limit })}
+            </Text>
+          </div>
+          <div className="w-full bg-bg-tertiary rounded-full h-1.5 border border-border-color">
+            <div
+              className="bg-accent h-1.5 rounded-full transition-all duration-500"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      );
+    } else if (isSignedIn && !isPro) {
+      statusColor = 'bg-red-500';
+      statusText = t('editor.ai.connection.upgradeRequired');
+      hoverContent = <Text variant={TextVariants.small}>{t('editor.ai.connection.proRequiredDesc')}</Text>;
+    } else {
+      statusColor = 'bg-red-500';
+      statusText = t('editor.ai.connection.notLoggedIn');
+      hoverContent = <Text variant={TextVariants.small}>{t('editor.ai.connection.loginRequiredDesc')}</Text>;
+    }
+  } else if (aiProvider === 'ai-connector') {
+    titleText = t('editor.ai.connection.connectorLabel');
+    if (isAIConnectorConnected) {
+      statusColor = 'bg-green-500';
+      statusText = t('editor.ai.connection.ready');
+      hoverContent = <Text variant={TextVariants.small}>{t('editor.ai.connection.connectorConnectedDesc')}</Text>;
+    } else {
+      statusColor = 'bg-red-500';
+      statusText = t('editor.ai.connection.notDetected');
+      hoverContent = <Text variant={TextVariants.small}>{t('editor.ai.connection.connectorDisconnectedDesc')}</Text>;
+    }
+  } else {
+    titleText = t('editor.ai.connection.builtinLabel');
+    statusColor = 'bg-green-500';
+    statusText = t('editor.ai.connection.ready');
+    hoverContent = <Text variant={TextVariants.small}>{t('editor.ai.connection.builtinDesc')}</Text>;
   }
+
   return (
     <div
       className="bg-surface rounded-lg"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="flex items-center gap-2 px-4 pt-2">
-        <div className={'w-2.5 h-2.5 rounded-full bg-red-500'} />
-        <Text variant={TextVariants.label}>AI Connector:</Text>
-        <Text variant={TextVariants.label} weight={TextWeights.bold} color={TextColors.error}>
-          Not Detected
+      <div className={`flex items-center gap-2 px-4 ${hoverContent ? 'pt-2' : 'py-2'}`}>
+        <div className={`w-2.5 h-2.5 rounded-full ${statusColor}`} />
+        <Text variant={TextVariants.label}>{titleText}</Text>
+        <Text
+          variant={TextVariants.label}
+          weight={TextWeights.bold}
+          className={statusColor === 'bg-green-500' ? 'text-green-500' : 'text-red-500'}
+        >
+          {statusText}
         </Text>
       </div>
-      <div className="px-4 pb-2">
-        <motion.div
-          animate={{ height: isHovered ? 'auto' : 0, opacity: isHovered ? 1 : 0, marginTop: isHovered ? '2px' : 0 }}
-          className="overflow-hidden"
-          initial={{ height: 0, opacity: 0, marginTop: 0 }}
-          transition={{ duration: 0.2, ease: 'easeInOut' }}
-        >
-          <Text variant={TextVariants.small}>
-            Only simple inpainting available. Connect backend for generative features.
-          </Text>
-        </motion.div>
-      </div>
+      {hoverContent && (
+        <div className="px-4 pb-3">
+          <motion.div
+            animate={{ height: isHovered ? 'auto' : 0, opacity: isHovered ? 1 : 0, marginTop: isHovered ? '2px' : 0 }}
+            className="overflow-hidden"
+            initial={{ height: 0, opacity: 0, marginTop: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+          >
+            {hoverContent}
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default function AIPanel() {
+  const { t } = useTranslation();
   const activePatchContainerId = useEditorStore((s) => s.activeAiPatchContainerId);
   const activeSubMaskId = useEditorStore((s) => s.activeAiSubMaskId);
   const adjustments = useEditorStore((s) => s.adjustments);
@@ -223,12 +292,52 @@ export default function AIPanel() {
 
   const { setAdjustments } = useEditorActions();
   const { handleGenerativeReplace, handleDeleteAiPatch, handleGenerateAiForegroundMask } = useAiMasking();
+  const appSettings = useSettingsStore((s) => s.appSettings);
+  const aiProvider = appSettings?.aiProvider || 'cpu';
+
+  const { user, isSignedIn } = useUser();
+  const { getToken } = useAuth();
+  const isPro = user?.publicMetadata?.plan === 'pro';
+  const [cloudUsage, setCloudUsage] = useState<{ requests: number; limit: number; month: string } | null>(null);
+
+  const isGenerativeAvailable =
+    (aiProvider === 'cloud' && !!isSignedIn && !!isPro) || (aiProvider === 'ai-connector' && isAIConnectorConnected);
+
+  useEffect(() => {
+    if (aiProvider !== 'cloud' || !isSignedIn || !isPro) return;
+
+    const fetchUsage = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+
+        const res = await fetch('https://getrapidraw.com/api/usage', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          setCloudUsage(await res.json());
+        }
+      } catch (e) {
+        console.error('Failed to fetch cloud usage', e);
+      }
+    };
+
+    fetchUsage();
+  }, [aiProvider, isSignedIn, isPro, getToken]);
 
   const setBrushSettings = useCallback(
     (updater: any) =>
       setEditor((state) => ({ brushSettings: typeof updater === 'function' ? updater(state.brushSettings) : updater })),
     [setEditor],
   );
+  const selectBrushToolForNewMask = useCallback(() => {
+    setEditor((state) => ({
+      brushSettings: {
+        ...(state.brushSettings ?? { size: 50, feather: 50, tool: ToolType.Brush }),
+        tool: ToolType.Brush,
+      },
+    }));
+  }, [setEditor]);
 
   const onSelectPatchContainer = useCallback(
     (id: string | null) => setEditor({ activeAiPatchContainerId: id }),
@@ -395,9 +504,10 @@ export default function AIPanel() {
         (adjustments.aiPatches || []).filter((p: AiPatch) =>
           p.subMasks.some((sm: SubMask) => sm.type === Mask.QuickEraser),
         ).length + 1;
-      name = `Quick Erase ${count}`;
+      name = t('editor.ai.patches.quickErase', { count });
     } else {
-      name = `AI Edit ${(adjustments.aiPatches || []).length + 1}`;
+      const count = (adjustments.aiPatches || []).length + 1;
+      name = t('editor.ai.patches.aiEdit', { count });
     }
 
     const newContainer: AiPatch = {
@@ -415,6 +525,7 @@ export default function AIPanel() {
     onSelectPatchContainer(newContainer.id);
     onSelectSubMask(subMask.id);
     setExpandedContainers((prev) => new Set(prev).add(newContainer.id));
+    if (type === Mask.Brush) selectBrushToolForNewMask();
 
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
   };
@@ -441,6 +552,7 @@ export default function AIPanel() {
     onSelectPatchContainer(containerId);
     onSelectSubMask(subMask.id);
     setExpandedContainers((prev) => new Set(prev).add(containerId));
+    if (type === Mask.Brush) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
   };
 
@@ -478,12 +590,12 @@ export default function AIPanel() {
         options.push(
           { type: OPTION_SEPARATOR },
           {
-            label: 'Subtract from Edit',
+            label: t('editor.ai.actions.subtractFromEdit'),
             icon: Minus,
             submenu: buildMenu(AI_SUB_MASK_COMPONENT_TYPES, SubMaskMode.Subtractive),
           },
           {
-            label: 'Intersect Edit with',
+            label: t('editor.ai.actions.intersectEditWith'),
             icon: SquaresIntersect,
             submenu: buildMenu(AI_SUB_MASK_COMPONENT_TYPES, SubMaskMode.Intersect),
           },
@@ -603,7 +715,7 @@ export default function AIPanel() {
   const handleDuplicateAndInvertPatchContainer = (container: AiPatch) => {
     const patchIndex = (adjustments.aiPatches || []).findIndex((patch) => patch.id === container.id);
     const duplicatedContainer = clonePatchData(container, { invert: true, rename: false });
-    duplicatedContainer.name = `${container.name} Inverted`;
+    duplicatedContainer.name = t('editor.ai.patches.invertedName', { name: container.name });
 
     insertPatchContainer(duplicatedContainer, patchIndex >= 0 ? patchIndex + 1 : undefined);
   };
@@ -633,7 +745,7 @@ export default function AIPanel() {
     const duplicatedSubMask = cloneSubMaskData(subMask, { invert: true, rename: false });
     const newContainer = clonePatchData(parentContainer, { rename: false });
 
-    newContainer.name = `${getSubMaskName(subMask)} Inverted`;
+    newContainer.name = t('editor.ai.patches.invertedName', { name: getSubMaskName(subMask) });
     newContainer.subMasks = [duplicatedSubMask];
     newContainer.invert = false;
 
@@ -663,8 +775,17 @@ export default function AIPanel() {
     }));
 
     showContextMenu(e.clientX, e.clientY, [
-      { label: 'Paste Edit', icon: ClipboardPaste, disabled: !copiedPatch, onClick: () => handlePastePatch() },
-      { label: 'Add New Edit', icon: Plus, submenu: newEditSubMenu },
+      {
+        label: t('editor.ai.actions.pasteEdit'),
+        icon: ClipboardPaste,
+        disabled: !copiedPatch,
+        onClick: () => handlePastePatch(),
+      },
+      {
+        label: t('editor.ai.addNewEdit'),
+        icon: Plus,
+        submenu: newEditSubMenu,
+      },
     ]);
   };
 
@@ -742,7 +863,7 @@ export default function AIPanel() {
             id: uuidv4(),
             invert: false,
             isLoading: false,
-            name: `AI Edit ${newPatches.length + 1}`,
+            name: t('editor.ai.patches.aiEdit', { count: newPatches.length + 1 }),
             patchData: null,
             prompt: '',
             subMasks: [movedSubMask],
@@ -808,11 +929,11 @@ export default function AIPanel() {
     >
       <div className="flex flex-col h-full select-none overflow-hidden" onContextMenu={handlePanelContextMenu}>
         <div className="p-4 flex justify-between items-center shrink-0 border-b border-surface">
-          <Text variant={TextVariants.title}>Inpainting</Text>
+          <Text variant={TextVariants.title}>{t('editor.ai.inpaintingTitle')}</Text>
           <button
             className="p-2 rounded-full hover:bg-surface transition-colors"
             onClick={handleResetAllAiEdits}
-            data-tooltip="Reset Inpainting"
+            data-tooltip={t('editor.ai.resetInpaintingTooltip')}
           >
             <RotateCcw size={18} />
           </button>
@@ -837,13 +958,19 @@ export default function AIPanel() {
                     weight={TextWeights.normal}
                     className="text-center mt-4"
                   >
-                    No image selected.
+                    {t('editor.ai.noImageSelected')}
                   </Text>
                 ) : (
                   <>
-                    <ConnectionStatus isConnected={isAIConnectorConnected} />
+                    <ConnectionStatus
+                      aiProvider={aiProvider}
+                      isAIConnectorConnected={isAIConnectorConnected}
+                      isSignedIn={!!isSignedIn}
+                      isPro={!!isPro}
+                      cloudUsage={cloudUsage}
+                    />
                     <Text variant={TextVariants.heading} className="mb-2 mt-8">
-                      Create New Generative Edit
+                      {t('editor.ai.createNewTitle')}
                     </Text>
                     <div className="grid grid-cols-3 gap-2" onClick={(e) => e.stopPropagation()}>
                       {AI_PANEL_CREATION_TYPES.map((maskType: MaskType) => (
@@ -870,7 +997,7 @@ export default function AIPanel() {
                 onClick={handleDeselect}
               >
                 <Text variant={TextVariants.heading} className="mb-2">
-                  Edits
+                  {t('editor.ai.editsTitle')}
                 </Text>
 
                 <AnimatePresence
@@ -939,7 +1066,7 @@ export default function AIPanel() {
                   <div className="p-0.5">
                     <Plus size={18} />
                   </div>
-                  <span>Add New Edit</span>
+                  <span>{t('editor.ai.addNewEdit')}</span>
                 </Text>
               </motion.div>
             )}
@@ -957,7 +1084,7 @@ export default function AIPanel() {
                 className="flex-1 min-h-0"
               >
                 <Text variant={TextVariants.heading} className="mb-2">
-                  Edit Settings
+                  {t('editor.ai.editSettingsTitle')}
                 </Text>
                 <SettingsPanel
                   container={activeContainer || null}
@@ -967,12 +1094,12 @@ export default function AIPanel() {
                   setBrushSettings={setBrushSettings}
                   updateContainer={updatePatch}
                   updateSubMask={updateSubMask}
-                  isAIConnectorConnected={isAIConnectorConnected}
                   isGeneratingAi={isGeneratingAi}
                   isGeneratingAiMask={isGeneratingAiMask}
                   onGenerativeReplace={handleGenerativeReplace}
                   collapsibleState={collapsibleState}
                   setCollapsibleState={setCollapsibleState}
+                  isGenerativeAvailable={isGenerativeAvailable}
                 />
               </motion.div>
             )}
@@ -1038,6 +1165,7 @@ export default function AIPanel() {
 }
 
 function NewMaskDropZone({ isOver }: { isOver: boolean }) {
+  const { t } = useTranslation();
   return (
     <motion.div
       layout
@@ -1047,12 +1175,13 @@ function NewMaskDropZone({ isOver }: { isOver: boolean }) {
       transition={{ duration: 0.2, ease: 'easeOut' }}
       className={`p-4 rounded-lg text-center ${isOver ? 'border border-accent/80 bg-bg-tertiary/50' : ''}`}
     >
-      <Text weight={TextWeights.medium}>Drop here to create a new edit</Text>
+      <Text weight={TextWeights.medium}>{t('editor.ai.dropzoneText')}</Text>
     </motion.div>
   );
 }
 
 function DraggableGridItem({ maskType, isGenerating, onClick }: any) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `create-ai-${maskType.type}`,
     data: { type: 'Creation', maskType: maskType.type },
@@ -1071,7 +1200,9 @@ function DraggableGridItem({ maskType, isGenerating, onClick }: any) {
                 : 'hover:bg-card-active active:bg-accent/20'
             }
             ${isDragging ? 'opacity-50' : ''}`}
-      data-tooltip={maskType.disabled ? 'Coming Soon' : `Create New ${maskType.name} Edit`}
+      data-tooltip={
+        maskType.disabled ? t('editor.ai.comingSoon') : t('editor.ai.createNewTooltip', { name: maskType.name })
+      }
       whileTap={{ scale: 0.98 }}
       transition={{ type: 'spring', stiffness: 400, damping: 17 }}
     >
@@ -1115,6 +1246,7 @@ function ContainerRow({
   analyzingSubMaskId,
   onAddComponent,
 }: any) {
+  const { t } = useTranslation();
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: container.id,
     data: { type: 'Container', item: container },
@@ -1144,29 +1276,38 @@ function ContainerRow({
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
       {
-        label: 'Rename',
+        label: t('editor.ai.actions.rename'),
         icon: FileEdit,
         onClick: () => {
           setRenamingId(container.id);
           setTempName(container.name);
         },
       },
-      { label: 'Duplicate Edit', icon: PlusSquare, onClick: () => handleDuplicate(container) },
-      { label: 'Duplicate and Invert Edit', icon: RotateCcw, onClick: () => handleDuplicateAndInvert(container) },
-      { label: 'Copy Edit', icon: Copy, onClick: () => copyPatchToClipboard(container) },
+      { label: t('editor.ai.actions.duplicateEdit'), icon: PlusSquare, onClick: () => handleDuplicate(container) },
       {
-        label: 'Paste Edit',
+        label: t('editor.ai.actions.duplicateAndInvertEdit'),
+        icon: RotateCcw,
+        onClick: () => handleDuplicateAndInvert(container),
+      },
+      { label: t('editor.ai.actions.copyEdit'), icon: Copy, onClick: () => copyPatchToClipboard(container) },
+      {
+        label: t('editor.ai.actions.pasteEdit'),
         icon: ClipboardPaste,
         disabled: !copiedPatch,
         onClick: () => handlePastePatch(container.id),
       },
       { type: OPTION_SEPARATOR },
       {
-        label: 'Reset Selection',
+        label: t('editor.ai.actions.resetSelection'),
         icon: RotateCcw,
         onClick: () => updateContainer(container.id, { subMasks: [] }),
       },
-      { label: 'Delete Edit', icon: Trash2, isDestructive: true, onClick: () => handleDelete(container.id) },
+      {
+        label: t('editor.ai.actions.deleteEdit'),
+        icon: Trash2,
+        isDestructive: true,
+        onClick: () => handleDelete(container.id),
+      },
     ]);
   };
 
@@ -1242,7 +1383,7 @@ function ContainerRow({
         <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             className="p-1 hover:text-text-primary text-text-secondary"
-            data-tooltip={container.visible ? 'Hide Edit' : 'Show Edit'}
+            data-tooltip={container.visible ? t('editor.ai.actions.hideEdit') : t('editor.ai.actions.showEdit')}
             onClick={(e) => {
               e.stopPropagation();
               updateContainer(container.id, { visible: !container.visible });
@@ -1252,7 +1393,7 @@ function ContainerRow({
           </button>
           <button
             className="p-1 hover:text-red-500 text-text-secondary"
-            data-tooltip="Delete Edit"
+            data-tooltip={t('editor.ai.actions.deleteEdit')}
             onClick={(e) => {
               e.stopPropagation();
               handleDelete(container.id);
@@ -1326,7 +1467,7 @@ function ContainerRow({
                     <div className="relative w-4 h-4 ml-1 shrink-0 flex items-center justify-center">
                       <Plus size={16} />
                     </div>
-                    <span className="select-none">Add New Component</span>
+                    <span className="select-none">{t('editor.ai.actions.addNewComponent')}</span>
                   </Text>
                 </motion.div>
               )}
@@ -1361,6 +1502,7 @@ function SubMaskRow({
   setTempName,
   isParentLoading,
 }: any) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: subMask.id,
     data: { type: 'SubMask', item: subMask, parentId: containerId },
@@ -1409,19 +1551,24 @@ function SubMaskRow({
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, [
       {
-        label: 'Rename',
+        label: t('editor.ai.actions.rename'),
         icon: FileEdit,
         onClick: () => {
           setRenamingId(subMask.id);
           setTempName(getSubMaskName(subMask));
         },
       },
-      { label: 'Duplicate Component', icon: PlusSquare, onClick: handleDuplicate },
-      { label: 'Duplicate and Invert Component', icon: RotateCcw, onClick: handleDuplicateAndInvert },
-      { label: 'Copy Component', icon: Copy, onClick: handleCopy },
-      { label: 'Paste Component', icon: ClipboardPaste, disabled: !hasCopiedSubMask, onClick: handlePaste },
+      { label: t('editor.ai.actions.duplicateComponent'), icon: PlusSquare, onClick: handleDuplicate },
+      { label: t('editor.ai.actions.duplicateAndInvertComponent'), icon: RotateCcw, onClick: handleDuplicateAndInvert },
+      { label: t('editor.ai.actions.copyComponent'), icon: Copy, onClick: handleCopy },
+      {
+        label: t('editor.ai.actions.pasteComponent'),
+        icon: ClipboardPaste,
+        disabled: !hasCopiedSubMask,
+        onClick: handlePaste,
+      },
       { type: OPTION_SEPARATOR },
-      { label: 'Delete Component', icon: Trash2, isDestructive: true, onClick: handleDelete },
+      { label: t('editor.ai.actions.deleteComponent'), icon: Trash2, isDestructive: true, onClick: handleDelete },
     ]);
   };
   const showNumber = isHovered && totalCount > 1;
@@ -1514,10 +1661,10 @@ function SubMaskRow({
             className="p-1 hover:text-text-primary text-text-secondary"
             data-tooltip={
               subMask.mode === SubMaskMode.Additive
-                ? 'Switch to Subtract'
+                ? t('editor.ai.actions.switchToSubtract')
                 : subMask.mode === SubMaskMode.Subtractive
-                  ? 'Switch to Intersect'
-                  : 'Switch to Add'
+                  ? t('editor.ai.actions.switchToIntersect')
+                  : t('editor.ai.actions.switchToAdd')
             }
             onClick={(e) => {
               e.stopPropagation();
@@ -1542,7 +1689,7 @@ function SubMaskRow({
         )}
         <button
           className="p-1 hover:text-red-500 text-text-secondary"
-          data-tooltip="Delete Component"
+          data-tooltip={t('editor.ai.actions.deleteComponent')}
           onClick={(e) => {
             e.stopPropagation();
             handleDelete();
@@ -1563,21 +1710,19 @@ function SettingsPanel({
   setBrushSettings,
   updateContainer,
   updateSubMask,
-  isAIConnectorConnected,
   isGeneratingAi,
   isGeneratingAiMask: _isGeneratingAiMask,
   onGenerativeReplace,
   collapsibleState,
   setCollapsibleState,
+  isGenerativeAvailable,
 }: any) {
+  const { t } = useTranslation();
   const isActive = !!container;
   const isComponentMode = !!activeSubMask;
-
   const displayContainer = container || PLACEHOLDER_PATCH;
-
   const [prompt, setPrompt] = useState(displayContainer.prompt || '');
-  const [useFastInpaint, setUseFastInpaint] = useState(!isAIConnectorConnected);
-
+  const [useFastInpaint, setUseFastInpaint] = useState(!isGenerativeAvailable);
   const prevContainerId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1588,7 +1733,7 @@ function SettingsPanel({
 
   useEffect(() => {
     if (container) {
-      if (!isAIConnectorConnected) {
+      if (!isGenerativeAvailable) {
         setUseFastInpaint(true);
       } else if (container.id !== prevContainerId.current) {
         setUseFastInpaint(isQuickErasePatch);
@@ -1597,7 +1742,7 @@ function SettingsPanel({
     } else {
       prevContainerId.current = null;
     }
-  }, [isAIConnectorConnected, container, isQuickErasePatch]);
+  }, [isGenerativeAvailable, container, isQuickErasePatch]);
 
   const subMaskConfig = activeSubMask ? SUB_MASK_CONFIG[activeSubMask.type] || {} : {};
   const isAiMask =
@@ -1621,7 +1766,7 @@ function SettingsPanel({
       onClick={(e) => e.stopPropagation()}
     >
       <CollapsibleSection
-        title="Generative Replace"
+        title={t('editor.ai.settings.generativeReplaceTitle')}
         isOpen={collapsibleState.generative}
         onToggle={() => handleToggleSection('generative')}
         canToggleVisibility={false}
@@ -1638,7 +1783,7 @@ function SettingsPanel({
             >
               <Loader2 size={16} className="animate-spin shrink-0" />
               <div className="leading-relaxed">
-                <Text variant={TextVariants.small}>Downloading: </Text>
+                <Text variant={TextVariants.small}>{t('editor.ai.settings.downloading')}</Text>
                 <span>{aiModelDownloadStatus}</span>
               </div>
             </Text>
@@ -1646,22 +1791,22 @@ function SettingsPanel({
 
           <Text variant={TextVariants.small}>
             {isQuickErasePatch
-              ? 'Fill selection to remove the object.'
+              ? t('editor.ai.settings.quickEraseDesc')
               : useFastInpaint
-                ? 'Fill selection based on surrounding pixels.'
-                : 'Describe what you want to generate in the selected area.'}
+                ? t('editor.ai.settings.fastInpaintDesc')
+                : t('editor.ai.settings.generativeDesc')}
           </Text>
 
           <div>
             <Switch
               checked={useFastInpaint}
-              disabled={!isAIConnectorConnected}
-              label="Use basic inpainting"
+              disabled={!isGenerativeAvailable}
+              label={t('editor.ai.settings.useBasicInpaint')}
               onChange={setUseFastInpaint}
               tooltip={
-                !isAIConnectorConnected
-                  ? 'AI Connector not connected, basic inpainting is required.'
-                  : 'Basic inpainting is quicker but not generative. Uncheck to use AI Connector with a text prompt.'
+                !isGenerativeAvailable
+                  ? t('editor.ai.settings.basicInpaintTooltipDisabled')
+                  : t('editor.ai.settings.basicInpaintTooltipEnabled')
               }
             />
 
@@ -1685,7 +1830,7 @@ function SettingsPanel({
                       onKeyDown={(e: any) => {
                         if (e.key === 'Enter') handleGenerateClick();
                       }}
-                      placeholder="e.g., a field of flowers"
+                      placeholder={t('editor.ai.settings.placeholder')}
                       type="text"
                       value={prompt}
                     />
@@ -1707,17 +1852,21 @@ function SettingsPanel({
             )}
             <span className="ml-2">
               {isGeneratingAi || displayContainer.isLoading
-                ? 'Generating...'
+                ? t('editor.ai.settings.generating')
                 : useFastInpaint
-                  ? 'Inpaint Selection'
-                  : 'Generate with AI'}
+                  ? t('editor.ai.settings.inpaintSelectionButton')
+                  : t('editor.ai.settings.generateWithAiButton')}
             </span>
           </Button>
         </div>
       </CollapsibleSection>
 
       <CollapsibleSection
-        title={isComponentMode ? `${getSubMaskName(activeSubMask)} Properties` : 'Selection Properties'}
+        title={
+          isComponentMode
+            ? t('editor.ai.settings.componentPropertiesTitle', { name: getSubMaskName(activeSubMask) })
+            : t('editor.ai.settings.selectionPropertiesTitle')
+        }
         isOpen={collapsibleState.properties}
         onToggle={() => handleToggleSection('properties')}
         canToggleVisibility={false}
@@ -1726,7 +1875,7 @@ function SettingsPanel({
         <div className="space-y-4 pt-2">
           <Switch
             checked={!!(isComponentMode ? activeSubMask.invert : displayContainer.invert)}
-            label={isComponentMode ? 'Invert Component' : 'Invert Selection'}
+            label={isComponentMode ? t('editor.ai.settings.invertComponent') : t('editor.ai.settings.invertSelection')}
             onChange={(v) =>
               isComponentMode
                 ? updateSubMask(activeSubMask.id, { invert: v })
@@ -1746,7 +1895,7 @@ function SettingsPanel({
                 >
                   <Loader2 size={16} className="animate-spin shrink-0" />
                   <div className="leading-relaxed">
-                    <Text variant={TextVariants.small}>AI Model Downloading: </Text>
+                    <Text variant={TextVariants.small}>{t('editor.ai.settings.aiModelDownloading')}</Text>
                     <span>{aiModelDownloadStatus}</span>
                   </div>
                 </Text>
@@ -1755,7 +1904,7 @@ function SettingsPanel({
               {subMaskConfig.parameters?.map((param: any) => (
                 <Slider
                   key={param.key}
-                  label={param.label}
+                  label={t('editor.ai.params.' + param.key)}
                   min={param.min}
                   max={param.max}
                   step={param.step}

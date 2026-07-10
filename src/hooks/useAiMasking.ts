@@ -6,6 +6,7 @@ import { useEditorActions } from './useEditorActions';
 import { Adjustments, AiPatch, MaskContainer, Coord } from '../utils/adjustments';
 import { SubMask } from '../components/panel/right/Masks';
 import { Invokes } from '../components/ui/AppProperties';
+import { useAuth } from '@clerk/react';
 
 const getTransformAdjustments = (adj: Adjustments) => ({
   transformDistortion: adj.transformDistortion,
@@ -30,6 +31,7 @@ const getTransformAdjustments = (adj: Adjustments) => ({
 export function useAiMasking() {
   const { setAdjustments } = useEditorActions();
   const setEditor = useEditorStore((state) => state.setEditor);
+  const { getToken } = useAuth();
 
   const updateSubMask = useCallback(
     (subMaskId: string, updatedData: any) => {
@@ -57,6 +59,7 @@ export function useAiMasking() {
       if (!patch) return;
 
       const patchDefinition = { ...patch, prompt };
+      const token = await getToken();
 
       setAdjustments((prev: Adjustments) => ({
         ...prev,
@@ -71,6 +74,7 @@ export function useAiMasking() {
           patchDefinition: patchDefinition,
           path: selectedImage.path,
           useFastInpaint: useFastInpaint,
+          token: token || null,
         });
 
         const newPatchData = JSON.parse(newPatchDataJson);
@@ -107,6 +111,7 @@ export function useAiMasking() {
     async (subMaskId: string | null, startPoint: Coord, endPoint: Coord) => {
       const { selectedImage, adjustments, isGeneratingAi, patchesSentToBackend } = useEditorStore.getState();
       if (!selectedImage?.path || isGeneratingAi) return;
+      const token = await getToken();
 
       const patchId = adjustments.aiPatches.find((p: AiPatch) =>
         p.subMasks.some((sm: SubMask) => sm.id === subMaskId),
@@ -156,6 +161,7 @@ export function useAiMasking() {
           patchDefinition: { ...patchDefinitionForBackend, prompt: '' },
           path: selectedImage.path,
           useFastInpaint: true,
+          token: token || null,
         });
 
         const newPatchData = JSON.parse(newPatchDataJson);

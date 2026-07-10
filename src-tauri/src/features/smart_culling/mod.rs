@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
-    fs, io,
+    fs,
+    io::Read,
     io::Write,
     path::{Path, PathBuf},
     sync::{
@@ -24,7 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use crate::{
-    app_settings::load_settings,
+    app_settings::{AppSettings, load_settings},
     file_management::{parse_virtual_path, sync_metadata_to_xmp},
     formats::{is_raw_file, is_supported_image_file},
     image_loader,
@@ -936,8 +937,6 @@ fn run_task(
         .collect();
 
     let app_settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let highlight_compression = app_settings.raw_highlight_compression.unwrap_or(2.5);
-    let linear_mode = app_settings.linear_raw_mode;
     let completed = Arc::new(AtomicUsize::new(0));
     let hasher = HasherConfig::new()
         .hash_alg(HashAlg::DoubleGradient)
@@ -961,8 +960,7 @@ fn run_task(
             analyze_asset(
                 asset,
                 &hasher,
-                highlight_compression,
-                linear_mode.clone(),
+                &app_settings,
                 &params,
                 clip_models.as_ref(),
                 degraded,
@@ -1073,23 +1071,15 @@ fn normalize_assets(params: &SmartCullingStartParams) -> Vec<SmartCullingAsset> 
 fn analyze_asset(
     asset: &SmartCullingAsset,
     hasher: &image_hasher::Hasher,
-    highlight_compression: f32,
-    linear_mode: String,
+    app_settings: &AppSettings,
     params: &SmartCullingStartParams,
     clip_models: Option<&Arc<crate::ai_processing::ClipModels>>,
     degraded: bool,
 ) -> Result<ImageAnalysisData, String> {
     let bytes = fs::read(&asset.source_path).map_err(|e| e.to_string())?;
     let path_str = asset.source_path.to_string_lossy().to_string();
-    let img = image_loader::load_base_image_from_bytes(
-        &bytes,
-        &path_str,
-        true,
-        highlight_compression,
-        linear_mode,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    let img = image_loader::load_base_image_from_bytes(&bytes, &path_str, true, app_settings, None)
+        .map_err(|e| e.to_string())?;
 
     let (width, height) = img.dimensions();
     let thumbnail = img.thumbnail(720, 720);
@@ -2183,8 +2173,15 @@ fn verify_sha256(path: &Path, expected_hash: &str) -> Result<bool, String> {
 
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher).map_err(|e| e.to_string())?;
-    let actual = format!("{:x}", hasher.finalize());
+    let mut buffer = [0; 8192];
+    loop {
+        let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let actual = hex::encode(hasher.finalize());
     Ok(actual == expected_hash)
 }
 

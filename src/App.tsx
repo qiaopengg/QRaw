@@ -8,7 +8,7 @@ import clsx from 'clsx';
 
 import TitleBar from './window/TitleBar';
 import FolderTree from './components/panel/FolderTree';
-import LibraryExportPanel from './components/panel/right/LibraryExportPanel';
+import ExportPanel from './components/panel/right/ExportPanel';
 import Resizer from './components/ui/Resizer';
 import GlobalTooltip from './components/ui/GlobalTooltip';
 import AppModals from './components/modals/AppModals';
@@ -32,6 +32,9 @@ import { useFileOperations } from './hooks/useFileOperations';
 import { useAppContextMenus } from './hooks/useAppContextMenus';
 import { useSortedLibrary } from './hooks/useSortedLibrary';
 import { useAppNavigation } from './hooks/useAppNavigation';
+import { useExternalEditSession } from './hooks/useExternalEditSession';
+import ExternalEditBar from './components/ui/ExternalEditBar';
+import { Status } from './components/ui/ExportImportProperties';
 
 import { useEditorActions } from './hooks/useEditorActions';
 import { useLibraryActions } from './hooks/useLibraryActions';
@@ -39,6 +42,8 @@ import { useProductivityActions } from './hooks/useProductivityActions';
 
 import { useAppFeatures } from './features/appFeatures';
 import { useAppInitialization } from './hooks/useAppInitialization';
+import './i18n';
+
 import {
   Invokes,
   ImageFile,
@@ -54,16 +59,6 @@ import ImageProcessingManager from './components/managers/ImageProcessingManager
 import ImageLoaderManager from './components/managers/ImageLoaderManager';
 
 const CLERK_PUBLISHABLE_KEY = 'pk_test_YnJpZWYtc2Vhc25haWwtMTIuY2xlcmsuYWNjb3VudHMuZGV2JA'; // local dev key
-
-const RIGHT_PANEL_ORDER = [
-  Panel.Metadata,
-  Panel.Adjustments,
-  Panel.Crop,
-  Panel.Masks,
-  Panel.Ai,
-  Panel.Presets,
-  Panel.Export,
-];
 
 const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[]): any => {
   if (!node) return null;
@@ -131,9 +126,9 @@ function App() {
     })),
   );
 
-  const { rootPath, currentFolderPath, expandedFolders, multiSelectedPaths, setLibrary } = useLibraryStore(
+  const { rootPaths, currentFolderPath, expandedFolders, multiSelectedPaths, setLibrary } = useLibraryStore(
     useShallow((state) => ({
-      rootPath: state.rootPath,
+      rootPaths: state.rootPaths,
       currentFolderPath: state.currentFolderPath,
       expandedFolders: state.expandedFolders,
       multiSelectedPaths: state.multiSelectedPaths,
@@ -152,12 +147,9 @@ function App() {
       })),
     );
 
-  const { exportState, isCopied, isPasted, setProcess, setExportState } = useProcessStore(
+  const { exportState, setExportState } = useProcessStore(
     useShallow((state) => ({
       exportState: state.exportState,
-      isCopied: state.isCopied,
-      isPasted: state.isPasted,
-      setProcess: state.setProcess,
       setExportState: state.setExportState,
     })),
   );
@@ -198,9 +190,9 @@ function App() {
 
   const transformWrapperRef = useRef<any>(null);
   const preloadedDataRef = useRef<{
-    tree?: Promise<any>;
+    trees?: Promise<any>;
     images?: Promise<ImageFile[]>;
-    rootPath?: string;
+    rootPaths?: string[];
     currentPath?: string;
   }>({});
 
@@ -274,12 +266,19 @@ function App() {
     handleBackToLibrary,
     handleImageSelect,
     handleSelectSubfolder,
+    handleSelectAlbum,
     handleOpenFolder,
     handleContinueSession,
   } = useAppNavigation({
     clearThumbnailQueue,
     refs: navigationRefs,
   });
+
+  const {
+    externalEditSession,
+    isFinishing: isExternalEditFinishing,
+    finishExternalEdit,
+  } = useExternalEditSession(handleImageSelect);
 
   const {
     handleRate,
@@ -289,6 +288,8 @@ function App() {
     handleSetColorLabel,
     refreshAllFolderTrees,
     handleTogglePinFolder,
+    handleCreateAlbumItem,
+    handleRenameAlbumItem,
   } = useLibraryActions(handleImageSelect);
 
   const appFeatures = useAppFeatures({ selectedImage });
@@ -296,9 +297,27 @@ function App() {
 
   const handleLibraryRefresh = useCallback(async () => {
     if (currentFolderPath) {
-      await handleSelectSubfolder(currentFolderPath, false);
+      if (currentFolderPath.startsWith('Album: ')) {
+        const { activeAlbumId, albumTree } = useLibraryStore.getState();
+        if (activeAlbumId) {
+          const findObj = (nodes: any[]): any => {
+            for (const n of nodes) {
+              if (n.id === activeAlbumId) return n;
+              if (n.type === 'group') {
+                const f = findObj(n.children);
+                if (f) return f;
+              }
+            }
+            return null;
+          };
+          const album = findObj(albumTree);
+          if (album) await handleSelectAlbum(album.id, album.name, album.images, true);
+        }
+      } else {
+        await handleSelectSubfolder(currentFolderPath, false, undefined, false, true);
+      }
     }
-  }, [currentFolderPath, handleSelectSubfolder]);
+  }, [currentFolderPath, handleSelectSubfolder, handleSelectAlbum]);
 
   const {
     executeDelete,
@@ -333,6 +352,7 @@ function App() {
     handleEditorContextMenu,
     handleThumbnailContextMenu,
     handleFolderTreeContextMenu,
+    handleAlbumTreeContextMenu,
     handleMainLibraryContextMenu,
   } = useAppContextMenus({
     handleImageSelect,
@@ -415,18 +435,6 @@ function App() {
     window.addEventListener('contextmenu', handleGlobalContextMenu);
     return () => window.removeEventListener('contextmenu', handleGlobalContextMenu);
   }, []);
-
-  useEffect(() => {
-    if (!isCopied) return;
-    const timer = setTimeout(() => setProcess({ isCopied: false }), 1000);
-    return () => clearTimeout(timer);
-  }, [isCopied, setProcess]);
-
-  useEffect(() => {
-    if (!isPasted) return;
-    const timer = setTimeout(() => setProcess({ isPasted: false }), 1000);
-    return () => clearTimeout(timer);
-  }, [isPasted, setProcess]);
 
   const isLightTheme = useMemo(() => [Theme.Light, Theme.Snow, Theme.Arctic].includes(theme as Theme), [theme]);
 
@@ -528,7 +536,7 @@ function App() {
 
   const handleRightPanelSelect = useCallback(
     (panelId: Panel) => {
-      setRightPanel(panelId, RIGHT_PANEL_ORDER);
+      setRightPanel(panelId);
       setEditor({ activeMaskId: null, activeAiSubMaskId: null, isWbPickerActive: false });
     },
     [setRightPanel, setEditor],
@@ -553,7 +561,9 @@ function App() {
           path,
           showImageCounts: showCounts,
         });
-        setLibrary((state) => ({ folderTree: insertChildrenIntoTree(state.folderTree, path, newChildren) }));
+        setLibrary((state) => ({
+          folderTrees: state.folderTrees.map((t: any) => insertChildrenIntoTree(t, path, newChildren)),
+        }));
         setLibrary((state) => ({
           pinnedFolderTrees: state.pinnedFolderTrees.map((tree) => insertChildrenIntoTree(tree, path, newChildren)),
         }));
@@ -564,8 +574,10 @@ function App() {
     [expandedFolders, appSettings?.enableFolderImageCounts, setLibrary],
   );
 
+  const hasRoots = rootPaths && rootPaths.length > 0;
+
   const renderFolderTree = () => {
-    if (!rootPath) return null;
+    if (!hasRoots) return null;
 
     return (
       <div
@@ -582,8 +594,11 @@ function App() {
           isResizing={isResizing}
           isVisible={uiVisibility.folderTree}
           onContextMenu={handleFolderTreeContextMenu}
+          onAlbumContextMenu={handleAlbumTreeContextMenu}
+          onSelectAlbum={handleSelectAlbum}
           onFolderSelect={(path) => handleSelectSubfolder(path, false)}
           onToggleFolder={handleToggleFolder}
+          onOpenFolder={handleOpenFolder}
           setIsVisible={(value: boolean) =>
             setUI((state) => ({ uiVisibility: { ...state.uiVisibility, folderTree: value } }))
           }
@@ -628,13 +643,21 @@ function App() {
         <div
           className={clsx(
             'flex-1 flex flex-col min-h-0',
-            isLayoutReady && rootPath && !isInstantTransition && 'transition-all duration-300 ease-in-out',
-            [rootPath && (isFullScreen ? 'p-0 gap-0' : 'p-2 gap-2')],
+            isLayoutReady && hasRoots && !isInstantTransition && 'transition-all duration-300 ease-in-out',
+            [hasRoots && (isFullScreen ? 'p-0 gap-0' : 'p-2 gap-2')],
           )}
         >
           <div className="flex flex-row grow h-full min-h-0">
             {!shouldHideFolderTree && renderFolderTree()}
-            <div className="flex-1 flex flex-col min-w-0">
+            <div className="relative flex-1 flex flex-col min-w-0">
+              {selectedImage && externalEditSession && (
+                <ExternalEditBar
+                  session={externalEditSession}
+                  isFinishing={isExternalEditFinishing}
+                  errorMessage={exportState.status === Status.Error ? exportState.errorMessage : ''}
+                  onDone={finishExternalEdit}
+                />
+              )}
               {selectedImage ? (
                 <EditorView
                   transformWrapperRef={transformWrapperRef}
@@ -698,16 +721,16 @@ function App() {
               )}
               style={{ width: isLibraryExportPanelVisible && !isFullScreen ? `${rightPanelWidth}px` : '0px' }}
             >
-              <LibraryExportPanel
+              <ExportPanel
                 exportState={exportState}
-                imageList={sortedImageList}
-                isVisible={isLibraryExportPanelVisible}
                 multiSelectedPaths={multiSelectedPaths}
-                onClose={() => setUI({ isLibraryExportPanelVisible: false })}
+                selectedImage={null}
                 setExportState={setExportState}
                 appSettings={appSettings}
                 onSettingsChange={handleSettingsChange}
-                rootPath={rootPath}
+                rootPaths={rootPaths}
+                isVisible={isLibraryExportPanelVisible}
+                onClose={() => setUI({ isLibraryExportPanelVisible: false })}
               />
             </div>
           </div>
@@ -730,6 +753,8 @@ function App() {
           handleRate={handleRate}
           executeDelete={executeDelete}
           handleSaveCollage={handleSaveCollage}
+          handleCreateAlbumItem={handleCreateAlbumItem}
+          handleRenameAlbumItem={handleRenameAlbumItem}
         />
         <ToastContainer
           position="bottom-right"
@@ -756,7 +781,7 @@ function App() {
 }
 
 const AppWrapper = () => (
-  <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+  <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} routerPush={(to) => {}} routerReplace={(to) => {}}>
     <ContextMenuProvider>
       <App />
       <GlobalTooltip />

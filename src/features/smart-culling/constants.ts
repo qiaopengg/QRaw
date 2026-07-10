@@ -1,5 +1,22 @@
 export const SMART_CULLING_REVIEW_VIEW = 'smart-culling-review';
 
+export const SMART_CULLING_INVOKES = {
+  ApplyTaskResult: 'smart_culling_apply_task_result',
+  CancelTask: 'smart_culling_cancel_task',
+  CheckModels: 'smart_culling_check_models',
+  DeletePreset: 'smart_culling_delete_preset',
+  DiscardTaskResult: 'smart_culling_discard_task_result',
+  DownloadModels: 'smart_culling_download_models',
+  ExportReportPdf: 'smart_culling_export_report_pdf',
+  GetTaskResult: 'smart_culling_get_task_result',
+  ListPresets: 'smart_culling_list_presets',
+  ListRecentTasks: 'smart_culling_list_recent_tasks',
+  OpenModelsDir: 'smart_culling_open_models_dir',
+  SavePreset: 'smart_culling_save_preset',
+  StartTask: 'smart_culling_start_task',
+  UndoTask: 'smart_culling_undo_task',
+} as const;
+
 export const SMART_CULLING_MODES = [
   { value: 'portrait', label: '人像' },
   { value: 'wedding_event', label: '婚礼/活动' },

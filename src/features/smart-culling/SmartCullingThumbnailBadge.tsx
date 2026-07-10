@@ -1,10 +1,11 @@
 import { Sparkles, Star } from 'lucide-react';
 import type { LibraryThumbnailBadgeSlotProps } from '../contracts';
+import { getSmartCullingImageMetadata } from './metadata';
 import Text from '../../components/ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 
 export default function SmartCullingThumbnailBadge({ image }: LibraryThumbnailBadgeSlotProps) {
-  const smart = image.featureData?.smartCulling;
+  const smart = getSmartCullingImageMetadata(image);
   if (!smart || !smart.rating || smart.status === 'skipped') return null;
 
   return (

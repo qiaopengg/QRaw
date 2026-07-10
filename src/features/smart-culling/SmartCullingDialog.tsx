@@ -6,12 +6,13 @@ import Button from '../../components/ui/Button';
 import Dropdown from '../../components/ui/Dropdown';
 import Switch from '../../components/ui/Switch';
 import Text from '../../components/ui/Text';
-import { Invokes, ImageFile } from '../../components/ui/AppProperties';
+import { ImageFile } from '../../components/ui/AppProperties';
 import { useUIStore } from '../../store/useUIStore';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import {
   SMART_CULLING_AESTHETIC_PREFERENCES,
   SMART_CULLING_FACE_CHECKS,
+  SMART_CULLING_INVOKES,
   SMART_CULLING_MODES,
   SMART_CULLING_PRESETS,
   SMART_CULLING_RANGES,
@@ -133,7 +134,7 @@ export default function SmartCullingDialog({
         faceAnalysisEnabled,
         allowDegraded: true,
       };
-      const response = await invoke<{ taskId: string }>(Invokes.SmartCullingStartTask, { params });
+      const response = await invoke<{ taskId: string }>(SMART_CULLING_INVOKES.StartTask, { params });
       setSmartCulling({
         activeTaskId: response.taskId,
         isRunning: true,
@@ -153,7 +154,7 @@ export default function SmartCullingDialog({
     if (!activeTaskId || isCancellingTask) return;
     setIsCancellingTask(true);
     try {
-      await invoke(Invokes.SmartCullingCancelTask, { taskId: activeTaskId });
+      await invoke(SMART_CULLING_INVOKES.CancelTask, { taskId: activeTaskId });
       setSmartCulling((state) => ({
         progress: state.progress ? { ...state.progress, stage: '正在取消任务' } : state.progress,
         error: null,
@@ -165,14 +166,14 @@ export default function SmartCullingDialog({
   };
 
   const handleOpenModelsDir = () => {
-    invoke<string>(Invokes.SmartCullingOpenModelsDir)
+    invoke<string>(SMART_CULLING_INVOKES.OpenModelsDir)
       .then((path) => open(path))
       .catch((error) => setSmartCulling({ error: String(error) }));
   };
 
   const refreshModelsStatus = async () => {
     try {
-      setModelsStatus(await invoke<SmartCullingModelsStatus>(Invokes.SmartCullingCheckModels));
+      setModelsStatus(await invoke<SmartCullingModelsStatus>(SMART_CULLING_INVOKES.CheckModels));
     } catch (error) {
       setModelsStatus({
         modelsDir: '',
@@ -190,7 +191,7 @@ export default function SmartCullingDialog({
     if (isDownloadingModels) return;
     setIsDownloadingModels(true);
     try {
-      const status = await invoke<SmartCullingModelsStatus>(Invokes.SmartCullingDownloadModels);
+      const status = await invoke<SmartCullingModelsStatus>(SMART_CULLING_INVOKES.DownloadModels);
       setModelsStatus(status);
     } catch (error) {
       setSmartCulling({ error: String(error) });
@@ -202,7 +203,7 @@ export default function SmartCullingDialog({
 
   const refreshRecentTasks = async () => {
     try {
-      setRecentTasks(await invoke<SmartCullingHistoryItem[]>(Invokes.SmartCullingListRecentTasks));
+      setRecentTasks(await invoke<SmartCullingHistoryItem[]>(SMART_CULLING_INVOKES.ListRecentTasks));
     } catch {
       setRecentTasks([]);
     }
@@ -210,7 +211,7 @@ export default function SmartCullingDialog({
 
   const refreshUserPresets = async () => {
     try {
-      setUserPresets(await invoke<SmartCullingUserPreset[]>(Invokes.SmartCullingListPresets));
+      setUserPresets(await invoke<SmartCullingUserPreset[]>(SMART_CULLING_INVOKES.ListPresets));
     } catch {
       setUserPresets([]);
     }
@@ -248,7 +249,7 @@ export default function SmartCullingDialog({
         name: presetName.trim() || defaultPresetName,
         config: currentPresetConfig,
       };
-      const savedPreset = await invoke<SmartCullingUserPreset>(Invokes.SmartCullingSavePreset, { params });
+      const savedPreset = await invoke<SmartCullingUserPreset>(SMART_CULLING_INVOKES.SavePreset, { params });
       setSelectedUserPresetId(savedPreset.id);
       setPresetName(savedPreset.name);
       await refreshUserPresets();
@@ -263,7 +264,7 @@ export default function SmartCullingDialog({
     if (!selectedUserPresetId || isDeletingPreset) return;
     setIsDeletingPreset(true);
     try {
-      await invoke(Invokes.SmartCullingDeletePreset, { id: selectedUserPresetId });
+      await invoke(SMART_CULLING_INVOKES.DeletePreset, { id: selectedUserPresetId });
       setSelectedUserPresetId('');
       setPresetName('');
       await refreshUserPresets();
@@ -282,7 +283,7 @@ export default function SmartCullingDialog({
 
   const handleOpenRecentTask = async (taskId: string) => {
     try {
-      const taskResult = await invoke<SmartCullingTaskResult>(Invokes.SmartCullingGetTaskResult, { taskId });
+      const taskResult = await invoke<SmartCullingTaskResult>(SMART_CULLING_INVOKES.GetTaskResult, { taskId });
       setSmartCulling({
         activeTaskId: taskId,
         result: taskResult,

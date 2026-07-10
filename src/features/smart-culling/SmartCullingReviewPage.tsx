@@ -16,12 +16,12 @@ import {
 import Button from '../../components/ui/Button';
 import Dropdown from '../../components/ui/Dropdown';
 import Text from '../../components/ui/Text';
-import { Invokes } from '../../components/ui/AppProperties';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useProcessStore } from '../../store/useProcessStore';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 import { COLOR_LABELS } from '../../utils/adjustments';
 import type { LibraryFeatureViewSlotProps } from '../contracts';
+import { SMART_CULLING_INVOKES } from './constants';
 import { useSmartCullingEvents } from './useSmartCullingEvents';
 import { useSmartCullingStore } from './useSmartCulling';
 import type {
@@ -242,7 +242,7 @@ export default function SmartCullingReviewPage({ onBackToLibrary, onLibraryRefre
     }
     if (!activeTaskId) return;
     setIsLoading(true);
-    invoke<SmartCullingTaskResult>(Invokes.SmartCullingGetTaskResult, { taskId: activeTaskId })
+    invoke<SmartCullingTaskResult>(SMART_CULLING_INVOKES.GetTaskResult, { taskId: activeTaskId })
       .then((taskResult) => {
         setSmartCulling({ result: taskResult });
         setItems(taskResult.items);
@@ -428,7 +428,7 @@ export default function SmartCullingReviewPage({ onBackToLibrary, onLibraryRefre
     }
     setIsApplying(true);
     try {
-      const applyResult = await invoke<SmartCullingApplyResult>(Invokes.SmartCullingApplyTaskResult, {
+      const applyResult = await invoke<SmartCullingApplyResult>(SMART_CULLING_INVOKES.ApplyTaskResult, {
         taskId: activeTaskId,
         items: itemsToApply,
       });
@@ -454,7 +454,7 @@ export default function SmartCullingReviewPage({ onBackToLibrary, onLibraryRefre
 
   const handleDiscard = async () => {
     if (activeTaskId) {
-      await invoke(Invokes.SmartCullingDiscardTaskResult, { taskId: activeTaskId }).catch(() => undefined);
+      await invoke(SMART_CULLING_INVOKES.DiscardTaskResult, { taskId: activeTaskId }).catch(() => undefined);
     }
     setSmartCulling({ result: null, activeTaskId: null, progress: null, error: null });
     onBackToLibrary();
@@ -464,7 +464,7 @@ export default function SmartCullingReviewPage({ onBackToLibrary, onLibraryRefre
     if (!activeTaskId) return;
     setIsExportingReport(true);
     try {
-      const report = await invoke<SmartCullingReportResult>(Invokes.SmartCullingExportReportPdf, {
+      const report = await invoke<SmartCullingReportResult>(SMART_CULLING_INVOKES.ExportReportPdf, {
         params: { taskId: activeTaskId, items },
       });
       setSmartCulling((state) => ({
@@ -482,7 +482,9 @@ export default function SmartCullingReviewPage({ onBackToLibrary, onLibraryRefre
     if (!activeTaskId) return;
     setIsUndoing(true);
     try {
-      const undoResult = await invoke<SmartCullingUndoResult>(Invokes.SmartCullingUndoTask, { taskId: activeTaskId });
+      const undoResult = await invoke<SmartCullingUndoResult>(SMART_CULLING_INVOKES.UndoTask, {
+        taskId: activeTaskId,
+      });
       setSmartCulling((state) => ({
         result: state.result ? { ...state.result, status: 'revoked' } : state.result,
         error:

@@ -1,5 +1,4 @@
 import { useShallow } from 'zustand/react/shallow';
-import type { MouseEvent } from 'react';
 
 import CommunityPage from '../panel/CommunityPage';
 import MainLibrary from '../panel/MainLibrary';
@@ -24,20 +23,20 @@ interface LibraryViewProps {
   setThumbnailAspectRatio: (ratio: ThumbnailAspectRatio) => void;
   setLibraryViewMode: (mode: LibraryViewMode) => void;
   handleClearSelection: () => void;
-  handleLibraryImageSingleClick: (path: string, event: MouseEvent) => void;
-  handleImageSelect: (path: string) => void;
-  handleRate: (rating: number, paths?: string[]) => void;
-  handleThumbnailContextMenu: (event: MouseEvent, path: string) => void;
-  handleMainLibraryContextMenu: (event: MouseEvent) => void;
-  handleContinueSession: () => void;
-  handleGoHome: () => void;
-  handleOpenFolder: () => void;
+  handleLibraryImageSingleClick: (...args: any) => void;
+  handleImageSelect: (...args: any) => void;
+  handleRate: (...args: any) => void;
+  handleThumbnailContextMenu: (...args: any) => void;
+  handleMainLibraryContextMenu: (...args: any) => void;
+  handleContinueSession: (...args: any) => void;
+  handleGoHome: (...args: any) => void;
+  handleOpenFolder: (...args: any) => void;
   handleImportClick: (path: string) => void;
   handleLibraryRefresh: () => Promise<void>;
   handleCopyAdjustments: () => void;
   handlePasteAdjustments: () => void;
   handleResetAdjustments: () => void;
-  requestThumbnails: (paths: string[]) => void;
+  requestThumbnails: any;
   libraryFeatureSlots: LibraryFeatureSlots;
 }
 
@@ -75,7 +74,7 @@ export default function LibraryView({
   );
 
   const {
-    rootPath,
+    rootPaths,
     currentFolderPath,
     libraryActivePath,
     multiSelectedPaths,
@@ -85,7 +84,7 @@ export default function LibraryView({
     isTreeLoading,
   } = useLibraryStore(
     useShallow((state) => ({
-      rootPath: state.rootPath,
+      rootPaths: state.rootPaths,
       currentFolderPath: state.currentFolderPath,
       libraryActivePath: state.libraryActivePath,
       multiSelectedPaths: state.multiSelectedPaths,
@@ -170,7 +169,7 @@ export default function LibraryView({
             onThumbnailAspectRatioChange={setThumbnailAspectRatio}
             onThumbnailSizeChange={setThumbnailSize}
             onRequestThumbnails={requestThumbnails}
-            rootPath={rootPath}
+            rootPaths={rootPaths}
             setLibraryViewMode={setLibraryViewMode}
             theme={theme}
             thumbnailAspectRatio={thumbnailAspectRatio}
@@ -180,7 +179,7 @@ export default function LibraryView({
             libraryFeatureSlots={libraryFeatureSlots}
           />
         )}
-        {rootPath && activeView === 'library' && (
+        {rootPaths && rootPaths.length > 0 && activeView === 'library' && (
           <BottomBar
             isCopied={isCopied}
             isCopyDisabled={multiSelectedPaths.length !== 1}
