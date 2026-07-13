@@ -36,8 +36,7 @@ use crate::mask_generation::{MaskDefinition, generate_mask_bitmap};
 use crate::cache_utils::{calculate_full_job_hash, calculate_transform_hash};
 use crate::{
     apply_all_transformations, generate_transformed_preview, get_cached_or_generate_mask,
-    get_full_image_for_processing, hydrate_adjustments, load_settings,
-    resolve_warped_image_for_masks,
+    hydrate_adjustments, load_settings, resolve_warped_image_for_masks,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -896,9 +895,9 @@ pub async fn export_images(
                     }
 
                     let base_image = if is_current_edit {
-                        match get_full_image_for_processing(&state) {
-                            Ok((orig_data, _)) => {
-                                composite_patches_on_image(&orig_data, &js_adjustments)
+                        match crate::get_original_image(&state) {
+                            Ok((orig_data_arc, _)) => {
+                                composite_patches_on_image(&orig_data_arc, &js_adjustments)
                                     .map_err(|e| format!("Failed to composite AI patches: {}", e))?
                             }
                             Err(_) => {

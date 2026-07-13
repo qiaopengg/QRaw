@@ -255,6 +255,7 @@ export interface ImageFile {
   featureData?: Record<string, unknown>;
   exif: { [key: string]: string } | null;
   is_virtual_copy: boolean;
+  is_cloud_placeholder: boolean;
 }
 
 export interface Option {

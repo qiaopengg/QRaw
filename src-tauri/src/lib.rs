@@ -24,6 +24,7 @@ mod gpu_processing;
 mod hdr_deghosting;
 mod image_loader;
 mod image_processing;
+mod inpainting;
 mod lens_correction;
 mod lut_processing;
 mod mask_generation;
@@ -253,11 +254,14 @@ pub fn get_cached_full_warped_image(
         }
     }
 
-    let (mut full_image, is_raw) = get_full_image_for_processing(state)?;
+    let (base_arc, is_raw) = get_original_image(state)?;
+    let mut cow_image = Cow::Borrowed(base_arc.as_ref());
+
     if is_raw {
-        apply_cpu_default_raw_processing(&mut full_image);
+        apply_cpu_default_raw_processing(cow_image.to_mut());
     }
-    let warped_image = apply_geometry_warp(Cow::Borrowed(&full_image), js_adjustments).into_owned();
+
+    let warped_image = apply_geometry_warp(cow_image, js_adjustments).into_owned();
     let warped_arc = Arc::new(warped_image);
 
     {
@@ -1079,15 +1083,15 @@ async fn preview_geometry_transform(
     Ok(format!("data:image/jpeg;base64,{}", base64_str))
 }
 
-pub fn get_full_image_for_processing(
+pub fn get_original_image(
     state: &tauri::State<AppState>,
-) -> Result<(DynamicImage, bool), String> {
+) -> Result<(std::sync::Arc<image::DynamicImage>, bool), String> {
     let original_image_lock = state.original_image.lock().unwrap();
     let loaded_image = original_image_lock
         .as_ref()
         .ok_or("No original image loaded")?;
     Ok((
-        loaded_image.image.clone().as_ref().clone(),
+        std::sync::Arc::clone(&loaded_image.image),
         loaded_image.is_raw,
     ))
 }
@@ -2087,6 +2091,7 @@ pub fn run() {
             start_preview_worker(app_handle.clone());
             start_analytics_worker(app_handle.clone());
             file_management::start_thumbnail_workers(app_handle.clone());
+            file_management::start_metadata_workers(app_handle.clone());
             jxl_oxide::integration::register_image_decoding_hook();
 
             let window_cfg = app.config().app.windows.first().unwrap().clone();
@@ -2281,6 +2286,7 @@ pub fn run() {
             full_transformed_cache: Mutex::new(None),
             decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),
             thumbnail_manager: ThumbnailManager::new(),
+            metadata_manager: MetadataManager::new(),
         })
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
@@ -2333,7 +2339,8 @@ pub fn run() {
             ai_commands::generate_ai_depth_mask,
             ai_commands::check_ai_connector_status,
             ai_commands::test_ai_connector_connection,
-            ai_commands::invoke_generative_replace_with_mask_def,
+            inpainting::invoke_generative_replace_with_mask_def,
+            inpainting::generate_manual_cleanup_patch,
             denoising::apply_denoising,
             denoising::batch_denoise_images,
             denoising::save_denoised_image,

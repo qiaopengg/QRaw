@@ -34,12 +34,7 @@ import Slider from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../ui/AppProperties';
-import {
-  formatKeyCode,
-  KEYBIND_DEFINITIONS,
-  KEYBIND_SECTIONS,
-  normalizeCombo,
-} from '../../utils/keyboardUtils';
+import { formatKeyCode, KEYBIND_DEFINITIONS, KEYBIND_SECTIONS, normalizeCombo } from '../../utils/keyboardUtils';
 import type { KeybindDefinition } from '../../utils/keybindContracts';
 import Text from '../ui/Text';
 import { TextColors, TextVariants, TextWeights } from '../../types/typography';

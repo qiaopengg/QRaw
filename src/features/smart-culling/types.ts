@@ -12,12 +12,7 @@ export type SmartCullingMode =
 export type SmartCullingPreset = 'strict' | 'balanced' | 'loose';
 export type SmartCullingAestheticPreference = 'general' | 'dark_tone' | 'film' | 'shallow_depth' | 'candid_emotion';
 export type SmartCullingFaceCheck =
-  | 'closed_eyes'
-  | 'blurred_face'
-  | 'abnormal_expression'
-  | 'smile'
-  | 'best_group_expression'
-  | 'looking_camera';
+  'closed_eyes' | 'blurred_face' | 'abnormal_expression' | 'smile' | 'best_group_expression' | 'looking_camera';
 export type SmartCullingColorLabel = 'red' | 'yellow' | 'green' | 'blue' | 'purple' | 'none';
 export type SmartCullingStatus = 'selected' | 'review' | 'reject_suggestion' | 'skipped' | 'failed';
 

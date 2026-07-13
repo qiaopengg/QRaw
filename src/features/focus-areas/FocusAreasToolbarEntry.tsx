@@ -7,10 +7,7 @@ interface FocusAreasToolbarEntryProps {
   onKeyDown(event: KeyboardEvent<HTMLButtonElement>): void;
 }
 
-export default function FocusAreasToolbarEntry({
-  focusAreas,
-  onKeyDown,
-}: FocusAreasToolbarEntryProps) {
+export default function FocusAreasToolbarEntry({ focusAreas, onKeyDown }: FocusAreasToolbarEntryProps) {
   return (
     <FocusAreaToolbarButton
       onKeyDown={onKeyDown}

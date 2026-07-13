@@ -24,6 +24,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::AppState;
+use crate::PendingMetadata;
 #[cfg(target_os = "android")]
 use crate::android_integration::*;
 use crate::app_settings::*;
@@ -77,6 +78,128 @@ fn compute_thumbnail_cache_hash(path_str: &str, adjustments_bytes: &[u8]) -> Opt
     hasher.update(&img_mod_time.to_le_bytes());
     hasher.update(adjustments_bytes);
     Some(hasher.finalize().to_hex().to_string())
+}
+
+fn resolve_image_metadata(
+    image_path: &Path,
+    sidecar_path: &Path,
+    enable_xmp_sync: bool,
+    settings: &AppSettings,
+) -> (bool, Option<Vec<String>>, u8, Option<Value>) {
+    let mut metadata = crate::exif_processing::load_sidecar(sidecar_path);
+
+    if enable_xmp_sync
+        && sync_metadata_from_xmp(image_path, &mut metadata)
+        && let Ok(json) = serde_json::to_string_pretty(&metadata)
+    {
+        let _ = fs::write(sidecar_path, json);
+    }
+
+    let is_raw = crate::formats::is_raw_file(image_path);
+    let tm_override = crate::image_processing::resolve_tonemapper_override(settings, is_raw);
+    let edited =
+        crate::image_processing::is_image_edited(&metadata.adjustments, is_raw, tm_override);
+    (
+        edited,
+        metadata.tags,
+        metadata.rating,
+        metadata.feature_data,
+    )
+}
+
+fn emit_image_metadata_loaded(
+    app_handle: &AppHandle,
+    path: &str,
+    rating: u8,
+    is_edited: bool,
+    tags: &Option<Vec<String>>,
+    feature_data: &Option<Value>,
+) {
+    let _ = app_handle.emit(
+        "image-metadata-loaded",
+        serde_json::json!({
+            "path": path,
+            "rating": rating,
+            "is_edited": is_edited,
+            "tags": tags,
+            "featureData": feature_data,
+        }),
+    );
+}
+
+fn enqueue_metadata(
+    app_handle: &AppHandle,
+    virtual_path: String,
+    image_path: PathBuf,
+    sidecar_path: PathBuf,
+) {
+    let state = app_handle.state::<crate::AppState>();
+    let manager = &state.metadata_manager;
+
+    let mut pending = manager.pending.lock().unwrap();
+    if !pending.insert(sidecar_path.clone()) {
+        return;
+    }
+    drop(pending);
+
+    manager.queue.lock().unwrap().push_back(PendingMetadata {
+        virtual_path,
+        image_path,
+        sidecar_path,
+    });
+    manager.cvar.notify_one();
+}
+
+// Not compute-heavy — these threads mostly block waiting on iCloud to
+// materialize a file, not burning CPU — so a small fixed pool is enough and
+// doesn't need a user-facing setting the way thumbnail_worker_threads does.
+const METADATA_WORKER_THREADS: usize = 4;
+
+pub fn start_metadata_workers(app_handle: tauri::AppHandle) {
+    let state = app_handle.state::<crate::AppState>();
+    let manager = state.metadata_manager.clone();
+
+    for _ in 0..METADATA_WORKER_THREADS {
+        let app_clone = app_handle.clone();
+        let manager_clone = manager.clone();
+
+        std::thread::spawn(move || {
+            loop {
+                let item = {
+                    let mut queue = manager_clone.queue.lock().unwrap();
+                    while queue.is_empty() {
+                        queue = manager_clone.cvar.wait(queue).unwrap();
+                    }
+                    queue.pop_front().unwrap()
+                };
+
+                let settings = load_settings(app_clone.clone()).unwrap_or_default();
+                let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
+
+                let (is_edited, tags, rating, feature_data) = resolve_image_metadata(
+                    &item.image_path,
+                    &item.sidecar_path,
+                    enable_xmp_sync,
+                    &settings,
+                );
+
+                emit_image_metadata_loaded(
+                    &app_clone,
+                    &item.virtual_path,
+                    rating,
+                    is_edited,
+                    &tags,
+                    &feature_data,
+                );
+
+                manager_clone
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .remove(&item.sidecar_path);
+            }
+        });
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -152,6 +275,7 @@ pub struct ImageFile {
     feature_data: Option<Value>,
     exif: Option<HashMap<String, String>>,
     is_virtual_copy: bool,
+    is_cloud_placeholder: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -210,6 +334,8 @@ pub async fn read_exif_for_paths(
                     crate::exif_processing::read_rrexif_sidecar(&source_path)
                 {
                     sidecar_exif
+                } else if is_cloud_placeholder(&source_path) {
+                    HashMap::new()
                 } else if let Ok(mmap) = read_file_mapped(&source_path) {
                     crate::exif_processing::read_exif_data(&source_path_str, &mmap)
                 } else if let Ok(bytes) = fs::read(&source_path) {
@@ -279,7 +405,7 @@ pub async fn update_exif_fields(
 
 #[tauri::command]
 pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<ImageFile>, String> {
-    let settings = load_settings(app_handle).unwrap_or_default();
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
     let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
 
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
@@ -338,6 +464,8 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
+            let is_cloud_placeholder = is_cloud_placeholder(&path_buf);
+
             let mut file_results = Vec::with_capacity(sidecars.len());
 
             for copy_id_opt in sidecars {
@@ -352,31 +480,24 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
 
                 let sidecar_path = path_buf.with_file_name(sidecar_filename);
 
-                let (is_edited, tags, rating, feature_data) = {
-                    let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+                let xmp_is_placeholder = enable_xmp_sync
+                    && resolve_xmp_path(&path_buf)
+                        .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                    if enable_xmp_sync
-                        && sync_metadata_from_xmp(&path_buf, &mut metadata)
-                        && let Ok(json) = serde_json::to_string_pretty(&metadata)
+                let (is_edited, tags, rating, feature_data) =
+                    if crate::file_management::is_cloud_placeholder(&sidecar_path)
+                        || xmp_is_placeholder
                     {
-                        let _ = fs::write(&sidecar_path, json);
-                    }
-
-                    let is_raw = crate::formats::is_raw_file(&path_str);
-                    let tm_override =
-                        crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
-                    let edited = crate::image_processing::is_image_edited(
-                        &metadata.adjustments,
-                        is_raw,
-                        tm_override,
-                    );
-                    (
-                        edited,
-                        metadata.tags,
-                        metadata.rating,
-                        metadata.feature_data,
-                    )
-                };
+                        enqueue_metadata(
+                            &app_handle,
+                            virtual_path.clone(),
+                            path_buf.clone(),
+                            sidecar_path.clone(),
+                        );
+                        (false, None, 0, None)
+                    } else {
+                        resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
+                    };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
@@ -387,6 +508,7 @@ pub fn list_images_in_dir(path: String, app_handle: AppHandle) -> Result<Vec<Ima
                     exif: None,
                     is_virtual_copy,
                     rating,
+                    is_cloud_placeholder,
                 });
             }
 
@@ -402,7 +524,7 @@ pub fn list_images_recursive(
     path: String,
     app_handle: AppHandle,
 ) -> Result<Vec<ImageFile>, String> {
-    let settings = load_settings(app_handle).unwrap_or_default();
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
     let enable_xmp_sync = settings.enable_xmp_sync.unwrap_or(false);
 
     let root_path = Path::new(&path);
@@ -467,6 +589,8 @@ pub fn list_images_recursive(
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
+            let is_cloud_placeholder = is_cloud_placeholder(&path_buf);
+
             let mut file_results = Vec::with_capacity(sidecars.len());
 
             for copy_id_opt in sidecars {
@@ -481,31 +605,24 @@ pub fn list_images_recursive(
 
                 let sidecar_path = path_buf.with_file_name(sidecar_filename);
 
-                let (is_edited, tags, rating, feature_data) = {
-                    let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+                let xmp_is_placeholder = enable_xmp_sync
+                    && resolve_xmp_path(&path_buf)
+                        .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                    if enable_xmp_sync
-                        && sync_metadata_from_xmp(&path_buf, &mut metadata)
-                        && let Ok(json) = serde_json::to_string_pretty(&metadata)
+                let (is_edited, tags, rating, feature_data) =
+                    if crate::file_management::is_cloud_placeholder(&sidecar_path)
+                        || xmp_is_placeholder
                     {
-                        let _ = fs::write(&sidecar_path, json);
-                    }
-
-                    let is_raw = crate::formats::is_raw_file(&path_str);
-                    let tm_override =
-                        crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
-                    let edited = crate::image_processing::is_image_edited(
-                        &metadata.adjustments,
-                        is_raw,
-                        tm_override,
-                    );
-                    (
-                        edited,
-                        metadata.tags,
-                        metadata.rating,
-                        metadata.feature_data,
-                    )
-                };
+                        enqueue_metadata(
+                            &app_handle,
+                            virtual_path.clone(),
+                            path_buf.clone(),
+                            sidecar_path.clone(),
+                        );
+                        (false, None, 0, None)
+                    } else {
+                        resolve_image_metadata(&path_buf, &sidecar_path, enable_xmp_sync, &settings)
+                    };
 
                 file_results.push(ImageFile {
                     path: virtual_path,
@@ -516,6 +633,7 @@ pub fn list_images_recursive(
                     exif: None,
                     is_virtual_copy,
                     rating,
+                    is_cloud_placeholder,
                 });
             }
 
@@ -750,32 +868,25 @@ pub fn get_album_images(
                 .unwrap_or(0);
 
             let is_virtual_copy = virtual_path.contains("?vc=");
+            let is_cloud_placeholder = is_cloud_placeholder(&source_path);
 
-            let (is_edited, tags, rating, feature_data) = {
-                let mut metadata = crate::exif_processing::load_sidecar(&sidecar_path);
+            let xmp_is_placeholder = enable_xmp_sync
+                && resolve_xmp_path(&source_path)
+                    .is_some_and(|p| crate::file_management::is_cloud_placeholder(&p));
 
-                if enable_xmp_sync
-                    && sync_metadata_from_xmp(&source_path, &mut metadata)
-                    && let Ok(json) = serde_json::to_string_pretty(&metadata)
+            let (is_edited, tags, rating, feature_data) =
+                if crate::file_management::is_cloud_placeholder(&sidecar_path) || xmp_is_placeholder
                 {
-                    let _ = fs::write(&sidecar_path, json);
-                }
-
-                let is_raw = crate::formats::is_raw_file(&source_path);
-                let tm_override =
-                    crate::image_processing::resolve_tonemapper_override(&settings, is_raw);
-                let edited = crate::image_processing::is_image_edited(
-                    &metadata.adjustments,
-                    is_raw,
-                    tm_override,
-                );
-                (
-                    edited,
-                    metadata.tags,
-                    metadata.rating,
-                    metadata.feature_data,
-                )
-            };
+                    enqueue_metadata(
+                        &app_handle,
+                        virtual_path.clone(),
+                        source_path.clone(),
+                        sidecar_path.clone(),
+                    );
+                    (false, None, 0, None)
+                } else {
+                    resolve_image_metadata(&source_path, &sidecar_path, enable_xmp_sync, &settings)
+                };
 
             Some(ImageFile {
                 path: virtual_path,
@@ -786,6 +897,7 @@ pub fn get_album_images(
                 exif: None,
                 is_virtual_copy,
                 rating,
+                is_cloud_placeholder,
             })
         })
         .collect();
@@ -1063,6 +1175,26 @@ pub async fn get_pinned_folder_trees(
     }
 }
 
+/// Checks if the given path exists and is an iCloud placeholder file on macOS.
+#[cfg(target_os = "macos")]
+pub fn is_cloud_placeholder(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    const SF_DATALESS: u32 = 0x4000_0000;
+
+    let c_path = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
+    let ret = unsafe { libc::lstat(c_path.as_ptr(), &mut stat_buf) };
+    ret == 0 && (stat_buf.st_flags & SF_DATALESS) != 0
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_cloud_placeholder(_path: &Path) -> bool {
+    false
+}
+
 pub fn read_file_mapped(path: &Path) -> Result<Mmap, ReadFileError> {
     if !path.is_file() {
         return Err(ReadFileError::Invalid);
@@ -1096,9 +1228,19 @@ pub fn generate_thumbnail_data(
     let source_path_str = source_path.to_string_lossy().to_string();
     let is_raw = is_raw_file(&source_path_str);
 
-    let metadata: Option<ImageMetadata> = fs::read_to_string(sidecar_path)
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok());
+    let metadata: Option<ImageMetadata> = if is_cloud_placeholder(&sidecar_path) {
+        enqueue_metadata(
+            app_handle,
+            path_str.to_string(),
+            source_path.clone(),
+            sidecar_path.clone(),
+        );
+        None
+    } else {
+        fs::read_to_string(&sidecar_path)
+            .ok()
+            .and_then(|content| serde_json::from_str(&content).ok())
+    };
 
     let adjustments = metadata
         .as_ref()
@@ -1402,25 +1544,32 @@ fn generate_single_thumbnail_and_cache(
     app_handle: &AppHandle,
     settings: &AppSettings,
 ) -> Option<(String, u8, bool)> {
-    let (_, sidecar_path) = parse_virtual_path(path_str);
+    let (source_path, sidecar_path) = parse_virtual_path(path_str);
 
-    let (rating, is_edited, adjustments_bytes) =
-        if let Ok(content) = fs::read_to_string(&sidecar_path) {
-            if let Ok(meta) = serde_json::from_str::<ImageMetadata>(&content) {
-                let is_raw = crate::formats::is_raw_file(path_str);
-                let tm = crate::image_processing::resolve_tonemapper_override(settings, is_raw);
+    let (rating, is_edited, adjustments_bytes) = if is_cloud_placeholder(&sidecar_path) {
+        enqueue_metadata(
+            app_handle,
+            path_str.to_string(),
+            source_path.clone(),
+            sidecar_path.clone(),
+        );
+        (0, false, Vec::new())
+    } else if let Ok(content) = fs::read_to_string(&sidecar_path) {
+        if let Ok(meta) = serde_json::from_str::<ImageMetadata>(&content) {
+            let is_raw = crate::formats::is_raw_file(path_str);
+            let tm = crate::image_processing::resolve_tonemapper_override(settings, is_raw);
 
-                (
-                    meta.rating,
-                    crate::image_processing::is_image_edited(&meta.adjustments, is_raw, tm),
-                    serde_json::to_vec(&meta.adjustments).unwrap_or_default(),
-                )
-            } else {
-                (0, false, Vec::new())
-            }
+            (
+                meta.rating,
+                crate::image_processing::is_image_edited(&meta.adjustments, is_raw, tm),
+                serde_json::to_vec(&meta.adjustments).unwrap_or_default(),
+            )
         } else {
             (0, false, Vec::new())
-        };
+        }
+    } else {
+        (0, false, Vec::new())
+    };
 
     let cache_hash = compute_thumbnail_cache_hash(path_str, &adjustments_bytes)?;
 
@@ -1429,6 +1578,10 @@ fn generate_single_thumbnail_and_cache(
 
     if !force_regenerate && cache_path.exists() {
         return Some((cache_path.to_string_lossy().into_owned(), rating, is_edited));
+    }
+
+    if is_cloud_placeholder(&source_path) {
+        return None;
     }
 
     let target_width = settings.thumbnail_resolution.unwrap_or(720);
@@ -3498,16 +3651,20 @@ pub fn extract_xmp_tags(content: &str) -> Vec<String> {
     tags
 }
 
-pub fn sync_metadata_from_xmp(source_path: &Path, metadata: &mut ImageMetadata) -> bool {
-    let xmp_path = source_path.with_extension("xmp");
-    let xmp_path_upper = source_path.with_extension("XMP");
-    let actual_xmp = if xmp_path.exists() {
+pub fn resolve_xmp_path(image_path: &Path) -> Option<PathBuf> {
+    let xmp_path = image_path.with_extension("xmp");
+    let xmp_path_upper = image_path.with_extension("XMP");
+    if xmp_path.exists() {
         Some(xmp_path)
     } else if xmp_path_upper.exists() {
         Some(xmp_path_upper)
     } else {
         None
-    };
+    }
+}
+
+pub fn sync_metadata_from_xmp(source_path: &Path, metadata: &mut ImageMetadata) -> bool {
+    let actual_xmp = resolve_xmp_path(source_path);
 
     let mut changed = false;
 
