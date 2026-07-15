@@ -315,40 +315,6 @@ export function useTauriListeners({
           }));
         }
       }),
-      listen('culling-start', (event: any) => {
-        if (isEffectActive) {
-          useUIStore.getState().setUI((state) => ({
-            cullingModalState: {
-              ...state.cullingModalState,
-              isOpen: true,
-              progress: { current: 0, total: event.payload, stage: 'Initializing...' },
-              suggestions: null,
-              error: null,
-            },
-          }));
-        }
-      }),
-      listen('culling-progress', (event: any) => {
-        if (isEffectActive) {
-          useUIStore
-            .getState()
-            .setUI((state) => ({ cullingModalState: { ...state.cullingModalState, progress: event.payload } }));
-        }
-      }),
-      listen('culling-complete', (event: any) => {
-        if (isEffectActive) {
-          useUIStore.getState().setUI((state) => ({
-            cullingModalState: { ...state.cullingModalState, progress: null, suggestions: event.payload },
-          }));
-        }
-      }),
-      listen('culling-error', (event: any) => {
-        if (isEffectActive) {
-          useUIStore.getState().setUI((state) => ({
-            cullingModalState: { ...state.cullingModalState, progress: null, error: String(event.payload) },
-          }));
-        }
-      }),
     ];
 
     return () => {

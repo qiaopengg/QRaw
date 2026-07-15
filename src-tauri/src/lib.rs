@@ -13,7 +13,6 @@ mod android_integration;
 mod app_settings;
 mod app_state;
 mod cache_utils;
-mod culling;
 mod denoising;
 mod exif_processing;
 mod export_processing;
@@ -2287,6 +2286,7 @@ pub fn run() {
             decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),
             thumbnail_manager: ThumbnailManager::new(),
             metadata_manager: MetadataManager::new(),
+            smart_culling_face_models: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
@@ -2296,20 +2296,8 @@ pub fn run() {
             generate_uncropped_preview,
             preview_geometry_transform,
             features::get_focus_regions,
-            features::smart_culling_apply_task_result,
-            features::smart_culling_cancel_task,
-            features::smart_culling_check_models,
-            features::smart_culling_delete_preset,
-            features::smart_culling_discard_task_result,
-            features::smart_culling_download_models,
-            features::smart_culling_export_report_pdf,
-            features::smart_culling_get_task_result,
-            features::smart_culling_list_presets,
-            features::smart_culling_list_recent_tasks,
-            features::smart_culling_open_models_dir,
-            features::smart_culling_save_preset,
-            features::smart_culling_start_task,
-            features::smart_culling_undo_task,
+            features::smart_culling_analyze,
+            features::smart_culling_write_metadata,
             get_log_file_path,
             frontend_log,
             save_collage,
@@ -2399,7 +2387,6 @@ pub fn run() {
             tagging::clear_all_tags,
             tagging::add_tag_for_paths,
             tagging::remove_tag_for_paths,
-            culling::cull_images,
             lens_correction::get_lensfun_makers,
             lens_correction::get_lensfun_lenses_for_maker,
             lens_correction::autodetect_lens,

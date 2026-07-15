@@ -1,24 +1,22 @@
 import { create } from 'zustand';
-import type { SmartCullingProgress, SmartCullingTaskResult } from './types';
+import type { SmartCullingProgress, SmartCullingSuggestions } from './types';
 
 interface SmartCullingState {
-  activeTaskId: string | null;
   dialogOpen: boolean;
-  error: string | null;
   isRunning: boolean;
   progress: SmartCullingProgress | null;
-  result: SmartCullingTaskResult | null;
+  suggestions: SmartCullingSuggestions | null;
+  error: string | null;
   setSmartCulling: (
     updater: Partial<SmartCullingState> | ((state: SmartCullingState) => Partial<SmartCullingState>),
   ) => void;
 }
 
 export const useSmartCullingStore = create<SmartCullingState>((set) => ({
-  activeTaskId: null,
   dialogOpen: false,
-  error: null,
   isRunning: false,
   progress: null,
-  result: null,
+  suggestions: null,
+  error: null,
   setSmartCulling: (updater) => set((state) => (typeof updater === 'function' ? updater(state) : updater)),
 }));

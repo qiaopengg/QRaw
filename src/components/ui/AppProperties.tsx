@@ -45,7 +45,6 @@ export enum Invokes {
   CopyFiles = 'copy_files',
   CreateFolder = 'create_folder',
   CreateVirtualCopy = 'create_virtual_copy',
-  CullImages = 'cull_images',
   DeleteFolder = 'delete_folder',
   DuplicateFile = 'duplicate_file',
   EstimateExportSizes = 'estimate_export_sizes',
@@ -343,34 +342,6 @@ export interface WaveformData {
   parade: string;
   vectorscope: string;
   width: number;
-}
-
-export interface CullingSettings {
-  similarityThreshold: number;
-  blurThreshold: number;
-  groupSimilar: boolean;
-  filterBlurry: boolean;
-}
-
-export interface ImageAnalysisResult {
-  path: string;
-  qualityScore: number;
-  sharpnessMetric: number;
-  centerFocusMetric: number;
-  exposureMetric: number;
-  width: number;
-  height: number;
-}
-
-export interface CullGroup {
-  representative: ImageAnalysisResult;
-  duplicates: ImageAnalysisResult[];
-}
-
-export interface CullingSuggestions {
-  similarGroups: CullGroup[];
-  blurryImages: ImageAnalysisResult[];
-  failedPaths: string[];
 }
 
 export interface KeybindHandler {

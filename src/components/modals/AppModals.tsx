@@ -17,7 +17,6 @@ import RenameFolderModal from './RenameFolderModal';
 import RenameFileModal from './RenameFileModal';
 import ConfirmModal from './ConfirmModal';
 import ImportSettingsModal from './ImportSettingsModal';
-import CullingModal from './CullingModal';
 import CollageModal from './CollageModal';
 import { AppSettings, Invokes, AlbumItem, Album, AlbumGroup } from '../ui/AppProperties';
 import { CopyPasteSettings } from '../../utils/adjustments';
@@ -71,7 +70,6 @@ export default function AppModals(props: AppModalsProps) {
     hdrModalState,
     negativeModalState,
     denoiseModalState,
-    cullingModalState,
     collageModalState,
     setUI,
   } = useUIStore(
@@ -93,7 +91,6 @@ export default function AppModals(props: AppModalsProps) {
       hdrModalState: state.hdrModalState,
       negativeModalState: state.negativeModalState,
       denoiseModalState: state.denoiseModalState,
-      cullingModalState: state.cullingModalState,
       collageModalState: state.collageModalState,
       setUI: state.setUI,
     })),
@@ -287,34 +284,6 @@ export default function AppModals(props: AppModalsProps) {
         isOpen={isImportModalOpen}
         onClose={() => setUI({ isImportModalOpen: false })}
         onSave={props.handleStartImport}
-      />
-      <CullingModal
-        isOpen={cullingModalState.isOpen}
-        onClose={() =>
-          setUI({
-            cullingModalState: { isOpen: false, progress: null, suggestions: null, error: null, pathsToCull: [] },
-          })
-        }
-        progress={cullingModalState.progress}
-        suggestions={cullingModalState.suggestions}
-        error={cullingModalState.error}
-        imagePaths={cullingModalState.pathsToCull}
-        thumbnails={thumbnails}
-        onApply={(action, paths) => {
-          if (action === 'reject') {
-            props.handleSetColorLabel('red', paths);
-          } else if (action === 'rate_zero') {
-            props.handleRate(1, paths);
-          } else if (action === 'delete') {
-            props.executeDelete(paths, { includeAssociated: false });
-          }
-          setUI({
-            cullingModalState: { isOpen: false, progress: null, suggestions: null, error: null, pathsToCull: [] },
-          });
-        }}
-        onError={(err) => {
-          setUI((state) => ({ cullingModalState: { ...state.cullingModalState, error: err, progress: null } }));
-        }}
       />
       <CollageModal
         isOpen={collageModalState.isOpen}

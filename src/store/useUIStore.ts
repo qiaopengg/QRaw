@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ImageFile, LibraryViewMode, Panel, UiVisibility, CullingSuggestions } from '../components/ui/AppProperties';
+import { ImageFile, LibraryViewMode, Panel, UiVisibility } from '../components/ui/AppProperties';
 
 const RIGHT_PANEL_ORDER = [
   Panel.Metadata,
@@ -67,14 +67,6 @@ export interface NegativeConversionModalState {
   targetPaths: Array<string>;
 }
 
-export interface CullingModalState {
-  isOpen: boolean;
-  suggestions: CullingSuggestions | null;
-  progress: { current: number; total: number; stage: string } | null;
-  error: string | null;
-  pathsToCull: Array<string>;
-}
-
 interface UIState {
   // View & Layout
   activeView: string;
@@ -120,7 +112,6 @@ interface UIState {
   hdrModalState: HdrModalState;
   negativeModalState: NegativeConversionModalState;
   denoiseModalState: DenoiseModalState;
-  cullingModalState: CullingModalState;
   collageModalState: CollageModalState;
 
   // Actions
@@ -191,7 +182,6 @@ export const useUIStore = create<UIState>((set, get) => ({
     progressMessage: null,
     isRaw: false,
   },
-  cullingModalState: { isOpen: false, suggestions: null, progress: null, error: null, pathsToCull: [] },
   collageModalState: { isOpen: false, sourceImages: [] },
 
   setUI: (updater) => set((state) => (typeof updater === 'function' ? updater(state) : updater)),

@@ -80,18 +80,14 @@ export function useAndroidBackHandler() {
         ui.setUI((state: any) => ({ denoiseModalState: { ...state.denoiseModalState, isOpen: false } }));
         return;
       }
-      if (ui.cullingModalState.isOpen) {
-        ui.setUI({
-          cullingModalState: { isOpen: false, progress: null, suggestions: null, error: null, pathsToCull: [] },
-        });
-        return;
-      }
       if (ui.collageModalState.isOpen) {
         ui.setUI({ collageModalState: { isOpen: false, sourceImages: [] } });
         return;
       }
 
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
+      );
     };
 
     return () => {
