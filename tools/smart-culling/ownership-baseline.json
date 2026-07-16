@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "2182b6d71c44206e3e661fbd2cca043443137d55",
+  "taskBaseCommit": "06405ea2aaa22ebf87288bc0c88cef5c202d7b2a",
+  "allowedPathPrefixes": [
+    "docs/smart-culling-v2-",
+    "docs/assets/smart-culling-v2-",
+    "docs/prototypes/smart-culling-lifecycle/",
+    "design-qa.md",
+    "src/features/smart-culling/",
+    "src-tauri/src/features/smart_culling/",
+    "src-tauri/resources/smart_culling_",
+    "tools/smart-culling/"
+  ],
+  "frozenPaths": ["src/features/appFeatures.ts", "src/features/contracts.ts"],
+  "mixedOwnershipPaths": ["src-tauri/src/app_state.rs", "src-tauri/src/features/mod.rs", "src-tauri/src/lib.rs"],
+  "approvedMixedOwnershipPatchIds": ["v2-single-gateway-and-v1-state-removal"],
+  "mixedOwnershipRules": {
+    "src-tauri/src/app_state.rs": {
+      "allowedBaseLineRanges": [
+        [15, 15],
+        [174, 174]
+      ]
+    },
+    "src-tauri/src/features/mod.rs": {
+      "allowedBaseLineRanges": [
+        [2, 2],
+        [10, 26]
+      ]
+    },
+    "src-tauri/src/lib.rs": {
+      "allowedBaseLineRanges": [
+        [2289, 2289],
+        [2299, 2300]
+      ]
+    }
+  }
+}

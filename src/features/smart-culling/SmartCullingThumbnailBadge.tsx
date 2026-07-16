@@ -1,22 +1,27 @@
-import { Sparkles } from 'lucide-react';
+import { Bot, LockKeyhole, Star } from 'lucide-react';
 import type { LibraryThumbnailBadgeSlotProps } from '../contracts';
+import { useSmartCullingReasonText, useSmartCullingText } from './i18n';
 import { getSmartCullingImageMetadata } from './metadata';
-import Text from '../../components/ui/Text';
-import { TextColors, TextVariants, TextWeights } from '../../types/typography';
 
 export default function SmartCullingThumbnailBadge({ image }: LibraryThumbnailBadgeSlotProps) {
+  const tx = useSmartCullingText();
+  const reasonText = useSmartCullingReasonText();
   const smart = getSmartCullingImageMetadata(image);
-  if (!smart || !smart.status) return null;
-
+  if (!smart) return null;
+  const reason = smart.source === 'ai' ? reasonText(smart.reasonCodes ?? []) : '';
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 backdrop-blur-md shadow-md"
-      data-tooltip={smart.reasonText || 'Smart culling suggestion'}
+      className={`sc-library-badge ${reason ? 'has-reason' : ''}`}
+      data-tooltip={reason || (smart.source === 'ai' ? tx('ai') : tx('manual'))}
     >
-      <Sparkles size={11} className="text-accent" />
-      <Text variant={TextVariants.small} color={TextColors.white} weight={TextWeights.semibold}>
-        {smart.status}
-      </Text>
+      <span className="sc-library-badge-main">
+        {smart.source === 'ai' ? <Bot size={11} /> : <LockKeyhole size={11} />}
+        <span>{smart.source === 'ai' ? tx('ai') : tx('manualShort')}</span>
+        <span className={`sc-color-dot is-${smart.colorLabel ?? 'none'}`} />
+        <span>{smart.rating}</span>
+        <Star size={10} className="fill-current" />
+      </span>
+      {reason ? <small>{reason}</small> : null}
     </div>
   );
 }

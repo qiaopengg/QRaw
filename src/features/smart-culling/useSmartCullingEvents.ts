@@ -1,36 +1,31 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { useSmartCullingStore } from './useSmartCulling';
-import type { SmartCullingProgress, SmartCullingSuggestions } from './types';
+import { toast } from 'react-toastify';
+import { SMART_CULLING_EVENT } from './constants';
+import { useSmartCullingText } from './i18n';
+import type { SmartCullingSnapshot } from './types';
+import { screenForSnapshot, useSmartCullingStore } from './useSmartCulling';
 
 export function useSmartCullingEvents() {
-  const setSmartCulling = useSmartCullingStore((state) => state.setSmartCulling);
-
+  const tx = useSmartCullingText();
+  const previousState = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
-    const unlisten = Promise.all([
-      listen<number>('smart-culling-start', (event) => {
-        if (!active) return;
-        setSmartCulling({
-          isRunning: true,
-          progress: { current: 0, total: event.payload, stage: 'Initializing...' },
-          suggestions: null,
-          error: null,
-        });
-      }),
-      listen<SmartCullingProgress>('smart-culling-progress', (event) => {
-        if (!active) return;
-        setSmartCulling({ progress: event.payload });
-      }),
-      listen<SmartCullingSuggestions>('smart-culling-complete', (event) => {
-        if (!active) return;
-        setSmartCulling({ isRunning: false, progress: null, suggestions: event.payload });
-      }),
-    ]);
-
+    const unlisten = listen<SmartCullingSnapshot>(SMART_CULLING_EVENT, ({ payload }) => {
+      if (!active) return;
+      const current = useSmartCullingStore.getState();
+      const nextScreen =
+        payload.state === 'readyForReview' && current.screen === 'review' ? 'review' : screenForSnapshot(payload);
+      const clearPeople = ['readyForReview', 'completed', 'unsupported', 'failed'].includes(payload.state);
+      current.setState({ snapshot: payload, screen: nextScreen, ...(clearPeople ? { keyPeople: [] } : {}) });
+      if (payload.state === 'readyForReview' && previousState.current !== 'readyForReview') {
+        toast.info(payload.progress.partial ? tx('partialFinishedNotice') : tx('analysisFinishedNotice'));
+      }
+      previousState.current = payload.state;
+    });
     return () => {
       active = false;
-      unlisten.then((callbacks) => callbacks.forEach((cb) => cb()));
+      void unlisten.then((dispose) => dispose());
     };
-  }, [setSmartCulling]);
+  }, [tx]);
 }

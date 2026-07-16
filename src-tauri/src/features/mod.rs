@@ -9,18 +9,9 @@ pub fn get_focus_regions(
 }
 
 #[tauri::command]
-pub async fn smart_culling_analyze(
-    paths: Vec<String>,
-    settings: smart_culling::SmartCullingSettings,
+pub async fn smart_culling_command(
+    request: smart_culling::SmartCullingRequest,
     app_handle: tauri::AppHandle,
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<smart_culling::SmartCullingSuggestions, String> {
-    smart_culling::smart_culling_analyze(paths, settings, app_handle, state).await
-}
-
-#[tauri::command]
-pub fn smart_culling_write_metadata(
-    items: Vec<smart_culling::SmartCullingApplyItem>,
-) -> Result<(), String> {
-    smart_culling::smart_culling_write_metadata(items)
+) -> Result<smart_culling::SmartCullingSnapshot, smart_culling::SmartCullingCommandError> {
+    smart_culling::smart_culling_command(request, app_handle).await
 }

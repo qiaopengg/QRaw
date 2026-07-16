@@ -2286,7 +2286,6 @@ pub fn run() {
             decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),
             thumbnail_manager: ThumbnailManager::new(),
             metadata_manager: MetadataManager::new(),
-            smart_culling_face_models: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
@@ -2296,8 +2295,7 @@ pub fn run() {
             generate_uncropped_preview,
             preview_geometry_transform,
             features::get_focus_regions,
-            features::smart_culling_analyze,
-            features::smart_culling_write_metadata,
+            features::smart_culling_command,
             get_log_file_path,
             frontend_log,
             save_collage,

@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
 use super::face_models::{
@@ -22,8 +23,9 @@ pub fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
         return 0.0;
     }
 
-    let mut laplacian_values = Vec::with_capacity(((width - 2) * (height - 2)) as usize);
     let mut sum = 0.0;
+    let mut sum_of_squares = 0.0;
+    let mut count = 0_u64;
 
     for y in 1..height - 1 {
         for x in 1..width - 1 {
@@ -33,17 +35,18 @@ pub fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
             let p_west = image.get_pixel(x - 1, y)[0] as i32;
             let p_east = image.get_pixel(x + 1, y)[0] as i32;
             let conv_val = (p_north + p_south + p_west + p_east - 4 * p_center) as f64;
-            laplacian_values.push(conv_val);
             sum += conv_val;
+            sum_of_squares += conv_val * conv_val;
+            count += 1;
         }
     }
 
-    if laplacian_values.is_empty() {
+    if count == 0 {
         return 0.0;
     }
-    let mean = sum / laplacian_values.len() as f64;
-
-    laplacian_values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / laplacian_values.len() as f64
+    let count = count as f64;
+    let mean = sum / count;
+    (sum_of_squares / count - mean * mean).max(0.0)
 }
 
 pub fn calculate_exposure_metric(image: &GrayImage) -> f64 {
@@ -56,8 +59,12 @@ pub fn calculate_exposure_metric(image: &GrayImage) -> f64 {
     let clip_threshold_dark = 5;
     let clip_threshold_bright = 250;
 
-    let dark_pixels = histogram.channels[0][0..clip_threshold_dark].iter().sum::<u32>() as f64;
-    let bright_pixels = histogram.channels[0][clip_threshold_bright..256].iter().sum::<u32>() as f64;
+    let dark_pixels = histogram.channels[0][0..clip_threshold_dark]
+        .iter()
+        .sum::<u32>() as f64;
+    let bright_pixels = histogram.channels[0][clip_threshold_bright..256]
+        .iter()
+        .sum::<u32>() as f64;
 
     let dark_clip_ratio = dark_pixels / total_pixels;
     let bright_clip_ratio = bright_pixels / total_pixels;
@@ -67,6 +74,7 @@ pub fn calculate_exposure_metric(image: &GrayImage) -> f64 {
     (1.0f64 - penalty).max(0.0)
 }
 
+#[derive(Clone)]
 pub struct AnalyzedImage {
     pub sharpness_metric: f64,
     pub center_focus_metric: f64,
@@ -81,7 +89,7 @@ pub fn analyze_image_quality(
     img: &DynamicImage,
     detect_faces: bool,
     face_models: Option<&SmartCullingFaceModels>,
-) -> AnalyzedImage {
+) -> Result<AnalyzedImage> {
     let (width, height) = img.dimensions();
     let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
     let gray_thumbnail = thumbnail.to_luma8();
@@ -90,8 +98,14 @@ pub fn analyze_image_quality(
     let exposure_metric = calculate_exposure_metric(&gray_thumbnail);
 
     let (thumb_w, thumb_h) = gray_thumbnail.dimensions();
-    let center_crop = imageops::crop_imm(&gray_thumbnail, thumb_w / 4, thumb_h / 4, thumb_w / 2, thumb_h / 2)
-        .to_image();
+    let center_crop = imageops::crop_imm(
+        &gray_thumbnail,
+        thumb_w / 4,
+        thumb_h / 4,
+        thumb_w / 2,
+        thumb_h / 2,
+    )
+    .to_image();
     let center_focus_metric = calculate_laplacian_variance(&center_crop);
 
     let normalized_sharpness = ((sharpness_metric + 1.0).log10() / 3.5).min(1.0);
@@ -102,14 +116,15 @@ pub fn analyze_image_quality(
         + (exposure_metric * WEIGHT_EXPOSURE);
 
     let faces = if detect_faces {
-        face_models
-            .map(|models| detect_faces_in_image(img, models))
-            .unwrap_or_default()
+        detect_faces_in_image(
+            img,
+            face_models.ok_or_else(|| anyhow!("face models are required for this analysis"))?,
+        )?
     } else {
         Vec::new()
     };
 
-    AnalyzedImage {
+    Ok(AnalyzedImage {
         sharpness_metric,
         center_focus_metric,
         exposure_metric,
@@ -117,21 +132,18 @@ pub fn analyze_image_quality(
         width,
         height,
         faces,
-    }
+    })
 }
 
-fn detect_faces_in_image(img: &DynamicImage, models: &SmartCullingFaceModels) -> Vec<FaceResult> {
-    let detections = match run_yunet_detection(img, &models.yunet) {
-        Ok(detections) => detections,
-        Err(e) => {
-            log::warn!("Smart culling: face detection failed: {}", e);
-            return Vec::new();
-        }
-    };
+fn detect_faces_in_image(
+    img: &DynamicImage,
+    models: &SmartCullingFaceModels,
+) -> Result<Vec<FaceResult>> {
+    let detections = run_yunet_detection(img, &models.yunet)?;
 
     detections
         .into_iter()
-        .map(|face| {
+        .map(|face| -> Result<FaceResult> {
             let right_eye = face.landmarks[0];
             let left_eye = face.landmarks[1];
             let inter_ocular_distance =
@@ -139,11 +151,12 @@ fn detect_faces_in_image(img: &DynamicImage, models: &SmartCullingFaceModels) ->
 
             let eye_open_probs: Vec<f32> = [right_eye, left_eye]
                 .iter()
-                .filter_map(|&eye_pos| {
-                    let crop = crop_eye_region(img, eye_pos, inter_ocular_distance)?;
-                    run_ocec_classification(&crop, &models.ocec).ok()
+                .map(|&eye_pos| {
+                    let crop = crop_eye_region(img, eye_pos, inter_ocular_distance)
+                        .ok_or_else(|| anyhow!("eye crop is outside the rendered image"))?;
+                    run_ocec_classification(&crop, &models.ocec)
                 })
-                .collect();
+                .collect::<Result<_>>()?;
 
             let eye_open_prob = if eye_open_probs.is_empty() {
                 None
@@ -153,11 +166,38 @@ fn detect_faces_in_image(img: &DynamicImage, models: &SmartCullingFaceModels) ->
 
             let is_closed = eye_open_prob.map(is_eye_closed).unwrap_or(false);
 
-            FaceResult {
+            Ok(FaceResult {
                 bbox: face.bbox,
                 eye_open_prob,
                 is_closed,
-            }
+            })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use image::Luma;
+
+    use super::*;
+
+    #[test]
+    fn laplacian_variance_is_zero_for_a_flat_image() {
+        let image = GrayImage::from_pixel(8, 8, Luma([128]));
+
+        assert_eq!(calculate_laplacian_variance(&image), 0.0);
+    }
+
+    #[test]
+    fn laplacian_variance_detects_high_frequency_detail() {
+        let image = GrayImage::from_fn(8, 8, |x, y| {
+            if (x + y) % 2 == 0 {
+                Luma([0])
+            } else {
+                Luma([255])
+            }
+        });
+
+        assert!(calculate_laplacian_variance(&image) > 100_000.0);
+    }
 }

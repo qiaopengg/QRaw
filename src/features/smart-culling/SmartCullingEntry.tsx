@@ -1,25 +1,61 @@
-import { Sparkles, Loader2 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import { useEffect, useRef } from 'react';
+import { Loader2, Sparkles } from 'lucide-react';
 import Button from '../../components/ui/Button';
+import { useUIStore } from '../../store/useUIStore';
 import type { LibraryHeaderActionSlotProps } from '../contracts';
-import { useSmartCullingStore } from './useSmartCulling';
-import SmartCullingDialog from './SmartCullingDialog';
+import { SMART_CULLING_VIEW } from './constants';
+import { useSmartCullingText } from './i18n';
+import { needsManualOwnershipReconciliation } from './metadata';
+import { runSmartCullingCommand, useSmartCullingStore } from './useSmartCulling';
+import { useSmartCullingEvents } from './useSmartCullingEvents';
 
-export default function SmartCullingEntry({ imageList, allImageList }: LibraryHeaderActionSlotProps) {
-  const { t } = useTranslation();
-  const { isRunning, progress, setSmartCulling } = useSmartCullingStore();
-  const paths = (allImageList ?? imageList).map((image) => image.path);
+export default function SmartCullingEntry({
+  currentFolderPath,
+  imageList,
+  allImageList,
+  onLibraryRefresh,
+}: LibraryHeaderActionSlotProps) {
+  useSmartCullingEvents();
+  const tx = useSmartCullingText();
+  const snapshot = useSmartCullingStore((state) => state.snapshot);
+  const setUI = useUIStore((state) => state.setUI);
+  const reconciled = useRef('');
+  const running =
+    snapshot && ['indexing', 'rendering', 'analyzing', 'organizing', 'cancelling'].includes(snapshot.state);
+  const pending = snapshot?.state === 'readyForReview';
+
+  useEffect(() => {
+    void runSmartCullingCommand({ action: 'status' }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const stale = (allImageList ?? imageList).filter(needsManualOwnershipReconciliation).map((image) => image.path);
+    const key = stale.join('\n');
+    if (!key) {
+      reconciled.current = '';
+      return;
+    }
+    if (key === reconciled.current) return;
+    reconciled.current = key;
+    void runSmartCullingCommand({ action: 'reconcileManual', paths: stale }, true)
+      .then(() => onLibraryRefresh?.())
+      .catch(() => undefined);
+  }, [allImageList, imageList, onLibraryRefresh]);
+
+  const open = async () => {
+    if (running || pending || snapshot?.state === 'completed') {
+      setUI({ activeView: SMART_CULLING_VIEW });
+      return;
+    }
+    if (!currentFolderPath) return;
+    const inspection = runSmartCullingCommand({ action: 'inspect', rootPath: currentFolderPath });
+    setUI({ activeView: SMART_CULLING_VIEW });
+    await inspection.catch(() => undefined);
+  };
 
   return (
-    <>
-      <Button
-        className="h-12 w-12 bg-surface text-text-primary shadow-none p-0 flex items-center justify-center"
-        onClick={() => setSmartCulling({ dialogOpen: true })}
-        data-tooltip={isRunning ? progress?.stage || t('modals.smartCulling.title') : t('modals.smartCulling.title')}
-      >
-        {isRunning ? <Loader2 className="w-8 h-8 animate-spin" /> : <Sparkles className="w-8 h-8" />}
-      </Button>
-      <SmartCullingDialog imagePaths={paths} />
-    </>
+    <Button className="sc-entry-button" onClick={() => void open()} data-tooltip={tx('title')} aria-label={tx('title')}>
+      {running ? <Loader2 className="animate-spin" size={23} /> : <Sparkles size={23} />}
+      {pending ? <span className="sc-entry-dot" /> : null}
+    </Button>
   );
 }

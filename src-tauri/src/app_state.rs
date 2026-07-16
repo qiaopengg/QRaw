@@ -12,7 +12,6 @@ use wgpu::{Texture, TextureView};
 
 use crate::ai_processing::AiState;
 use crate::cache_utils::DecodedImageCache;
-use crate::features::smart_culling::SmartCullingFaceModels;
 use crate::gpu_processing::GpuProcessor;
 use crate::image_processing::GpuContext;
 use crate::lens_correction::LensDatabase;
@@ -171,5 +170,4 @@ pub struct AppState {
     pub decoded_image_cache: Mutex<DecodedImageCache>,
     pub thumbnail_manager: Arc<ThumbnailManager>,
     pub metadata_manager: Arc<MetadataManager>,
-    pub smart_culling_face_models: Mutex<Option<Arc<SmartCullingFaceModels>>>,
 }

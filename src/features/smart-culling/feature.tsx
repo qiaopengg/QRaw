@@ -1,16 +1,21 @@
 import type { AppFeatureRegistration } from '../contracts';
+import SmartCullingEditorGuard from './SmartCullingEditorGuard';
 import SmartCullingEntry from './SmartCullingEntry';
 import SmartCullingReviewPage from './SmartCullingReviewPage';
 import SmartCullingThumbnailBadge from './SmartCullingThumbnailBadge';
-import { SMART_CULLING_REVIEW_VIEW } from './constants';
+import { SMART_CULLING_VIEW } from './constants';
+import './smart-culling.css';
 
 export function useSmartCullingFeature(): AppFeatureRegistration {
   return {
+    editor: {
+      toolbarControls: [SmartCullingEditorGuard],
+    },
     library: {
       headerActions: [SmartCullingEntry],
       thumbnailBadges: [SmartCullingThumbnailBadge],
       views: {
-        [SMART_CULLING_REVIEW_VIEW]: SmartCullingReviewPage,
+        [SMART_CULLING_VIEW]: SmartCullingReviewPage,
       },
     },
   };

@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use ndarray::Array;
 use ort::session::Session;
@@ -58,7 +58,9 @@ pub fn run_yunet_detection(
     let input_tensor_dyn = input_tensor.into_dyn();
     let t_input = Tensor::from_array(input_tensor_dyn.as_standard_layout().into_owned())?;
 
-    let mut session_guard = session.lock().unwrap();
+    let mut session_guard = session
+        .lock()
+        .map_err(|_| anyhow!("YuNet inference session lock is poisoned"))?;
     let outputs = session_guard.run(ort::inputs!["input" => t_input])?;
 
     let scale_x = orig_w as f32 / YUNET_INPUT_SIZE as f32;
@@ -133,7 +135,11 @@ pub fn run_yunet_detection(
 }
 
 fn non_max_suppression(mut candidates: Vec<DetectedFace>, iou_threshold: f32) -> Vec<DetectedFace> {
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut kept: Vec<DetectedFace> = Vec::new();
     for face in candidates {
@@ -170,16 +176,17 @@ fn box_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let area_b = (b[2]).max(0.0) * (b[3]).max(0.0);
     let union = area_a + area_b - inter_area;
 
-    if union <= 0.0 { 0.0 } else { inter_area / union }
+    if union <= 0.0 {
+        0.0
+    } else {
+        inter_area / union
+    }
 }
 
 /// Classifies whether the eyes in a cropped face region are open or closed
 /// using the OCEC model. Returns the probability that the eyes are open
 /// (0.0 = closed, 1.0 = open).
-pub fn run_ocec_classification(
-    face_crop: &DynamicImage,
-    session: &Mutex<Session>,
-) -> Result<f32> {
+pub fn run_ocec_classification(face_crop: &DynamicImage, session: &Mutex<Session>) -> Result<f32> {
     let resized = face_crop.resize_exact(OCEC_INPUT_WIDTH, OCEC_INPUT_HEIGHT, FilterType::Triangle);
     let rgb = resized.to_rgb8();
     let raw_pixels = rgb.as_raw();
@@ -199,7 +206,9 @@ pub fn run_ocec_classification(
     let input_tensor_dyn = input_tensor.into_dyn();
     let t_input = Tensor::from_array(input_tensor_dyn.as_standard_layout().into_owned())?;
 
-    let mut session_guard = session.lock().unwrap();
+    let mut session_guard = session
+        .lock()
+        .map_err(|_| anyhow!("OCEC inference session lock is poisoned"))?;
     let outputs = session_guard.run(ort::inputs!["images" => t_input])?;
     let output_tensor = outputs[0].try_extract_array::<f32>()?.to_owned();
     let prob_open = *output_tensor.as_slice().unwrap().first().unwrap_or(&1.0);
