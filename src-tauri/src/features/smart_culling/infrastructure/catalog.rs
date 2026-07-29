@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::exif_processing::{get_creation_date_from_path, try_get_exif_creation_date};
 use crate::formats::{is_raw_file, is_supported_image_file};
 use crate::image_processing::ImageMetadata;
 
@@ -31,6 +32,9 @@ pub(crate) enum CatalogAssetStatus {
 pub(crate) struct CatalogAsset {
     pub primary_path: PathBuf,
     pub member_paths: Vec<PathBuf>,
+    pub capture_time_millis: i64,
+    pub capture_time_from_exif: bool,
+    pub sequence_number: Option<u64>,
     pub file_baselines: Vec<(PathBuf, FileBaseline)>,
     pub sidecar_path: PathBuf,
     pub sidecar_baseline: SidecarBaseline,
@@ -213,6 +217,9 @@ fn inspect_asset(
     }
 
     let sidecar_path = get_primary_sidecar_path(&primary_path);
+    let capture_time_from_exif = try_get_exif_creation_date(&primary_path).is_some();
+    let capture_time_millis = get_creation_date_from_path(&primary_path).timestamp_millis();
+    let sequence_number = trailing_sequence_number(&primary_path);
     let sidecar_baseline =
         capture_sidecar_baseline(&sidecar_path).map_err(|reason| CatalogFailure {
             path: sidecar_path.clone(),
@@ -227,11 +234,27 @@ fn inspect_asset(
     Ok(CatalogAsset {
         primary_path,
         member_paths,
+        capture_time_millis,
+        capture_time_from_exif,
+        sequence_number,
         file_baselines,
         sidecar_path,
         sidecar_baseline,
         status,
     })
+}
+
+fn trailing_sequence_number(path: &Path) -> Option<u64> {
+    let stem = path.file_stem()?.to_str()?;
+    let digits = stem
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
 }
 
 fn read_sidecar_strict(path: &Path) -> Result<ImageMetadata, String> {
@@ -331,6 +354,18 @@ mod tests {
             catalog.failures[0]
                 .reason
                 .starts_with("Invalid sidecar JSON")
+        );
+    }
+
+    #[test]
+    fn extracts_a_trailing_camera_sequence_number() {
+        assert_eq!(
+            trailing_sequence_number(Path::new("/photos/DSC_0042.ARW")),
+            Some(42)
+        );
+        assert_eq!(
+            trailing_sequence_number(Path::new("/photos/portrait-final.jpg")),
+            None
         );
     }
 }

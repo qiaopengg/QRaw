@@ -63,7 +63,7 @@ pub(crate) fn run_preflight(
 fn provider_name() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        return "Core ML GPU";
+        return "Core ML GPU accelerated";
     }
     #[cfg(target_os = "windows")]
     {

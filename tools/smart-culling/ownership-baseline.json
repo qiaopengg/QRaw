@@ -5,6 +5,7 @@
   "featureTipCommit": "5bf0b8b336126ecdbf3248f8d189d2b02c8f8c5f",
   "allowedPathPrefixes": [
     "docs/smart-culling-v2-",
+    "docs/audits/smart-culling-2026-07-29/",
     "docs/assets/smart-culling-v2-",
     "docs/prototypes/smart-culling-lifecycle/",
     "design-qa.md",

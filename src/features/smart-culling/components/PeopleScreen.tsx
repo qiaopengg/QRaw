@@ -6,6 +6,7 @@ import { useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { LifecycleChrome, fileName } from './LifecycleChrome';
+import { faceSelectionKey, PhotoEvidenceViewport } from './PhotoEvidenceViewport';
 
 const PHOTO_PAGE_SIZE = 12;
 
@@ -14,31 +15,30 @@ export function PeopleScreen({ snapshot, images }: { snapshot: SmartCullingSnaps
   const thumbnails = useProcessStore((state) => state.thumbnails);
   const { keyPeople, mode, busy, setState } = useSmartCullingStore();
   const [samplePath, setSamplePath] = useState(images[0]?.path ?? '');
-  const [detectedSamplePath, setDetectedSamplePath] = useState('');
   const [photoPage, setPhotoPage] = useState(0);
-  const faces = detectedSamplePath === samplePath ? snapshot.detectedFaces : [];
+  const faces = snapshot.detectedImagePath === samplePath ? snapshot.detectedFaces : [];
   const pageCount = Math.max(1, Math.ceil(images.length / PHOTO_PAGE_SIZE));
   const pageImages = images.slice(photoPage * PHOTO_PAGE_SIZE, (photoPage + 1) * PHOTO_PAGE_SIZE);
   const sampleUrl = thumbnails[samplePath];
   const selectedKeys = useMemo(
-    () => new Set(keyPeople.map((person) => `${person.samplePath}:${person.bbox.join(',')}`)),
+    () => new Set(keyPeople.map((person) => faceSelectionKey(person.samplePath, person.bbox))),
     [keyPeople],
   );
   const detect = async () => {
     if (!samplePath) return;
-    const path = samplePath;
-    try {
-      await runSmartCullingCommand({ action: 'detectPeople', path }, true);
-      setDetectedSamplePath(path);
-    } catch {
-      setDetectedSamplePath('');
-    }
+    await runSmartCullingCommand({ action: 'detectPeople', path: samplePath }, true).catch(() => undefined);
   };
   const selectFace = (bbox: [number, number, number, number]) => {
-    const key = `${samplePath}:${bbox.join(',')}`;
+    const key = faceSelectionKey(samplePath, bbox);
     if (selectedKeys.has(key)) return;
     setState({ keyPeople: [...keyPeople, { samplePath, bbox, priority: keyPeople.length + 1 }] });
   };
+  const selectImageAt = (index: number) => {
+    if (index < 0 || index >= images.length) return;
+    setSamplePath(images[index].path);
+    setPhotoPage(Math.floor(index / PHOTO_PAGE_SIZE));
+  };
+  const currentImageIndex = images.findIndex((image) => image.path === samplePath);
   const move = (index: number, direction: -1 | 1) => {
     const next = [...keyPeople];
     const target = index + direction;
@@ -65,27 +65,16 @@ export function PeopleScreen({ snapshot, images }: { snapshot: SmartCullingSnaps
             <em>{tx('currentTaskOnly')}</em>
           </header>
           <div className="sc-person-stage">
-            {sampleUrl ? (
-              <img src={sampleUrl} alt={fileName(samplePath)} />
-            ) : (
-              <div className="sc-empty-photo">{fileName(samplePath)}</div>
-            )}
-            {faces.map((face, index) => (
-              <button
-                key={`${face.bbox.join('-')}-${index}`}
-                className="sc-face-target"
-                style={{
-                  left: `${face.bbox[0] * 100}%`,
-                  top: `${face.bbox[1] * 100}%`,
-                  width: `${face.bbox[2] * 100}%`,
-                  height: `${face.bbox[3] * 100}%`,
-                }}
-                onClick={() => selectFace(face.bbox)}
-                aria-label={`${tx('selectPerson')} ${index + 1}`}
-              >
-                <span>{index + 1}</span>
-              </button>
-            ))}
+            <PhotoEvidenceViewport
+              path={samplePath}
+              fallbackUrl={sampleUrl}
+              alt={fileName(samplePath)}
+              faces={faces}
+              selectedFaceKeys={selectedKeys}
+              onFaceClick={(face) => selectFace(face.bbox)}
+              onPrevious={() => selectImageAt(currentImageIndex - 1)}
+              onNext={() => selectImageAt(currentImageIndex + 1)}
+            />
           </div>
           <button className="sc-secondary sc-detect" disabled={!samplePath || busy} onClick={() => void detect()}>
             <ScanFace size={16} />
@@ -139,10 +128,14 @@ export function PeopleScreen({ snapshot, images }: { snapshot: SmartCullingSnaps
                   <small>{index === 0 ? tx('highestPriority') : `${tx('priority')} ${index + 1}`}</small>
                 </div>
                 <span>
-                  <button aria-label={tx('moveEarlier')} onClick={() => move(index, -1)}>
+                  <button disabled={index === 0} aria-label={tx('moveEarlier')} onClick={() => move(index, -1)}>
                     <ChevronUp size={14} />
                   </button>
-                  <button aria-label={tx('moveLater')} onClick={() => move(index, 1)}>
+                  <button
+                    disabled={index === keyPeople.length - 1}
+                    aria-label={tx('moveLater')}
+                    onClick={() => move(index, 1)}
+                  >
                     <ChevronDown size={14} />
                   </button>
                   <button

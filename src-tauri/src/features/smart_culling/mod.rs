@@ -4,6 +4,7 @@ mod coordinator;
 mod coordinator_support;
 pub(crate) mod domain;
 mod face_models;
+mod grouping;
 pub(crate) mod infrastructure;
 mod models;
 mod preflight;

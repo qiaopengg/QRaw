@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
 use super::face_models::{
-    crop_eye_region, is_eye_closed, run_ocec_classification, run_yunet_detection,
+    crop_eye_region, run_ocec_classification, run_yunet_detection, summarize_eye_state,
 };
 use super::models::SmartCullingFaceModels;
 use super::types::FaceResult;
@@ -16,6 +16,7 @@ const WEIGHT_EXPOSURE: f64 = 0.25;
 /// mild focus/blur defects that a heavy downscale would hide are still
 /// detected. Fixes the FIXME in the original `culling.rs` implementation.
 const ANALYSIS_DIM: u32 = 1600;
+const MIN_INTER_OCULAR_DISTANCE: f32 = 16.0;
 
 pub fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
     let (width, height) = image.dimensions();
@@ -149,22 +150,17 @@ fn detect_faces_in_image(
             let inter_ocular_distance =
                 ((left_eye.0 - right_eye.0).powi(2) + (left_eye.1 - right_eye.1).powi(2)).sqrt();
 
-            let eye_open_probs: Vec<f32> = [right_eye, left_eye]
-                .iter()
-                .map(|&eye_pos| {
-                    let crop = crop_eye_region(img, eye_pos, inter_ocular_distance)
-                        .ok_or_else(|| anyhow!("eye crop is outside the rendered image"))?;
-                    run_ocec_classification(&crop, &models.ocec)
-                })
-                .collect::<Result<_>>()?;
-
-            let eye_open_prob = if eye_open_probs.is_empty() {
-                None
-            } else {
-                Some(eye_open_probs.iter().sum::<f32>() / eye_open_probs.len() as f32)
-            };
-
-            let is_closed = eye_open_prob.map(is_eye_closed).unwrap_or(false);
+            let mut eye_open_probs = Vec::with_capacity(2);
+            if inter_ocular_distance >= MIN_INTER_OCULAR_DISTANCE {
+                for eye_position in [right_eye, left_eye] {
+                    let Some(crop) = crop_eye_region(img, eye_position, inter_ocular_distance)
+                    else {
+                        continue;
+                    };
+                    eye_open_probs.push(run_ocec_classification(&crop, &models.ocec)?);
+                }
+            }
+            let (eye_open_prob, is_closed) = summarize_eye_state(&eye_open_probs);
 
             Ok(FaceResult {
                 bbox: face.bbox,

@@ -1,7 +1,6 @@
-import { Check, LockKeyhole, Star } from 'lucide-react';
-import { useSmartCullingReasonText, useSmartCullingText } from '../i18n';
+import { Star } from 'lucide-react';
+import { useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
-import { fileName } from './LifecycleChrome';
 
 export function Stars({
   value,
@@ -55,66 +54,5 @@ export function LabelControls({
         </button>
       ))}
     </div>
-  );
-}
-
-export function ReviewPhotoCard({
-  result,
-  thumbnail,
-  focused,
-  onFocus,
-  onToggle,
-  onRating,
-  readOnly = false,
-}: {
-  result: ReviewResult;
-  thumbnail?: string;
-  focused: boolean;
-  onFocus: () => void;
-  onToggle: () => void;
-  onRating: (rating: number) => void;
-  readOnly?: boolean;
-}) {
-  const tx = useSmartCullingText();
-  const reason = useSmartCullingReasonText();
-  return (
-    <article
-      className={`sc-photo-card ${focused ? 'is-focused' : ''} ${result.source === 'manual' ? 'is-manual' : ''}`}
-      onClick={onFocus}
-    >
-      <div className="sc-photo-media">
-        {thumbnail ? <img src={thumbnail} alt={fileName(result.path)} /> : <div>{fileName(result.path)}</div>}
-        <button
-          className={`sc-keep-check ${result.adopted ? 'is-checked' : ''}`}
-          disabled={readOnly}
-          aria-label={result.adopted ? tx('doNotAdopt') : tx('adopt')}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggle();
-          }}
-        >
-          {result.adopted ? <Check size={13} /> : null}
-        </button>
-        {result.source === 'manual' ? (
-          <span className="sc-manual-lock">
-            <LockKeyhole size={10} />
-            {tx('manualShort')}
-          </span>
-        ) : null}
-      </div>
-      <div className="sc-photo-meta">
-        <div>
-          <Stars value={result.rating} onChange={readOnly ? undefined : onRating} compact />
-          <span className={`sc-label is-${result.colorLabel ?? 'none'}`}>
-            {result.colorLabel ? tx(result.colorLabel) : tx('noLabel')}
-          </span>
-        </div>
-        <div>
-          <span>{fileName(result.path)}</span>
-          <i>{result.source === 'ai' ? tx('ai') : tx('manualShort')}</i>
-        </div>
-        <small>{result.source === 'ai' ? reason(result.reasonCodes) : tx('manualProtected')}</small>
-      </div>
-    </article>
   );
 }

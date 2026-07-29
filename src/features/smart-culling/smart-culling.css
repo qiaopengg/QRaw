@@ -1777,6 +1777,15 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  line-height: 1;
+}
+.sc-library-badge-main svg {
+  display: block;
+  flex: none;
+}
+.sc-library-badge-main > span {
+  display: block;
+  line-height: 11px;
 }
 .sc-library-badge small {
   margin-top: 2px;

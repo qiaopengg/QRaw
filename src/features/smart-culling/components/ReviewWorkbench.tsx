@@ -1,14 +1,26 @@
-import { ChevronDown, ChevronLeft, FileWarning, Folder, Search, SlidersHorizontal } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { useProcessStore } from '../../../store/useProcessStore';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronLeft,
+  FileWarning,
+  Folder,
+  PanelLeftOpen,
+  PanelRightOpen,
+  Search,
+  SearchX,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSmartCullingFailureText } from '../errorText';
 import { useSmartCullingModes, useSmartCullingStoryText, useSmartCullingText } from '../i18n';
 import type { ReviewChange, ReviewResult, SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { ConfirmModal } from './ConfirmModal';
-import { LifecycleChrome } from './LifecycleChrome';
+import { LifecycleChrome, Modal } from './LifecycleChrome';
+import { ReviewCompareWorkspace } from './ReviewCompareWorkspace';
 import { ReviewInspector } from './ReviewInspector';
-import { ReviewPhotoCard } from './ReviewControls';
+import { ReviewQueueNavigation } from './ReviewQueueNavigation';
 
 export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }) {
   const tx = useSmartCullingText();
@@ -16,13 +28,15 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
   const modeCopy = useSmartCullingModes();
   const storyText = useSmartCullingStoryText();
   const readOnly = snapshot.state === 'completed';
-  const thumbnails = useProcessStore((state) => state.thumbnails);
   const { focusedResultId, confirmOpen, setState } = useSmartCullingStore();
   const [folder, setFolder] = useState<string>('all');
   const [story, setStory] = useState<string>('all');
   const [filter, setFilter] = useState<'all' | 'selected' | 'pending'>('all');
-  const [showFailures, setShowFailures] = useState(true);
+  const [showFailures, setShowFailures] = useState(false);
   const [query, setQuery] = useState('');
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [pendingGroupMode, setPendingGroupMode] = useState<ReviewResult['mode'] | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const folders = useMemo(
     () => Array.from(new Set(snapshot.results.map((result) => result.folder))),
@@ -56,15 +70,23 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
     [snapshot.results, folder, story, filter, normalizedQuery, storyText],
   );
   const groups = useMemo(() => {
+    const visibleGroupIds = new Set(visible.map((result) => result.groupId));
     const map = new Map<string, ReviewResult[]>();
-    visible.forEach((result) => map.set(result.groupId, [...(map.get(result.groupId) ?? []), result]));
+    snapshot.results
+      .filter((result) => visibleGroupIds.has(result.groupId))
+      .forEach((result) => map.set(result.groupId, [...(map.get(result.groupId) ?? []), result]));
     return [...map.entries()];
-  }, [visible]);
+  }, [snapshot.results, visible]);
+  const visibleGroupIds = useMemo(() => new Set(groups.map(([groupId]) => groupId)), [groups]);
   const focused =
-    snapshot.results.find((result) => result.resultId === focusedResultId) ?? visible[0] ?? snapshot.results[0];
+    snapshot.results.find((result) => result.resultId === focusedResultId && visibleGroupIds.has(result.groupId)) ??
+    visible[0] ??
+    null;
+  const focusedGroup = focused ? (groups.find(([groupId]) => groupId === focused.groupId)?.[1] ?? [focused]) : [];
   const picked = snapshot.results.filter((result) => result.colorLabel === 'green').length;
   const pending = snapshot.results.filter((result) => result.colorLabel === 'yellow').length;
   const rejected = snapshot.results.filter((result) => result.colorLabel === 'red').length;
+  const hasFailures = snapshot.failures.length > 0;
   const update = (changes: ReviewChange[]) =>
     readOnly
       ? Promise.resolve(snapshot)
@@ -79,6 +101,8 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
   });
   const editFocused = (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel' | 'mode'>>) =>
     focused && void update([changeFor(focused, patch, true)]);
+  const editResult = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel' | 'mode'>>) =>
+    void update([changeFor(result, patch, true)]);
   const editFocusedGroupMode = (mode: ReviewResult['mode']) =>
     focused &&
     void update(
@@ -89,8 +113,44 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
   const toggle = (result: ReviewResult) => void update([changeFor(result, { adopted: !result.adopted }, false)]);
   const setAll = (adopted: boolean) =>
     void update(snapshot.results.map((result) => changeFor(result, { adopted }, false)));
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target?.matches('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return;
+      }
+      const currentIndex = focused ? visible.findIndex((result) => result.resultId === focused.resultId) : -1;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (visible.length === 0) return;
+        event.preventDefault();
+        const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        const nextIndex = Math.min(visible.length - 1, Math.max(0, currentIndex + direction));
+        setState({ focusedResultId: visible[nextIndex].resultId });
+        return;
+      }
+      if (!focused || readOnly) return;
+      if (/^[1-5]$/.test(event.key)) {
+        event.preventDefault();
+        editFocused({ rating: Number(event.key) });
+      } else if (event.key === ' ') {
+        event.preventDefault();
+        toggle(focused);
+      } else if (['g', 'y', 'r'].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        const labels = { g: 'green', y: 'yellow', r: 'red' } as const;
+        editFocused({ colorLabel: labels[event.key.toLowerCase() as keyof typeof labels] });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editFocused, focused, readOnly, setState, toggle, visible]);
   return (
-    <div className="sc-page">
+    <div className="sc-page sc-review-page">
       <LifecycleChrome screen="review">
         <div className="sc-review-counts">
           <span>
@@ -121,7 +181,7 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
         </button>
       </LifecycleChrome>
       <main className="sc-review-layout">
-        <aside className="sc-story-sidebar">
+        <aside className={`sc-story-sidebar ${navigationOpen ? 'is-open' : ''}`}>
           <header>
             <button onClick={() => setState({ abandonOpen: true })} aria-label={tx('back')}>
               <ChevronLeft size={15} />
@@ -130,6 +190,13 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
             <span>
               {snapshot.mode ? modeCopy[snapshot.mode][0] : tx('title')} · {snapshot.results.length}
             </span>
+            <button
+              className="sc-review-drawer-close"
+              onClick={() => setNavigationOpen(false)}
+              aria-label={tx('close')}
+            >
+              <X size={15} />
+            </button>
           </header>
           <div className="sc-search">
             <Search size={14} />
@@ -181,6 +248,14 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
                 <em>{snapshot.results.filter((result) => result.story === item).length}</em>
               </button>
             ))}
+          <ReviewQueueNavigation
+            groups={groups}
+            focusedGroupId={focused?.groupId ?? null}
+            onSelect={(resultId) => {
+              setState({ focusedResultId: resultId });
+              setNavigationOpen(false);
+            }}
+          />
           <footer>
             <span>
               {tx('selectedCount')} {snapshot.results.filter((result) => result.adopted).length}
@@ -195,6 +270,13 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
         </aside>
         <section className="sc-review-canvas">
           <header>
+            <button
+              className="sc-review-panel-button"
+              onClick={() => setNavigationOpen(true)}
+              aria-label={tx('folders')}
+            >
+              <PanelLeftOpen size={16} />
+            </button>
             <div>
               <h1>{folder === 'all' ? tx('allFolders') : folder}</h1>
               <span>{story === 'all' ? visible.length : storyText(story)}</span>
@@ -210,39 +292,49 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
                 {tx('pending')}
               </button>
             </nav>
+            <button
+              className="sc-review-panel-button"
+              onClick={() => setInspectorOpen(true)}
+              aria-label={tx('aiReason')}
+            >
+              <PanelRightOpen size={16} />
+            </button>
           </header>
-          {groups.map(([groupId, results]) => (
-            <section className="sc-similar-group" key={groupId}>
-              <header>
-                <div>
-                  <i />
-                  <strong>
-                    {storyText(results[0].story)} · {results.length}
-                  </strong>
-                  <small>
-                    {tx('recommended')} {results[0].recommendedCount}
-                  </small>
-                </div>
-                <span>{tx('similarityHigh')}</span>
-              </header>
-              <div className="sc-review-row">
-                {results.map((result) => (
-                  <ReviewPhotoCard
-                    key={result.resultId}
-                    result={result}
-                    thumbnail={thumbnails[result.path]}
-                    focused={focused?.resultId === result.resultId}
-                    onFocus={() => setState({ focusedResultId: result.resultId })}
-                    onToggle={() => toggle(result)}
-                    onRating={(rating) => void update([changeFor(result, { rating }, true)])}
-                    readOnly={readOnly}
-                  />
-                ))}
-              </div>
+          {focused ? (
+            <ReviewCompareWorkspace
+              results={focusedGroup}
+              focusedResultId={focused.resultId}
+              onFocus={(resultId) => setState({ focusedResultId: resultId })}
+              onToggle={toggle}
+              onRating={(result, rating) => editResult(result, { rating })}
+              onLabel={(result, colorLabel) => editResult(result, { colorLabel })}
+              onOpenInspector={() => setInspectorOpen(true)}
+              readOnly={readOnly}
+            />
+          ) : (
+            <section className="sc-review-empty" role="status">
+              <SearchX size={24} />
+              <h2>{tx('emptyReviewTitle')}</h2>
+              <p>{tx('emptyReviewHint')}</p>
+              <button
+                className="sc-secondary"
+                onClick={() => {
+                  setFolder('all');
+                  setStory('all');
+                  setFilter('all');
+                  setQuery('');
+                }}
+              >
+                {tx('clearFilters')}
+              </button>
             </section>
-          ))}
+          )}
           <section className="sc-failures">
-            <button onClick={() => setShowFailures(!showFailures)}>
+            <button
+              disabled={!hasFailures}
+              aria-expanded={hasFailures ? showFailures : false}
+              onClick={() => setShowFailures(!showFailures)}
+            >
               <FileWarning size={16} />
               <strong>
                 {tx('failureAndSkip')} · {snapshot.failures.length}
@@ -251,9 +343,9 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
                 {snapshot.inventory.protectedAssets} {tx('protectedScanSummary')} · {snapshot.inventory.failedAssets}{' '}
                 {tx('scanFailures')}
               </span>
-              <ChevronDown size={15} />
+              <ChevronDown className={showFailures ? 'is-open' : ''} size={15} />
             </button>
-            {showFailures ? (
+            {showFailures && hasFailures ? (
               <div>
                 {snapshot.failures.slice(0, 100).map((failure, index) => (
                   <p key={`${failure.path}-${failure.code}-${index}`}>
@@ -270,12 +362,37 @@ export function ReviewWorkbench({ snapshot }: { snapshot: SmartCullingSnapshot }
           <ReviewInspector
             result={focused}
             onEdit={editFocused}
-            onEditGroupMode={editFocusedGroupMode}
+            onEditGroupMode={setPendingGroupMode}
             onToggle={() => toggle(focused)}
             readOnly={readOnly}
+            open={inspectorOpen}
+            onClose={() => setInspectorOpen(false)}
           />
         ) : null}
       </main>
+      {pendingGroupMode && focused ? (
+        <Modal onClose={() => setPendingGroupMode(null)}>
+          <span className="sc-dialog-icon warning">
+            <AlertTriangle size={22} />
+          </span>
+          <h2>{tx('applyModeTitle')}</h2>
+          <p>{tx('applyModeBody')}</p>
+          <footer>
+            <button className="sc-secondary" onClick={() => setPendingGroupMode(null)}>
+              {tx('cancel')}
+            </button>
+            <button
+              className="sc-primary"
+              onClick={() => {
+                editFocusedGroupMode(pendingGroupMode);
+                setPendingGroupMode(null);
+              }}
+            >
+              {tx('applyModeConfirm')}
+            </button>
+          </footer>
+        </Modal>
+      ) : null}
       {confirmOpen && !readOnly ? <ConfirmModal snapshot={snapshot} /> : null}
     </div>
   );

@@ -8,6 +8,7 @@ import type {
   SmartCullingSnapshot,
 } from './types';
 import type { SmartCullingMode } from './constants';
+import { initialScreenForSnapshot, screenForTaskTransition } from './navigation';
 
 interface SmartCullingState {
   snapshot: SmartCullingSnapshot | null;
@@ -37,15 +38,6 @@ export const useSmartCullingStore = create<SmartCullingState>((set) => ({
   setState: (update) => set(update),
 }));
 
-export function screenForSnapshot(snapshot: SmartCullingSnapshot): LifecycleScreen {
-  if (snapshot.state === 'unsupported') return 'unsupported';
-  if (snapshot.state === 'configuring') return 'setup';
-  if (['indexing', 'rendering', 'analyzing', 'organizing', 'cancelling'].includes(snapshot.state)) return 'analysis';
-  if (snapshot.state === 'readyForReview') return 'ready';
-  if (snapshot.state === 'completed') return 'write';
-  return 'setup';
-}
-
 export async function runSmartCullingCommand(request: SmartCullingRequest, preserveScreen = false) {
   const store = useSmartCullingStore.getState();
   store.setState({ busy: true, error: null });
@@ -58,7 +50,7 @@ export async function runSmartCullingCommand(request: SmartCullingRequest, prese
       : (snapshot.results[0]?.resultId ?? null);
     current.setState({
       snapshot,
-      screen: preserveScreen ? current.screen : screenForSnapshot(snapshot),
+      screen: preserveScreen ? current.screen : screenForTaskTransition(current.screen, snapshot),
       mode: snapshot.mode ?? current.mode,
       keyPeople: clearPeople ? [] : current.keyPeople,
       focusedResultId,
@@ -70,3 +62,5 @@ export async function runSmartCullingCommand(request: SmartCullingRequest, prese
     throw error;
   }
 }
+
+export { initialScreenForSnapshot };

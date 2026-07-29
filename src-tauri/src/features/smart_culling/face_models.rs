@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
-use ndarray::Array;
+use ndarray::{Array, Array4};
 use ort::session::Session;
 use ort::value::Tensor;
 
@@ -13,7 +13,8 @@ const YUNET_NMS_THRESHOLD: f32 = 0.45;
 
 const OCEC_INPUT_HEIGHT: u32 = 24;
 const OCEC_INPUT_WIDTH: u32 = 40;
-const OCEC_OPEN_THRESHOLD: f32 = 0.5;
+const OCEC_STRONG_CLOSED_THRESHOLD: f32 = 0.30;
+const OCEC_CONFIDENT_OPEN_THRESHOLD: f32 = 0.70;
 
 #[derive(Debug, Clone)]
 pub struct DetectedFace {
@@ -187,22 +188,7 @@ fn box_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
 /// using the OCEC model. Returns the probability that the eyes are open
 /// (0.0 = closed, 1.0 = open).
 pub fn run_ocec_classification(face_crop: &DynamicImage, session: &Mutex<Session>) -> Result<f32> {
-    let resized = face_crop.resize_exact(OCEC_INPUT_WIDTH, OCEC_INPUT_HEIGHT, FilterType::Triangle);
-    let rgb = resized.to_rgb8();
-    let raw_pixels = rgb.as_raw();
-
-    let h = OCEC_INPUT_HEIGHT as usize;
-    let w = OCEC_INPUT_WIDTH as usize;
-    let mut input_tensor: Array<f32, _> = Array::zeros((1, 3, h, w));
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) * 3;
-            input_tensor[[0, 0, y, x]] = raw_pixels[idx] as f32 / 255.0;
-            input_tensor[[0, 1, y, x]] = raw_pixels[idx + 1] as f32 / 255.0;
-            input_tensor[[0, 2, y, x]] = raw_pixels[idx + 2] as f32 / 255.0;
-        }
-    }
-
+    let input_tensor = prepare_ocec_input(face_crop);
     let input_tensor_dyn = input_tensor.into_dyn();
     let t_input = Tensor::from_array(input_tensor_dyn.as_standard_layout().into_owned())?;
 
@@ -216,8 +202,42 @@ pub fn run_ocec_classification(face_crop: &DynamicImage, session: &Mutex<Session
     Ok(prob_open.clamp(0.0, 1.0))
 }
 
-pub fn is_eye_closed(prob_open: f32) -> bool {
-    prob_open < OCEC_OPEN_THRESHOLD
+fn prepare_ocec_input(face_crop: &DynamicImage) -> Array4<f32> {
+    let resized = face_crop.resize_exact(OCEC_INPUT_WIDTH, OCEC_INPUT_HEIGHT, FilterType::Triangle);
+    let rgb = resized.to_rgb8();
+    let raw_pixels = rgb.as_raw();
+    let h = OCEC_INPUT_HEIGHT as usize;
+    let w = OCEC_INPUT_WIDTH as usize;
+    let mut input_tensor = Array4::<f32>::zeros((1, 3, h, w));
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) * 3;
+            // The official OCEC pipeline receives OpenCV BGR images before
+            // transposing to NCHW. DynamicImage is RGB, so swap channels here
+            // instead of feeding a different color contract to the model.
+            input_tensor[[0, 0, y, x]] = raw_pixels[idx + 2] as f32 / 255.0;
+            input_tensor[[0, 1, y, x]] = raw_pixels[idx + 1] as f32 / 255.0;
+            input_tensor[[0, 2, y, x]] = raw_pixels[idx] as f32 / 255.0;
+        }
+    }
+    input_tensor
+}
+
+pub fn summarize_eye_state(probabilities: &[f32]) -> (Option<f32>, bool) {
+    if probabilities.len() != 2 || probabilities.iter().any(|value| !value.is_finite()) {
+        return (None, false);
+    }
+    let weakest_eye = probabilities[0].min(probabilities[1]);
+    if weakest_eye <= OCEC_STRONG_CLOSED_THRESHOLD {
+        (Some(weakest_eye), true)
+    } else if probabilities
+        .iter()
+        .all(|value| *value >= OCEC_CONFIDENT_OPEN_THRESHOLD)
+    {
+        (Some(weakest_eye), false)
+    } else {
+        (None, false)
+    }
 }
 
 /// Crops a square region around a single eye landmark, sized relative to the
@@ -245,4 +265,30 @@ pub fn crop_eye_region(
     }
 
     Some(image.crop_imm(x1, y1, x2 - x1, y2 - y1))
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{Rgb, RgbImage};
+
+    use super::*;
+
+    #[test]
+    fn ocec_input_matches_the_official_bgr_channel_contract() {
+        let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([255, 128, 0])));
+
+        let input = prepare_ocec_input(&image);
+
+        assert_eq!(input[[0, 0, 0, 0]], 0.0);
+        assert!((input[[0, 1, 0, 0]] - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(input[[0, 2, 0, 0]], 1.0);
+    }
+
+    #[test]
+    fn eye_state_requires_strong_evidence_and_both_eyes() {
+        assert_eq!(summarize_eye_state(&[0.1, 0.9]), (Some(0.1), true));
+        assert_eq!(summarize_eye_state(&[0.8, 0.9]), (Some(0.8), false));
+        assert_eq!(summarize_eye_state(&[0.45, 0.9]), (None, false));
+        assert_eq!(summarize_eye_state(&[0.1]), (None, false));
+    }
 }

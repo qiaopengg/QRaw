@@ -107,6 +107,7 @@ export interface SmartCullingSnapshot {
   progress: TaskProgress;
   results: ReviewResult[];
   failures: FailureItem[];
+  detectedImagePath: string | null;
   detectedFaces: DetectedFace[];
   writeSummary: WriteSummary | null;
 }
@@ -132,4 +133,4 @@ export type SmartCullingRequest =
   | { action: 'reconcileManual'; paths: string[] }
   | { action: 'abandon' };
 
-export type LifecycleScreen = 'setup' | 'people' | 'analysis' | 'ready' | 'review' | 'write' | 'unsupported';
+export type LifecycleScreen = 'setup' | 'people' | 'analysis' | 'review' | 'write' | 'unsupported';

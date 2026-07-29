@@ -64,6 +64,9 @@ pub(crate) fn run_analysis(
                         path: asset.primary_path.clone(),
                         member_paths: asset.member_paths.clone(),
                         hash,
+                        capture_time_millis: asset.capture_time_millis,
+                        capture_time_from_exif: asset.capture_time_from_exif,
+                        sequence_number: asset.sequence_number,
                         quality_score: quality.quality_score,
                         sharpness_metric: quality.sharpness_metric,
                         center_focus_metric: quality.center_focus_metric,
@@ -130,7 +133,7 @@ pub(crate) fn detect_people(
                 face.bbox[2] / width as f32,
                 face.bbox[3] / height as f32,
             ],
-            score: face.eye_open_prob.unwrap_or(0.8),
+            score: face.eye_open_prob.unwrap_or(0.5),
             thumbnail_data_url: None,
         })
         .collect())

@@ -1,4 +1,4 @@
-import { Bot, LockKeyhole, Star } from 'lucide-react';
+import { Bot, LockKeyhole } from 'lucide-react';
 import type { LibraryThumbnailBadgeSlotProps } from '../contracts';
 import { useSmartCullingReasonText, useSmartCullingText } from './i18n';
 import { getSmartCullingImageMetadata } from './metadata';
@@ -17,9 +17,6 @@ export default function SmartCullingThumbnailBadge({ image }: LibraryThumbnailBa
       <span className="sc-library-badge-main">
         {smart.source === 'ai' ? <Bot size={11} /> : <LockKeyhole size={11} />}
         <span>{smart.source === 'ai' ? tx('ai') : tx('manualShort')}</span>
-        <span className={`sc-color-dot is-${smart.colorLabel ?? 'none'}`} />
-        <span>{smart.rating}</span>
-        <Star size={10} className="fill-current" />
       </span>
       {reason ? <small>{reason}</small> : null}
     </div>

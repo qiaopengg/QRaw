@@ -48,6 +48,7 @@ struct TaskSession {
     cancellation: Arc<AtomicBool>,
     results: Vec<super::api::ReviewResult>,
     failures: Vec<FailureItem>,
+    detected_image_path: Option<String>,
     detected_faces: Vec<super::api::DetectedFaceDto>,
     assets: HashMap<String, CatalogAsset>,
     pending_write: HashMap<PathBuf, ConfirmedResult>,
@@ -127,6 +128,7 @@ fn inspect(root_path: String, app_handle: &AppHandle) -> Result<SmartCullingSnap
         cancellation: Arc::new(AtomicBool::new(false)),
         results: Vec::new(),
         failures,
+        detected_image_path: None,
         detected_faces: Vec::new(),
         assets: HashMap::new(),
         pending_write: HashMap::new(),
@@ -169,6 +171,7 @@ fn detect_people_request(
     let snapshot = {
         let mut coordinator = COORDINATOR.lock().unwrap();
         let session = coordinator.session.as_mut().unwrap();
+        session.detected_image_path = Some(path);
         session.detected_faces = faces;
         snapshot_for(session)
     };
@@ -206,6 +209,7 @@ fn start(
         session.mode = mode.clone();
         session.state = TaskState::Indexing;
         session.started_at = Some(Instant::now());
+        session.detected_image_path = None;
         session.detected_faces.clear();
         session.progress = TaskProgress {
             completed: 0,
@@ -668,6 +672,7 @@ fn snapshot_for(session: &TaskSession) -> SmartCullingSnapshot {
         progress: session.progress.clone(),
         results: session.results.clone(),
         failures: session.failures.clone(),
+        detected_image_path: session.detected_image_path.clone(),
         detected_faces: session.detected_faces.clone(),
         write_summary: session.write_summary.clone(),
     }

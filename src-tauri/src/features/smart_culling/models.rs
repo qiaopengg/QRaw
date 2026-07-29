@@ -115,9 +115,9 @@ fn verify_model(path: &Path, expected_sha256: &str) -> Result<()> {
 }
 
 fn gpu_session(model_path: &PathBuf, dimension_override: Option<(&str, i64)>) -> Result<Session> {
-    // CoreML/DirectML registration alone does not prevent ONNX Runtime from
-    // silently assigning unsupported nodes to its default CPU provider. The
-    // product contract is GPU-only, so fail preflight instead of degrading.
+    // The currently bundled YuNet/OCEC models pass the strict provider gate.
+    // Future models may use an audited low-cost CPU-node allowlist, but must
+    // not weaken this validated path globally.
     let builder = Session::builder()?.with_config_entry("session.disable_cpu_ep_fallback", "1")?;
     let builder = if let Some((name, size)) = dimension_override {
         builder.with_dimension_override(name, size)?

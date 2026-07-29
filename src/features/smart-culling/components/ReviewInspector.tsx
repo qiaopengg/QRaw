@@ -1,10 +1,11 @@
-import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { LockKeyhole, ShieldCheck, X } from 'lucide-react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { SMART_CULLING_MODES, type SmartCullingMode } from '../constants';
 import { useSmartCullingModes, useSmartCullingReasonText, useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
 import { fileName } from './LifecycleChrome';
 import { LabelControls, Stars } from './ReviewControls';
+import { useRenderedPreview } from './useRenderedPreview';
 
 export function ReviewInspector({
   result,
@@ -12,29 +13,47 @@ export function ReviewInspector({
   onEditGroupMode,
   onToggle,
   readOnly = false,
+  open = false,
+  onClose,
 }: {
   result: ReviewResult;
   onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel' | 'mode'>>) => void;
   onEditGroupMode: (mode: SmartCullingMode) => void;
   onToggle: () => void;
   readOnly?: boolean;
+  open?: boolean;
+  onClose?: () => void;
 }) {
   const tx = useSmartCullingText();
   const reason = useSmartCullingReasonText();
   const modeCopy = useSmartCullingModes();
   const thumbnail = useProcessStore((state) => state.thumbnails[result.path]);
-  const groupSummary = [result.rating, 5, result.groupSize, tx('groupSuffix')].join(' · ');
+  const { loadedUrl } = useRenderedPreview(result.path, thumbnail);
+  const previewUrl = loadedUrl ?? thumbnail;
+  const groupSummary =
+    result.groupSize > 1
+      ? `${result.rating}/5 ${tx('starRating')} · ${result.groupSize} ${tx('groupSuffix')}`
+      : `${result.rating}/5 ${tx('starRating')} · ${tx('singlePhoto')}`;
   const sourceLabel = `${tx('source')}:`;
+  const confidenceLabel =
+    result.confidence >= 0.84
+      ? tx('confidenceHigh')
+      : result.confidence >= 0.7
+        ? tx('confidenceMedium')
+        : tx('confidenceLow');
   return (
-    <aside className="sc-inspector">
+    <aside className={`sc-inspector ${open ? 'is-open' : ''}`}>
       <header>
         <div>
           <strong>{fileName(result.path)}</strong>
           <span>{groupSummary}</span>
         </div>
+        <button className="sc-review-drawer-close" onClick={onClose} aria-label={tx('close')}>
+          <X size={15} />
+        </button>
       </header>
       <div className="sc-inspector-photo">
-        {thumbnail ? <img src={thumbnail} alt={fileName(result.path)} /> : <div>{fileName(result.path)}</div>}
+        {previewUrl ? <img src={previewUrl} alt={fileName(result.path)} /> : <div>{fileName(result.path)}</div>}
         <span>
           {result.width} × {result.height}
         </span>
@@ -56,7 +75,7 @@ export function ReviewInspector({
               <i>
                 <b style={{ width: `${Math.round(result.confidence * 100)}%` }} />
               </i>
-              <em>{Math.round(result.confidence * 100)}%</em>
+              <em>{confidenceLabel}</em>
             </div>
           </>
         )}

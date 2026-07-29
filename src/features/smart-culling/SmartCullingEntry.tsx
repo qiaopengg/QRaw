@@ -54,7 +54,7 @@ export default function SmartCullingEntry({
 
   return (
     <Button className="sc-entry-button" onClick={() => void open()} data-tooltip={tx('title')} aria-label={tx('title')}>
-      {running ? <Loader2 className="animate-spin" size={23} /> : <Sparkles size={23} />}
+      {running ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
       {pending ? <span className="sc-entry-dot" /> : null}
     </Button>
   );

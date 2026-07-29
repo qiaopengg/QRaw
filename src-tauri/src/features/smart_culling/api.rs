@@ -96,6 +96,7 @@ pub struct SmartCullingSnapshot {
     pub progress: TaskProgress,
     pub results: Vec<ReviewResult>,
     pub failures: Vec<FailureItem>,
+    pub detected_image_path: Option<String>,
     pub detected_faces: Vec<DetectedFaceDto>,
     pub write_summary: Option<WriteSummary>,
 }
@@ -112,6 +113,7 @@ impl Default for SmartCullingSnapshot {
             progress: TaskProgress::default(),
             results: Vec::new(),
             failures: Vec::new(),
+            detected_image_path: None,
             detected_faces: Vec::new(),
             write_summary: None,
         }

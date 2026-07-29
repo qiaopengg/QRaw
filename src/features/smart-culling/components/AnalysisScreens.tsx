@@ -135,57 +135,6 @@ export function AnalysisScreen({
   );
 }
 
-export function ReadyScreen({
-  snapshot,
-  images,
-  onBrowseLibrary,
-}: {
-  snapshot: SmartCullingSnapshot;
-  images: ImageFile[];
-  onBrowseLibrary: () => void;
-}) {
-  const tx = useSmartCullingText();
-  const setState = useSmartCullingStore((state) => state.setState);
-  return (
-    <div className="sc-page">
-      <LifecycleChrome screen="ready">
-        <button className="sc-text-button" onClick={onBrowseLibrary}>
-          <FolderOpen size={14} />
-          {tx('library')}
-        </button>
-      </LifecycleChrome>
-      <main className="sc-analysis-shell">
-        <header>
-          <div>
-            <h1>{fileName(snapshot.rootPath ?? '')}</h1>
-            <p>{snapshot.progress.partial ? tx('partialReady') : tx('ready')}</p>
-          </div>
-        </header>
-        <PhotoGrid images={images} />
-        <section className="sc-ready-card">
-          <span>
-            <CheckCircle2 size={24} />
-          </span>
-          <div>
-            <h2>{snapshot.progress.partial ? tx('partialReady') : tx('ready')}</h2>
-            <p>
-              {tx('analyzedPrefix')} {snapshot.results.length.toLocaleString()} ·{' '}
-              {snapshot.inventory.protectedAssets.toLocaleString()} {tx('protectedSummary')}
-            </p>
-            <small>
-              <ShieldCheck size={13} />
-              {tx('notWritten')}
-            </small>
-          </div>
-          <button className="sc-primary" onClick={() => setState({ screen: 'review' })}>
-            {tx('enterReview')}
-          </button>
-        </section>
-      </main>
-    </div>
-  );
-}
-
 export function UnsupportedScreen({ snapshot, onExit }: { snapshot: SmartCullingSnapshot; onExit: () => void }) {
   const tx = useSmartCullingText();
   const [guideOpen, setGuideOpen] = useState(false);
