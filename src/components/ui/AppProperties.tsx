@@ -129,7 +129,6 @@ export enum RawStatus {
   All = 'all',
   NonRawOnly = 'nonRawOnly',
   RawOnly = 'rawOnly',
-  RawOverNonRaw = 'rawOverNonRaw',
 }
 
 export enum SortDirection {
@@ -160,6 +159,9 @@ export enum ThumbnailAspectRatio {
   Contain = 'contain',
 }
 
+export type GroupPreference = 'jpeg' | 'raw';
+export type GroupingMode = 'off' | GroupPreference;
+
 export interface AppSettings {
   aiConnectorAddress?: string;
   aiProvider?: string;
@@ -171,10 +173,13 @@ export interface AppSettings {
   enableLivePreviews?: boolean;
   livePreviewQuality?: string;
   enableAiTagging?: boolean;
+  aiTagCount?: number;
+  customAiTags?: string[];
   filterCriteria?: FilterCriteria;
   lastFolderState?: any;
   pinnedFolders?: any;
   lastRootPath: string | null;
+  rootFolders?: string[];
   libraryViewMode?: LibraryViewMode;
   sortCriteria?: SortCriteria;
   theme: Theme;
@@ -208,7 +213,15 @@ export interface AppSettings {
   folderIcons?: Record<string, string>;
   exifOverlay?: ExifOverlay;
   language?: string;
+  fontFamily?: string;
   folderTreeSort?: FolderTreeSort;
+  taggingShortcuts?: string[];
+  libraryDisplayMode?: LibraryDisplayMode;
+  grouping?: GroupingMode;
+  requireMatchingExif?: boolean;
+  groupEditedFiles?: boolean;
+  groupPreferredType?: GroupPreference; // legacy
+  alwaysDecodeRawThumbnails?: boolean;
 }
 
 export interface BrushSettings {
@@ -255,6 +268,8 @@ export interface ImageFile {
   exif: { [key: string]: string } | null;
   is_virtual_copy: boolean;
   is_cloud_placeholder: boolean;
+  is_raw: boolean;
+  group_id: string | null;
 }
 
 export interface Option {
@@ -292,6 +307,7 @@ export interface Progress {
 
 export interface SelectedImage {
   exif: any;
+  group_id?: string | null;
   height: number;
   isRaw: boolean;
   isReady: boolean;
@@ -314,11 +330,16 @@ export interface SupportedTypes {
   raw: Array<string>;
 }
 
+export enum LibraryDisplayMode {
+  Grid = 'grid',
+  Cull = 'cull',
+  List = 'list',
+}
+
 export enum ThumbnailSize {
   Large = 'large',
   Medium = 'medium',
   Small = 'small',
-  List = 'list',
 }
 
 export interface TransformState {

@@ -6,9 +6,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'react-toastify';
 import debounce from 'lodash.debounce';
 
-import { ImageDimensions, useImageRenderSize } from '../../hooks/useImageRenderSize';
+import { ImageDimensions, RenderSize, useImageRenderSize } from '../../hooks/useImageRenderSize';
 import { Adjustments, AiPatch, MaskContainer } from '../../utils/adjustments';
-import { calculateCenteredCrop } from '../../utils/cropUtils';
+import { calculateCenteredCrop, rotateCropCenter } from '../../utils/cropUtils';
 import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas from './editor/ImageCanvas';
 import { Mask, SubMask } from './right/Masks';
@@ -73,6 +73,7 @@ interface WgpuRenderState {
 interface EditorProps {
   onBackToLibrary(): void;
   onContextMenu(event: any): void;
+  onImageSelect?(path: string, event?: any): void;
   transformWrapperRef: any;
   editorFeatureSlots: EditorFeatureSlots;
 }
@@ -80,6 +81,7 @@ interface EditorProps {
 export default function Editor({
   onBackToLibrary,
   onContextMenu,
+  onImageSelect,
   transformWrapperRef,
   editorFeatureSlots,
 }: EditorProps) {
@@ -216,7 +218,7 @@ export default function Editor({
   }, [isFullScreen, selectedImage, targetZoom, setUI]);
 
   const handleDisplaySizeChange = useCallback(
-    (size: any) => {
+    (size: RenderSize) => {
       setEditor({ displaySize: { width: size.width, height: size.height } });
       if (size.scale) {
         const baseWidth = size.width / size.scale;
@@ -229,7 +231,7 @@ export default function Editor({
           containerWidth: size.containerWidth || 0,
           containerHeight: size.containerHeight || 0,
         };
-        setEditor({ baseRenderSize: newSize as any });
+        setEditor({ baseRenderSize: newSize });
       }
     },
     [setEditor],
@@ -270,7 +272,7 @@ export default function Editor({
     [setAdjustments],
   );
 
-  const handleWbPicked = useCallback(() => {}, []);
+  const handleWbPicked = useCallback(() => { }, []);
 
   useEffect(() => {
     if (isFullScreen) {
@@ -1192,7 +1194,7 @@ export default function Editor({
               pixelated: false,
             },
           })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
               isInvoking = false;
             });
@@ -1341,7 +1343,7 @@ export default function Editor({
     return JSON.stringify({
       id: activeMaskDef.id,
       invert: activeMaskDef.invert,
-      opacity: activeMaskDef.opacity,
+      ...('opacity' in activeMaskDef ? { opacity: activeMaskDef.opacity } : {}),
       subMasks,
       geometry,
       renderSize: { w: imageRenderSize.width, h: imageRenderSize.height },
@@ -1499,17 +1501,26 @@ export default function Editor({
           effectiveRotation,
         );
       } else {
-        if (!checkCropValid(currentAdjCrop, W, H, effectiveRotation)) {
+        const referenceRotation = prevCropParams.current?.rotation ?? rotation;
+        const rotationDelta = effectiveRotation - referenceRotation;
+        const followedCrop =
+          rotationChanged && rotationDelta !== 0
+            ? rotateCropCenter(currentAdjCrop, W, H, rotationDelta)
+            : currentAdjCrop;
+
+        if (checkCropValid(followedCrop, W, H, effectiveRotation)) {
+          nextPixelCrop = followedCrop;
+        } else {
           let low = 0.1;
           let high = 1.0;
-          let bestCrop = currentAdjCrop;
+          let bestCrop = followedCrop;
 
           for (let i = 0; i < 10; i++) {
             let mid = (low + high) / 2;
-            let cx = currentAdjCrop.x + currentAdjCrop.width / 2;
-            let cy = currentAdjCrop.y + currentAdjCrop.height / 2;
-            let nw = currentAdjCrop.width * mid;
-            let nh = currentAdjCrop.height * mid;
+            let cx = followedCrop.x + followedCrop.width / 2;
+            let cy = followedCrop.y + followedCrop.height / 2;
+            let nw = followedCrop.width * mid;
+            let nh = followedCrop.height * mid;
             let testCrop = {
               unit: 'px' as const,
               x: cx - nw / 2,
@@ -1937,6 +1948,7 @@ export default function Editor({
   }
 
   const isWgpuActive = appSettings?.useWgpuRenderer !== false && hasRenderedFirstFrame;
+  const hasRenderedAnyPreview = hasRenderedFirstFrame || !!finalPreviewUrl;
 
   return (
     <div
@@ -1948,6 +1960,7 @@ export default function Editor({
           : clsx('rounded-lg p-2 gap-2', appSettings?.useWgpuRenderer !== false ? 'bg-transparent' : 'bg-bg-secondary'),
       )}
     >
+      {hasRenderedAnyPreview && <div className="hidden" data-bench-id="editor-first-frame" />}
       <div
         className={clsx(
           'shrink-0 relative z-10',
@@ -1962,6 +1975,7 @@ export default function Editor({
           isAndroid={isAndroid}
           isLoading={isLoading}
           onBackToLibrary={onBackToLibrary}
+          onImageSelect={onImageSelect}
           onRedo={redo}
           onToggleFullScreen={handleToggleFullScreen}
           onToggleShowOriginal={toggleShowOriginal}

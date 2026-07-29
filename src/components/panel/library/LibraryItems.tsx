@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Image as ImageIcon, Folder, FolderOpen, Star as StarIcon, SlidersHorizontal, CloudOff } from 'lucide-react';
+import { Image as ImageIcon, Folder, FolderOpen, Star as StarIcon, SlidersHorizontal, CloudOff, Layers } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { COLOR_LABELS, Color } from '../../../utils/adjustments';
@@ -21,6 +21,7 @@ interface ImageLayer {
 const ThumbnailComponent = ({
   isActive,
   isSelected,
+  isForcedHover,
   onContextMenu,
   onImageClick,
   onImageDoubleClick,
@@ -34,6 +35,7 @@ const ThumbnailComponent = ({
   isEdited,
   exif,
   isCloudPlaceholder,
+  groupBadgeLabel,
 }: any) => {
   const { t } = useTranslation();
   const data = useProcessStore((s) => s.thumbnails[path]);
@@ -133,7 +135,9 @@ const ThumbnailComponent = ({
     ? 'ring-2 ring-inset ring-accent'
     : isSelected
       ? 'ring-2 ring-inset ring-gray-400'
-      : 'group-hover:ring-2 group-hover:ring-inset group-hover:ring-hover-color';
+      : isForcedHover
+        ? 'ring-2 ring-inset ring-hover-color'
+        : 'group-hover:ring-2 group-hover:ring-inset group-hover:ring-hover-color';
 
   const colorTag = tags?.find((t: string) => t.startsWith('color:'))?.substring(6);
   const colorLabel = COLOR_LABELS.find((c: Color) => c.name === colorTag);
@@ -144,11 +148,13 @@ const ThumbnailComponent = ({
   const hasEditIcon = !!showEditIcon;
   const hasColorLabel = !!colorLabel;
   const hasRating = rating > 0;
-  const hasAnyOverlay = hasEditIcon || hasColorLabel || hasRating;
+  const hasGroupBadge = !!groupBadgeLabel;
+  const hasAnyOverlay = hasEditIcon || hasColorLabel || hasRating || hasGroupBadge;
 
   return (
     <div
       className="aspect-square bg-surface rounded-md overflow-hidden cursor-pointer group relative flex flex-col transition-all duration-150 transform-gpu [-webkit-mask-image:-webkit-radial-gradient(white,black)]"
+      data-bench-id="thumbnail"
       onClick={(e: any) => {
         e.stopPropagation();
         onImageClick(path, e);
@@ -171,9 +177,11 @@ const ThumbnailComponent = ({
               >
                 <img
                   alt={path.split(/[\\/]/).pop()}
-                  className={`w-full h-full group-hover:scale-[1.02] transition-transform duration-300 will-change-transform ${
-                    thumbnailAspectRatio === ThumbnailAspectRatio.Contain ? 'object-contain' : 'object-cover'
-                  } relative`}
+                  className={clsx(
+                    'w-full h-full transition-transform duration-300 will-change-transform relative',
+                    thumbnailAspectRatio === ThumbnailAspectRatio.Contain ? 'object-contain' : 'object-cover',
+                    isForcedHover ? 'scale-[1.02]' : 'group-hover:scale-[1.02]',
+                  )}
                   decoding="async"
                   loading="lazy"
                   src={layer.url}
@@ -208,6 +216,14 @@ const ThumbnailComponent = ({
           </div>
         )}
       </div>
+
+      {thumbnailBadges.length > 0 && (
+        <div className="absolute left-2 top-2 z-20 flex flex-col gap-1 pointer-events-none">
+          {thumbnailBadges.map((Badge: React.ComponentType<LibraryThumbnailBadgeSlotProps>, index: number) => (
+            <Badge key={index} image={image} />
+          ))}
+        </div>
+      )}
 
       <div
         className={clsx(
@@ -257,16 +273,19 @@ const ThumbnailComponent = ({
             </Text>
             <StarIcon size={12} className="text-white fill-white" />
           </div>
+
+          <div
+            className={clsx(
+              'flex items-center shrink-0 transition-all duration-200 ease-out overflow-hidden',
+              hasGroupBadge ? 'max-w-4 opacity-100 scale-100' : 'max-w-0 opacity-0 scale-75 pointer-events-none',
+              hasGroupBadge && (hasEditIcon || hasColorLabel || hasRating) ? 'ml-1.5' : 'ml-0',
+            )}
+            data-tooltip={groupBadgeLabel}
+          >
+            <Layers size={12} className="text-white" />
+          </div>
         </div>
       </div>
-
-      {thumbnailBadges.length > 0 && (
-        <div className="absolute left-2 top-2 z-20 flex flex-col gap-1 pointer-events-none">
-          {thumbnailBadges.map((Badge: React.ComponentType<LibraryThumbnailBadgeSlotProps>, index: number) => (
-            <Badge key={index} image={image} />
-          ))}
-        </div>
-      )}
 
       <div
         className={clsx(
@@ -444,6 +463,8 @@ const ListItemComponent = ({
   columnWidths,
   exif,
   isCloudPlaceholder,
+  isPrevSelected,
+  isNextSelected,
 }: any) => {
   const { t } = useTranslation();
   const data = useProcessStore((s) => s.thumbnails[path]);
@@ -556,15 +577,29 @@ const ListItemComponent = ({
     ' ' +
     dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  let roundingClass = 'rounded-md';
+  if (isSelected || isActive) {
+    if (isPrevSelected && isNextSelected) {
+      roundingClass = 'rounded-none';
+    } else if (isPrevSelected) {
+      roundingClass = 'rounded-b-md';
+    } else if (isNextSelected) {
+      roundingClass = 'rounded-t-md';
+    }
+  }
+
+  const borderClass =
+    (isSelected || isActive) && isNextSelected ? 'border-b border-transparent' : 'border-b border-border-color/30';
+
   const stateClass = isActive
-    ? 'ring-1 ring-inset ring-accent bg-accent/10'
+    ? `ring-1 ring-inset ring-accent bg-accent/10 ${roundingClass}`
     : isSelected
-      ? 'ring-1 ring-inset ring-accent/50 bg-accent/5'
-      : 'hover:bg-surface/80';
+      ? `ring-1 ring-inset ring-accent/50 bg-accent/5 ${roundingClass}`
+      : 'hover:bg-surface/80 hover:rounded-md';
 
   return (
     <div
-      className={`flex items-center w-full h-full border-b border-border-color/30 cursor-pointer transition-colors duration-150 ${stateClass}`}
+      className={`flex items-center w-full h-full cursor-pointer transition-all duration-150 ${borderClass} ${roundingClass} ${stateClass}`}
       onClick={(e: any) => {
         e.stopPropagation();
         onImageClick(path, e);
@@ -734,6 +769,7 @@ const RowComponent = ({
   queueThumbnailRequest,
   thumbnailBadges,
   onToggleRecursiveFolder,
+  groupBadgeInfo,
 }: any) => {
   const { t } = useTranslation();
   const row = rows[index];
@@ -745,7 +781,9 @@ const RowComponent = ({
       queueThumbnailRequest(img.path);
     });
 
-    const cloudPaths = row.images.filter((img: ImageFile) => img.is_cloud_placeholder).map((img: ImageFile) => img.path);
+    const cloudPaths = row.images
+      .filter((img: ImageFile) => img.is_cloud_placeholder)
+      .map((img: ImageFile) => img.path);
     if (cloudPaths.length === 0) return;
 
     const interval = setInterval(() => {
@@ -818,56 +856,79 @@ const RowComponent = ({
         width: isListView ? '100%' : 'auto',
         display: 'flex',
         gap: gap,
+        paddingLeft: isListView ? '8px' : '0px',
+        paddingRight: isListView ? '8px' : '0px',
+        boxSizing: 'border-box',
       }}
     >
-      {row.images.map((imageFile: ImageFile) => (
-        <div
-          key={imageFile.path}
-          style={{
-            width: isListView ? '100%' : itemWidth,
-            height: itemHeight,
-          }}
-        >
-          {isListView ? (
-            <ListItem
-              isActive={activePath === imageFile.path}
-              isSelected={multiSelectedSet.has(imageFile.path)}
-              onContextMenu={onContextMenu}
-              onImageClick={onImageClick}
-              onImageDoubleClick={onImageDoubleClick}
-              onLoad={onImageLoad}
-              path={imageFile.path}
-              rating={imageRatings?.[imageFile.path] || 0}
-              tags={imageFile.tags}
-              image={imageFile}
-              thumbnailBadges={thumbnailBadges}
-              exif={imageFile.exif}
-              aspectRatio={thumbnailAspectRatio}
-              modified={imageFile.modified}
-              columnWidths={columnWidths}
-              isCloudPlaceholder={imageFile.is_cloud_placeholder}
-            />
-          ) : (
-            <Thumbnail
-              isActive={activePath === imageFile.path}
-              isSelected={multiSelectedSet.has(imageFile.path)}
-              onContextMenu={onContextMenu}
-              onImageClick={onImageClick}
-              onImageDoubleClick={onImageDoubleClick}
-              onLoad={onImageLoad}
-              path={imageFile.path}
-              rating={imageRatings?.[imageFile.path] || 0}
-              tags={imageFile.tags}
-              image={imageFile}
-              thumbnailBadges={thumbnailBadges}
-              exif={imageFile.exif}
-              isEdited={imageFile.is_edited}
-              aspectRatio={thumbnailAspectRatio}
-              isCloudPlaceholder={imageFile.is_cloud_placeholder}
-            />
-          )}
-        </div>
-      ))}
+      {row.images.map((imageFile: ImageFile) => {
+        let isPrevSelected = false;
+        let isNextSelected = false;
+
+        if (isListView) {
+          const prevRow = index > 0 ? rows[index - 1] : null;
+          const nextRow = index < rows.length - 1 ? rows[index + 1] : null;
+
+          if (prevRow && prevRow.type === 'images' && prevRow.images.length > 0) {
+            isPrevSelected = multiSelectedSet.has(prevRow.images[0].path);
+          }
+          if (nextRow && nextRow.type === 'images' && nextRow.images.length > 0) {
+            isNextSelected = multiSelectedSet.has(nextRow.images[0].path);
+          }
+        }
+
+        return (
+          <div
+            key={imageFile.path}
+            style={{
+              width: isListView ? '100%' : itemWidth,
+              height: itemHeight,
+            }}
+          >
+            {isListView ? (
+              <ListItem
+                isActive={activePath === imageFile.path}
+                isSelected={multiSelectedSet.has(imageFile.path)}
+                onContextMenu={onContextMenu}
+                onImageClick={onImageClick}
+                onImageDoubleClick={onImageDoubleClick}
+                onLoad={onImageLoad}
+                path={imageFile.path}
+                rating={imageRatings?.[imageFile.path] || 0}
+                tags={imageFile.tags}
+                image={imageFile}
+                thumbnailBadges={thumbnailBadges}
+                exif={imageFile.exif}
+                aspectRatio={thumbnailAspectRatio}
+                modified={imageFile.modified}
+                columnWidths={columnWidths}
+                isCloudPlaceholder={imageFile.is_cloud_placeholder}
+                isPrevSelected={isPrevSelected}
+                isNextSelected={isNextSelected}
+              />
+            ) : (
+              <Thumbnail
+                isActive={activePath === imageFile.path}
+                isSelected={multiSelectedSet.has(imageFile.path)}
+                onContextMenu={onContextMenu}
+                onImageClick={onImageClick}
+                onImageDoubleClick={onImageDoubleClick}
+                onLoad={onImageLoad}
+                path={imageFile.path}
+                rating={imageRatings?.[imageFile.path] || 0}
+                tags={imageFile.tags}
+                image={imageFile}
+                thumbnailBadges={thumbnailBadges}
+                exif={imageFile.exif}
+                isEdited={imageFile.is_edited}
+                aspectRatio={thumbnailAspectRatio}
+                isCloudPlaceholder={imageFile.is_cloud_placeholder}
+                groupBadgeLabel={imageFile.group_id && groupBadgeInfo?.get(imageFile.group_id)?.label}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };

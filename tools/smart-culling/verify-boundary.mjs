@@ -12,6 +12,14 @@ function git(args) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim();
 }
 
+function gitOrEmpty(args) {
+  try {
+    return git(args);
+  } catch {
+    return '';
+  }
+}
+
 function lines(value) {
   return value
     ? value
@@ -27,11 +35,33 @@ function isAllowed(path) {
 
 git(['cat-file', '-e', `${baseline.taskBaseCommit}^{commit}`]);
 git(['cat-file', '-e', `${baseline.upstreamCommit}^{commit}`]);
+git(['cat-file', '-e', `${baseline.featureTipCommit}^{commit}`]);
 
-const changed = new Set([
-  ...lines(git(['diff', '--name-only', baseline.taskBaseCommit])),
-  ...lines(git(['ls-files', '--others', '--exclude-standard'])),
-]);
+const changed = new Set(lines(git(['diff', '--name-only', baseline.taskBaseCommit, baseline.featureTipCommit])));
+const postFeatureChanges = new Set();
+const postFeatureCommits = lines(
+  git(['rev-list', '--reverse', '--first-parent', '--no-merges', `${baseline.featureTipCommit}..HEAD`]),
+);
+
+for (const commit of postFeatureCommits) {
+  const parent = git(['rev-parse', `${commit}^`]);
+  for (const path of lines(git(['diff', '--name-only', parent, commit]))) {
+    changed.add(path);
+    postFeatureChanges.add(path);
+  }
+}
+
+const mergeInProgress = Boolean(gitOrEmpty(['rev-parse', '--verify', '-q', 'MERGE_HEAD']));
+if (!mergeInProgress) {
+  for (const path of lines(git(['diff', '--name-only']))) {
+    changed.add(path);
+    postFeatureChanges.add(path);
+  }
+  for (const path of lines(git(['ls-files', '--others', '--exclude-standard']))) {
+    changed.add(path);
+    postFeatureChanges.add(path);
+  }
+}
 
 const frozenChanges = [...changed].filter((path) => baseline.frozenPaths.includes(path));
 const mixedChanges = [...changed].filter((path) => baseline.mixedOwnershipPaths.includes(path));
@@ -51,8 +81,12 @@ if (mixedChanges.length > 0 && baseline.approvedMixedOwnershipPatchIds.length ==
 }
 
 for (const path of mixedChanges) {
+  if (postFeatureChanges.has(path)) {
+    failures.push(`mixed-ownership host file changed after the approved feature tip:\n  ${path}`);
+    continue;
+  }
   const ranges = baseline.mixedOwnershipRules?.[path]?.allowedBaseLineRanges ?? [];
-  const diff = git(['diff', '--unified=0', baseline.taskBaseCommit, '--', path]);
+  const diff = git(['diff', '--unified=0', baseline.taskBaseCommit, baseline.featureTipCommit, '--', path]);
   const hunks = [...diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/gm)].map((match) => ({
     start: Number(match[1]),
     count: match[2] === undefined ? 1 : Number(match[2]),

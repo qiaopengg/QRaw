@@ -1,7 +1,8 @@
 {
   "schemaVersion": 1,
-  "upstreamCommit": "2182b6d71c44206e3e661fbd2cca043443137d55",
+  "upstreamCommit": "15075591e2d1ce3256724424992bdd365b7eeb1a",
   "taskBaseCommit": "06405ea2aaa22ebf87288bc0c88cef5c202d7b2a",
+  "featureTipCommit": "5bf0b8b336126ecdbf3248f8d189d2b02c8f8c5f",
   "allowedPathPrefixes": [
     "docs/smart-culling-v2-",
     "docs/assets/smart-culling-v2-",

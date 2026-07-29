@@ -8,6 +8,7 @@ import clsx from 'clsx';
 
 import TitleBar from './window/TitleBar';
 import FolderTree from './components/panel/FolderTree';
+import SettingsPanel from './components/panel/SettingsPanel';
 import ExportPanel from './components/panel/right/ExportPanel';
 import Resizer from './components/ui/Resizer';
 import GlobalTooltip from './components/ui/GlobalTooltip';
@@ -108,6 +109,7 @@ function App() {
     rightPanelWidth,
     compactEditorPanelHeightOverride,
     activeRightPanel,
+    isSettingsOpen,
     setUI,
     setRightPanel,
   } = useUIStore(
@@ -122,6 +124,7 @@ function App() {
       rightPanelWidth: state.rightPanelWidth,
       compactEditorPanelHeightOverride: state.compactEditorPanelHeightOverride,
       activeRightPanel: state.activeRightPanel,
+      isSettingsOpen: state.isSettingsOpen,
       setUI: state.setUI,
       setRightPanel: state.setRightPanel,
     })),
@@ -294,7 +297,9 @@ function App() {
   } = useLibraryActions(handleImageSelect);
 
   const appFeatures = useAppFeatures({ selectedImage });
-  const sortedImageList = useSortedLibrary(appFeatures.library?.filterGroups ?? []);
+  const { displayList: sortedImageList, badges: groupBadgeInfo } = useSortedLibrary(
+    appFeatures.library?.filterGroups ?? [],
+  );
 
   const handleLibraryRefresh = useCallback(async () => {
     if (currentFolderPath) {
@@ -689,6 +694,7 @@ function App() {
               ) : (
                 <LibraryView
                   sortedImageList={sortedImageList}
+                  groupBadgeInfo={groupBadgeInfo}
                   thumbnailSize={thumbnailSize}
                   thumbnailAspectRatio={thumbnailAspectRatio}
                   libraryViewMode={libraryViewMode}
@@ -713,6 +719,19 @@ function App() {
                   requestThumbnails={requestThumbnails}
                   libraryFeatureSlots={appFeatures.library ?? {}}
                 />
+              )}
+              {isSettingsOpen && appSettings && hasRoots && (
+                <div className="absolute inset-0 z-50 flex bg-bg-secondary rounded-lg">
+                  <div className="w-full h-full flex flex-col p-4 lg:p-8 overflow-y-auto custom-scrollbar">
+                    <SettingsPanel
+                      appSettings={appSettings}
+                      onBack={() => setUI({ isSettingsOpen: false })}
+                      onLibraryRefresh={handleLibraryRefresh}
+                      onSettingsChange={handleSettingsChange}
+                      rootPaths={rootPaths}
+                    />
+                  </div>
+                </div>
               )}
             </div>
             {!selectedImage && isLibraryExportPanelVisible && (
