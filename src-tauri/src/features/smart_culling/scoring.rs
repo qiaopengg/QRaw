@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 
 use image_hasher::ImageHash;
 
-use super::api::{DetectedFaceDto, ReviewResult};
+use super::api::{DetectedFaceDto, EyeEvidenceDto, KeyPersonEvidenceDto, ReviewResult};
 use super::grouping::{CaptureDescriptor, group_capture_sequence};
-use super::types::FaceResult;
+use super::key_person_scoring::{candidate_reason, rank_key_person_performance};
+use super::types::{FaceResult, KeyPersonEvidence};
 
 pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-2.4";
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+ocec-l-bgr-v2";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+ocec-l-bgr+sface-coreml-v3";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
     pub path: PathBuf,
@@ -24,7 +25,7 @@ pub(crate) struct AnalysisCandidate {
     pub width: u32,
     pub height: u32,
     pub faces: Vec<FaceResult>,
-    pub key_person_priority: Option<usize>,
+    pub key_person_evidence: Vec<KeyPersonEvidence>,
 }
 
 pub(crate) fn organize_results(
@@ -53,6 +54,7 @@ pub(crate) fn organize_results(
             })
             .collect::<Vec<_>>();
         for group in group_capture_sequence(&descriptors) {
+            rank_key_person_performance(&mut folder_items, &group.indices);
             let mut ranked = group
                 .indices
                 .iter()
@@ -66,20 +68,31 @@ pub(crate) fn organize_results(
             });
 
             let group_size = ranked.len();
-            let recommended_count = recommended_count(group_size);
-            let group_id = format!(
-                "{}-{:04}-{:04}",
-                stable_folder_id(&folder),
-                group.story_index,
-                group.group_index
-            );
-            let story = story_label(group.story_index);
+            let group_kind = if group_size == 1 {
+                "single"
+            } else if capture_combination_suspected(&folder_items, &group.indices) {
+                "reviewOnly"
+            } else {
+                "similar"
+            };
+            let recommended_count = if group_kind == "reviewOnly" {
+                group_size
+            } else {
+                recommended_count(group_size)
+            };
+            let group_id = format!("{}-{:04}", stable_folder_id(&folder), group.group_index);
+            let rank_by_index = ranked
+                .iter()
+                .enumerate()
+                .map(|(rank, (candidate_index, score))| (*candidate_index, (rank, *score)))
+                .collect::<BTreeMap<_, _>>();
 
-            for (rank, (candidate_index, score)) in ranked.into_iter().enumerate() {
+            for candidate_index in group.indices {
                 let candidate = &folder_items[candidate_index];
+                let (rank, score) = rank_by_index[&candidate_index];
                 let confidence = confidence(score, candidate);
                 let rating = rating_for(score, rank, recommended_count);
-                let color_label = color_for(rank, recommended_count, confidence);
+                let color_label = color_for(rank, recommended_count, confidence, group_kind);
                 let resolved_mode = resolve_mode(mode, candidate);
                 let reason_codes = reasons_for(
                     candidate,
@@ -98,8 +111,10 @@ pub(crate) fn organize_results(
                         .map(|path| path.to_string_lossy().to_string())
                         .collect(),
                     folder: folder.clone(),
-                    story: story.clone(),
                     group_id: group_id.clone(),
+                    group_kind: group_kind.to_string(),
+                    group_index: group.group_index,
+                    group_rank: rank + 1,
                     group_size,
                     recommended_count,
                     rating,
@@ -108,7 +123,8 @@ pub(crate) fn organize_results(
                     mode: resolved_mode.to_string(),
                     reason_codes,
                     confidence,
-                    adopted: rank < recommended_count,
+                    ai_initially_adopted: group_kind == "reviewOnly" || rank < recommended_count,
+                    adopted: group_kind == "reviewOnly" || rank < recommended_count,
                     protected: false,
                     width: candidate.width,
                     height: candidate.height,
@@ -117,8 +133,34 @@ pub(crate) fn organize_results(
                         .iter()
                         .map(|face| DetectedFaceDto {
                             bbox: normalize_bbox(face.bbox, candidate.width, candidate.height),
-                            score: face.eye_open_prob.unwrap_or(0.5),
+                            score: face.detection_score,
                             thumbnail_data_url: None,
+                            landmarks: Some(normalize_landmarks(
+                                face.landmarks,
+                                candidate.width,
+                                candidate.height,
+                            )),
+                            left_eye: Some(eye_dto(&face.left_eye)),
+                            right_eye: Some(eye_dto(&face.right_eye)),
+                            expression_state: Some(face.expression_state.clone()),
+                            expression_confidence: Some(face.expression_confidence),
+                            expression_reason: Some(face.expression_reason.clone()),
+                            sharpness_metric: Some(face.sharpness_metric),
+                            sharpness_confidence: Some(face.sharpness_confidence),
+                            exposure_metric: Some(face.exposure_metric),
+                            exposure_confidence: Some(face.exposure_confidence),
+                        })
+                        .collect(),
+                    key_person_evidence: candidate
+                        .key_person_evidence
+                        .iter()
+                        .map(|evidence| KeyPersonEvidenceDto {
+                            priority: evidence.priority,
+                            face_index: evidence.face_index,
+                            similarity: evidence.similarity,
+                            status: evidence.status.clone(),
+                            auto_score_eligible: evidence.auto_score_eligible,
+                            performance_rank: evidence.performance_rank,
                         })
                         .collect(),
                 });
@@ -126,7 +168,6 @@ pub(crate) fn organize_results(
         }
     }
 
-    results.sort_by(|left, right| left.path.cmp(&right.path));
     results
 }
 
@@ -169,40 +210,33 @@ fn mode_score(mode: &str, item: &AnalysisCandidate) -> f64 {
         .clamp(0.0, 1.0);
     let center = normalize_focus(item.center_focus_metric);
     let exposure = item.exposure_metric.clamp(0.0, 1.0);
-    let open_eye = if item.faces.iter().any(|face| face.is_closed) {
+    let open_eye = if item.faces.iter().any(FaceResult::has_closed_eye) {
         0.25
     } else if item.faces.is_empty() {
         0.65
-    } else if item.faces.iter().any(|face| face.eye_open_prob.is_none()) {
+    } else if item.faces.iter().any(|face| !face.eye_state_is_known()) {
         0.60
     } else {
         1.0
     };
     let people = if item.faces.is_empty() { 0.4 } else { 1.0 };
-    let key_person = item
-        .key_person_priority
-        .map(|priority| (1.0 - priority.saturating_sub(1) as f64 * 0.12).max(0.4))
-        .unwrap_or(0.5);
-
-    let (sharp_w, center_w, exposure_w, people_w, key_w) = match mode {
-        "portrait" | "group" => (0.24, 0.16, 0.16, 0.26, 0.18),
-        "environment" | "documentary" => (0.25, 0.16, 0.20, 0.22, 0.17),
-        "wildlife" => (0.36, 0.22, 0.15, 0.17, 0.10),
-        "landscape" | "architecture" | "astro" => (0.36, 0.28, 0.30, 0.04, 0.02),
-        "product" => (0.38, 0.30, 0.26, 0.04, 0.02),
-        _ if item.faces.is_empty() => (0.38, 0.28, 0.28, 0.04, 0.02),
-        _ => (0.27, 0.17, 0.18, 0.23, 0.15),
+    // Identity candidates stay informational until the independent QRaw
+    // photography validation gate passes, so identity presence has no weight.
+    let (sharp_w, center_w, exposure_w, people_w) = match mode {
+        "portrait" | "group" => (0.30, 0.20, 0.20, 0.30),
+        "environment" | "documentary" => (0.30, 0.19, 0.24, 0.27),
+        "wildlife" => (0.40, 0.24, 0.18, 0.18),
+        "landscape" | "architecture" | "astro" => (0.38, 0.29, 0.31, 0.02),
+        "product" => (0.39, 0.31, 0.28, 0.02),
+        _ if item.faces.is_empty() => (0.39, 0.29, 0.30, 0.02),
+        _ => (0.32, 0.20, 0.21, 0.27),
     };
     let face_component = if item.faces.is_empty() {
         people
     } else {
         (people + open_eye) / 2.0
     };
-    (sharpness * sharp_w
-        + center * center_w
-        + exposure * exposure_w
-        + face_component * people_w
-        + key_person * key_w)
+    (sharpness * sharp_w + center * center_w + exposure * exposure_w + face_component * people_w)
         .clamp(0.0, 1.0)
 }
 
@@ -220,7 +254,7 @@ fn recommended_count(group_size: usize) -> usize {
 }
 
 fn confidence(score: f64, item: &AnalysisCandidate) -> f32 {
-    let face_penalty = if item.faces.iter().any(|face| face.eye_open_prob.is_none()) {
+    let face_penalty = if item.faces.iter().any(|face| !face.eye_state_is_known()) {
         0.08
     } else {
         0.0
@@ -242,14 +276,20 @@ fn rating_for(score: f64, rank: usize, recommended_count: usize) -> u8 {
     }
 }
 
-fn color_for(rank: usize, recommended_count: usize, confidence: f32) -> &'static str {
-    if confidence < 0.7 {
+fn color_for(
+    rank: usize,
+    recommended_count: usize,
+    confidence: f32,
+    group_kind: &str,
+) -> &'static str {
+    if group_kind == "reviewOnly" || confidence < 0.7 {
         "yellow"
     } else if rank < recommended_count {
         "green"
-    } else if confidence >= 0.84 {
-        "red"
     } else {
+        // Similar-group policy values have not passed the independent
+        // real-photo release gate, so an unselected result is never a strong
+        // red rejection.
         "yellow"
     }
 }
@@ -260,15 +300,13 @@ fn reasons_for(
     rank: usize,
     recommended_count: usize,
     group_size: usize,
-    confidence: f32,
+    _confidence: f32,
 ) -> Vec<String> {
     let mut reasons = Vec::with_capacity(2);
     reasons.push(mode_reason(item, mode));
 
     if group_size <= 1 {
-        if let Some(priority) = item.key_person_priority {
-            reasons.push(format!("key_person_{priority}"));
-        }
+        reasons.extend(candidate_reason(item));
         return reasons;
     }
 
@@ -276,8 +314,8 @@ fn reasons_for(
         reasons.push("group_best".to_string());
     } else if rank < recommended_count {
         reasons.push("group_keeper".to_string());
-    } else if confidence >= 0.84 {
-        reasons.push("stronger_similar_exists".to_string());
+    } else if candidate_reason(item).is_some() {
+        reasons.extend(candidate_reason(item));
     } else {
         reasons.push("needs_review".to_string());
     }
@@ -289,9 +327,9 @@ fn mode_reason(item: &AnalysisCandidate, mode: &str) -> String {
     let sharp = normalize_focus(item.sharpness_metric) >= 0.7;
     let center_sharp = normalize_focus(item.center_focus_metric) >= 0.7;
     let exposure_balanced = item.exposure_metric >= 0.72;
-    let has_closed_eyes = item.faces.iter().any(|face| face.is_closed);
+    let has_closed_eyes = item.faces.iter().any(FaceResult::has_closed_eye);
     let eye_state_reliable =
-        !item.faces.is_empty() && item.faces.iter().all(|face| face.eye_open_prob.is_some());
+        !item.faces.is_empty() && item.faces.iter().all(FaceResult::eye_state_is_known);
 
     let reason = match mode {
         "portrait" if has_closed_eyes => "portrait_closed_eyes",
@@ -342,8 +380,51 @@ fn stable_folder_id(folder: &str) -> String {
     blake3::hash(folder.as_bytes()).to_hex()[..8].to_string()
 }
 
-fn story_label(index: usize) -> String {
-    format!("story:{index}")
+fn capture_combination_suspected(items: &[AnalysisCandidate], indices: &[usize]) -> bool {
+    if indices.len() < 2 {
+        return false;
+    }
+    let (min_exposure, max_exposure) = indices
+        .iter()
+        .map(|index| items[*index].exposure_metric)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| {
+            (min.min(value), max.max(value))
+        });
+    let normalized_focus = indices
+        .iter()
+        .map(|index| normalize_focus(items[*index].sharpness_metric))
+        .collect::<Vec<_>>();
+    let min_focus = normalized_focus
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let max_focus = normalized_focus
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    max_exposure - min_exposure >= 0.25 || max_focus - min_focus >= 0.35
+}
+
+fn eye_dto(eye: &super::types::EyeResult) -> EyeEvidenceDto {
+    EyeEvidenceDto {
+        open_probability: eye.open_probability,
+        state: eye.state.clone(),
+        confidence: eye.confidence,
+        effective_pixels: eye.effective_pixels,
+        sharpness_metric: eye.sharpness_metric,
+    }
+}
+
+fn normalize_landmarks(landmarks: [(f32, f32); 5], width: u32, height: u32) -> [[f32; 2]; 5] {
+    if width == 0 || height == 0 {
+        return [[0.0; 2]; 5];
+    }
+    landmarks.map(|(x, y)| {
+        [
+            (x / width as f32).clamp(0.0, 1.0),
+            (y / height as f32).clamp(0.0, 1.0),
+        ]
+    })
 }
 
 fn normalize_bbox(bbox: [f32; 4], width: u32, height: u32) -> [f32; 4] {
@@ -367,7 +448,7 @@ mod tests {
             result_id: path.to_string(),
             path: PathBuf::from(path),
             member_paths: Vec::new(),
-            hash: ImageHash::from_bytes(&[0; 8]).unwrap(),
+            hash: ImageHash::from_bytes(&[0; 32]).unwrap(),
             capture_time_millis,
             capture_time_from_exif: false,
             sequence_number: Some(sequence_number),
@@ -378,7 +459,7 @@ mod tests {
             width: 100,
             height: 100,
             faces: Vec::new(),
-            key_person_priority: None,
+            key_person_evidence: Vec::new(),
         }
     }
 
@@ -393,15 +474,10 @@ mod tests {
     }
 
     #[test]
-    fn low_confidence_never_becomes_a_red_reject() {
-        assert_eq!(color_for(9, 3, 0.69), "yellow");
-        assert_eq!(color_for(9, 3, 0.9), "red");
-    }
-
-    #[test]
-    fn story_labels_are_stable_locale_independent_codes() {
-        assert_eq!(story_label(2), "story:2");
-        assert_eq!(story_label(7), "story:7");
+    fn unselected_results_remain_pending_until_grouping_release_gate_passes() {
+        assert_eq!(color_for(9, 3, 0.69, "similar"), "yellow");
+        assert_eq!(color_for(9, 3, 0.90, "similar"), "yellow");
+        assert_eq!(color_for(0, 3, 0.90, "reviewOnly"), "yellow");
     }
 
     #[test]

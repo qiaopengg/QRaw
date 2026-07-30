@@ -30,6 +30,7 @@ export interface LibraryFeatureContext {
   allImageList?: ImageFile[];
   selectedPaths: string[];
   onLibraryRefresh?(): void | Promise<void>;
+  onRequestThumbnails?(paths: string[]): void;
 }
 
 export type LibraryHeaderActionSlotProps = LibraryFeatureContext;

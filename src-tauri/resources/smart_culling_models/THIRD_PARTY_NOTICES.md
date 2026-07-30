@@ -2,6 +2,28 @@
 
 These model files are distributed with QRaw for fully offline Smart Culling.
 
+## SFace face recognizer
+
+- File: `face_recognition_sface_2021dec_coreml.onnx`
+- Source: https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
+- Original SHA-256: `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79`
+- Distributed SHA-256: `3e4a66d8a95745ce8b972e78d1330918db04bdb8ef4a81d02088c50aa8d55a15`
+- License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+Copyright (C) 2021, Shenzhen Institute of Artificial Intelligence and Robotics
+for Society, all rights reserved. Third-party copyrights are property of their
+respective owners.
+
+QRaw modifies the ONNX graph without changing the model weights' mathematical
+result: adjacent BatchNorm parameters are folded and the final Gemm is
+represented as an equivalent 7x7 Conv whose `1x128x1x1` output contains the
+same 128 values. This avoids a standalone Flatten operation unsupported by
+the packaged ONNX Runtime/Core ML MLProgram path. The equivalent Conv
+explicitly declares zero padding, unit stride, unit dilation, and one group.
+The original and distributed hashes above identify both forms. The model is
+distributed under the Apache License, Version 2.0, without warranties or
+conditions beyond those stated by that license.
+
 ## YuNet face detector
 
 - File: `face_detection_yunet_2023mar.onnx`

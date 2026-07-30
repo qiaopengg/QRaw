@@ -24,6 +24,33 @@ export interface DetectedFace {
   bbox: [number, number, number, number];
   score: number;
   thumbnailDataUrl: string | null;
+  landmarks?: [[number, number], [number, number], [number, number], [number, number], [number, number]] | null;
+  leftEye?: EyeEvidence | null;
+  rightEye?: EyeEvidence | null;
+  expressionState?: string | null;
+  expressionConfidence?: number | null;
+  expressionReason?: string | null;
+  sharpnessMetric?: number | null;
+  sharpnessConfidence?: number | null;
+  exposureMetric?: number | null;
+  exposureConfidence?: number | null;
+}
+
+export interface EyeEvidence {
+  openProbability: number | null;
+  state: 'open' | 'closed' | 'unknown';
+  confidence: number;
+  effectivePixels: number;
+  sharpnessMetric: number | null;
+}
+
+export interface KeyPersonEvidence {
+  priority: number;
+  faceIndex: number | null;
+  similarity: number | null;
+  status: 'candidate' | 'ambiguous' | 'not_found' | 'reference_unavailable';
+  autoScoreEligible: boolean;
+  performanceRank: number | null;
 }
 
 export interface DevicePreflight {
@@ -58,8 +85,10 @@ export interface ReviewResult {
   path: string;
   memberPaths: string[];
   folder: string;
-  story: string;
   groupId: string;
+  groupKind: 'similar' | 'single' | 'reviewOnly';
+  groupIndex: number;
+  groupRank: number;
   groupSize: number;
   recommendedCount: number;
   rating: number;
@@ -68,11 +97,13 @@ export interface ReviewResult {
   mode: SmartCullingMode;
   reasonCodes: string[];
   confidence: number;
+  aiInitiallyAdopted: boolean;
   adopted: boolean;
   protected: boolean;
   width: number;
   height: number;
   faces: DetectedFace[];
+  keyPersonEvidence: KeyPersonEvidence[];
 }
 
 export interface FailureItem {
@@ -118,7 +149,8 @@ export interface ReviewChange {
   rating: number;
   colorLabel: ReviewResult['colorLabel'];
   mode: SmartCullingMode;
-  edited: boolean;
+  metadataEdited: boolean;
+  modeChanged: boolean;
 }
 
 export type SmartCullingRequest =

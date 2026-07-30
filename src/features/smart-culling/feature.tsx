@@ -7,6 +7,7 @@ import { SMART_CULLING_VIEW } from './constants';
 import './smart-culling.css';
 import './smart-culling-workbench.css';
 import './smart-culling-review.css';
+import './smart-culling-gallery.css';
 
 export function useSmartCullingFeature(): AppFeatureRegistration {
   return {

@@ -127,6 +127,7 @@ export default function LibraryView({
     allImageList: imageList,
     selectedPaths: multiSelectedPaths,
     onLibraryRefresh: handleLibraryRefresh,
+    onRequestThumbnails: requestThumbnails,
   };
 
   return (

@@ -54,10 +54,11 @@ const zhReasons: Record<string, string> = {
   product_center_detail: '产品模式：主体区域细节与曝光较稳定',
   product_detail_review: '产品模式：建议确认主体边缘、质感与背景',
   astro_detail_review: '星空模式：当前按细节和重复度比较，星点与拖线需复核',
-  group_best: '同组综合表现最佳',
-  group_keeper: '同组建议保留',
+  group_best: '同组当前技术指标排名靠前，建议复核',
+  group_keeper: '同组当前技术指标进入候选',
   stronger_similar_exists: '同组存在更强候选',
   needs_review: '判断可信度有限，建议人工确认',
+  mode_corrected_review: '拍摄模式已调整，请按新模式重新确认',
 };
 
 const enReasons: Record<string, string> = {
@@ -86,16 +87,25 @@ const enReasons: Record<string, string> = {
   product_center_detail: 'Product: subject detail and exposure are stable',
   product_detail_review: 'Product: check subject edges, texture, and background',
   astro_detail_review: 'Astro: currently compared by detail and repetition; verify stars and trails',
-  group_best: 'Strongest overall result in this group',
-  group_keeper: 'Recommended keeper in this group',
+  group_best: 'Current technical metrics rank near the top of this group; review it',
+  group_keeper: 'Current technical metrics place this frame in the candidate set',
   stronger_similar_exists: 'A stronger similar frame exists',
   needs_review: 'Confidence is limited; manual review recommended',
+  mode_corrected_review: 'Shooting mode changed; review this result against the new mode',
 };
 
 function reasonText(code: string, isChinese: boolean) {
-  if (code.startsWith('key_person_')) {
-    const priority = code.slice('key_person_'.length);
-    return isChinese ? `包含第 ${priority} 优先级关键人物` : `Includes key person priority ${priority}`;
+  const keyPersonMatch = /^key_person_(\d+)_(candidate_review|ambiguous)$/.exec(code);
+  if (keyPersonMatch) {
+    const [, priority, state] = keyPersonMatch;
+    if (state === 'ambiguous') {
+      return isChinese
+        ? `第 ${priority} 优先级关键人物：身份候选不唯一，请人工确认`
+        : `Key person priority ${priority}: multiple identity candidates; verify manually`;
+    }
+    return isChinese
+      ? `第 ${priority} 优先级关键人物：疑似候选，身份待确认`
+      : `Key person priority ${priority}: possible candidate; identity pending`;
   }
   const dictionary = isChinese ? zhReasons : enReasons;
   return dictionary[code] ?? (isChinese ? '建议人工确认' : 'Manual review recommended');
@@ -219,16 +229,15 @@ const zh = {
   shootingMode: '拍摄模式',
   applyModeToGroup: '将当前模式应用到相似组',
   applyModeTitle: '应用拍摄模式到整组？',
-  applyModeBody: '整组照片都会转为人工结果并受到保护，原有 AI 原因将被清除。',
+  applyModeBody: '整组照片将按新拍摄模式标为待确认；不会因此转为人工结果。',
   applyModeConfirm: '应用到整组',
   pickedCount: '精选',
   pendingCount: '待确认',
   rejectedCount: '淘汰建议',
   failureCount: '失败',
-  searchPlaceholder: '搜索文件夹或故事…',
+  searchPlaceholder: '搜索文件夹或文件名…',
   folders: '文件夹',
   allFolders: '全部文件夹',
-  stories: '故事段落',
   selectedCount: '已选择',
   recommended: '建议保留',
   similarityHigh: '相似度：高',
@@ -243,6 +252,30 @@ const zh = {
   similarGroups: '相似组',
   singlePhotos: '单张照片',
   singlePhoto: '单张照片',
+  unselected: '未采用',
+  keyPersonCandidates: '关键人物候选',
+  reviewOnly: '受保护组合',
+  reviewOnlyTitle: '此组不自动淘汰',
+  reviewOnlyHint: '疑似包围曝光、焦点堆栈或其他拍摄组合；整组保留，由你确认。',
+  similarGroup: '相似组',
+  keyPersonCandidate: '关键人物候选',
+  performanceRank: '组内技术表现排序',
+  expressionPending: '表情状态尚无可靠模型，当前不参与评分或淘汰。',
+  identityPending: '身份仍需人工确认，不参与自动打分',
+  moveToCandidates: '移至待选池',
+  moveToSelected: '移至已选池',
+  setAsA: '设为 A',
+  setAsB: '设为 B',
+  backToAllResults: '返回全部结果',
+  restoreAiSelection: '恢复 AI 初选',
+  selectedPool: '已选池',
+  candidatePool: '待选池',
+  remainingPhotos: '其余照片',
+  expandCandidatePool: '展开全部候选',
+  collapseCandidates: '收起待选池',
+  compareSelected: '对比 A / B',
+  compareNeedsTwo: '请先分别选择 A 和 B',
+  allResults: '全部结果',
   photoUnit: '张',
   groupPhotos: '组内照片',
   comparisonPane: 'A/B 对比窗格',
@@ -415,16 +448,16 @@ const en: Record<keyof typeof zh, string> = {
   shootingMode: 'Shooting mode',
   applyModeToGroup: 'Apply this mode to the similar group',
   applyModeTitle: 'Apply this shooting mode to the group?',
-  applyModeBody: 'Every photo in the group becomes a protected manual result and its AI reasons are cleared.',
+  applyModeBody:
+    'Every photo in the group becomes pending under the new shooting mode; this alone does not make it manual.',
   applyModeConfirm: 'Apply to group',
   pickedCount: 'Picks',
   pendingCount: 'Needs review',
   rejectedCount: 'Reject suggestions',
   failureCount: 'Failures',
-  searchPlaceholder: 'Search folders or stories…',
+  searchPlaceholder: 'Search folders or filenames…',
   folders: 'Folders',
   allFolders: 'All folders',
-  stories: 'Story segments',
   selectedCount: 'Selected',
   recommended: 'Keep',
   similarityHigh: 'Similarity: high',
@@ -439,6 +472,31 @@ const en: Record<keyof typeof zh, string> = {
   similarGroups: 'Similar groups',
   singlePhotos: 'Single photos',
   singlePhoto: 'Single photo',
+  unselected: 'Not adopted',
+  keyPersonCandidates: 'Key-person candidates',
+  reviewOnly: 'Protected sequence',
+  reviewOnlyTitle: 'No automatic rejection for this group',
+  reviewOnlyHint:
+    'Possible exposure bracket, focus stack, or other capture combination. Keep the group and review it yourself.',
+  similarGroup: 'Similar group',
+  keyPersonCandidate: 'Key-person candidate',
+  performanceRank: 'Technical performance rank in group',
+  expressionPending: 'Expression has no validated model yet and does not affect scoring or rejection.',
+  identityPending: 'Identity still needs manual confirmation and does not affect automatic scoring',
+  moveToCandidates: 'Move to candidates',
+  moveToSelected: 'Move to selected',
+  setAsA: 'Set as A',
+  setAsB: 'Set as B',
+  backToAllResults: 'Back to all results',
+  restoreAiSelection: 'Restore AI selection',
+  selectedPool: 'Selected pool',
+  candidatePool: 'Candidate pool',
+  remainingPhotos: 'Remaining photos',
+  expandCandidatePool: 'Expand all candidates',
+  collapseCandidates: 'Collapse candidates',
+  compareSelected: 'Compare A / B',
+  compareNeedsTwo: 'Choose both A and B first',
+  allResults: 'All results',
   photoUnit: 'photos',
   groupPhotos: 'Photos in group',
   comparisonPane: 'A/B comparison panes',
@@ -515,22 +573,6 @@ export function useSmartCullingReasonText() {
         .slice(0, 2)
         .map((code) => reasonText(code, isChinese))
         .join(isChinese ? '；' : '; '),
-    [isChinese],
-  );
-}
-
-export function useSmartCullingStoryText() {
-  const { i18n } = useTranslation();
-  const isChinese = i18n.resolvedLanguage?.toLowerCase().startsWith('zh') ?? false;
-  return useCallback(
-    (story: string) => {
-      const [kind, index] = story.split(':');
-      if (!index) return story;
-      if (kind === 'similar') return isChinese ? `相似组 ${index}` : `Similar group ${index}`;
-      if (kind === 'single') return isChinese ? `单张故事 ${index}` : `Single photo ${index}`;
-      if (kind === 'story') return isChinese ? `拍摄段 ${index}` : `Capture segment ${index}`;
-      return story;
-    },
     [isChinese],
   );
 }

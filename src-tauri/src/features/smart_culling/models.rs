@@ -17,21 +17,25 @@ use ort::value::ValueType;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
 
+use super::face_identity::run_sface_embedding;
 use super::face_models::{run_ocec_classification, run_yunet_detection};
 
 const YUNET_MODEL_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
 const OCEC_MODEL_FILENAME: &str = "ocec_l.onnx";
+const SFACE_MODEL_FILENAME: &str = "face_recognition_sface_2021dec_coreml.onnx";
 const OCEC_BATCH_DIMENSION: (&str, i64) = ("batch", 1);
 const OCEC_INPUT_SHAPE: [i64; 4] = [1, 3, 24, 40];
 const YUNET_SHA256: &str = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 const OCEC_SHA256: &str = "de9b8031f8b521a862d8cff55ba88c2fccab6ac96484ba53154dd12c53c7c7f9";
+const SFACE_SHA256: &str = "3e4a66d8a95745ce8b972e78d1330918db04bdb8ef4a81d02088c50aa8d55a15";
 
 pub struct SmartCullingFaceModels {
     pub yunet: Mutex<Session>,
     pub ocec: Mutex<Session>,
+    pub sface: Mutex<Session>,
 }
 
-// Core ML session teardown is asynchronous. Keeping the two compiled models
+// Core ML session teardown is asynchronous. Keeping the compiled models
 // for the application lifetime also avoids recompiling them for every folder
 // inspection and prevents native cleanup from racing a later task.
 static FACE_MODELS: OnceCell<Arc<SmartCullingFaceModels>> = OnceCell::new();
@@ -63,9 +67,11 @@ fn load_face_models_uncached(app_handle: &tauri::AppHandle) -> Result<Arc<SmartC
 
     let yunet_path = resource_dir.join(YUNET_MODEL_FILENAME);
     let ocec_path = resource_dir.join(OCEC_MODEL_FILENAME);
+    let sface_path = resource_dir.join(SFACE_MODEL_FILENAME);
 
     verify_model(&yunet_path, YUNET_SHA256)?;
     verify_model(&ocec_path, OCEC_SHA256)?;
+    verify_model(&sface_path, SFACE_SHA256)?;
 
     let yunet = gpu_session(&yunet_path, None)?;
     validate_session_contract(
@@ -83,10 +89,13 @@ fn load_face_models_uncached(app_handle: &tauri::AppHandle) -> Result<Arc<SmartC
     // or failing when an unbounded program is torn down.
     let ocec = gpu_session(&ocec_path, Some(OCEC_BATCH_DIMENSION))?;
     validate_session_contract(&ocec, "images", &OCEC_INPUT_SHAPE, &["prob_open"])?;
+    let sface = gpu_session(&sface_path, None)?;
+    validate_session_contract(&sface, "data", &[1, 3, 112, 112], &["fc1"])?;
 
     let models = Arc::new(SmartCullingFaceModels {
         yunet: Mutex::new(yunet),
         ocec: Mutex::new(ocec),
+        sface: Mutex::new(sface),
     });
     smoke_test(&models)?;
     Ok(models)
@@ -98,6 +107,16 @@ fn smoke_test(models: &SmartCullingFaceModels) -> Result<()> {
         .map_err(|error| anyhow!("YuNet GPU smoke test failed: {error}"))?;
     run_ocec_classification(&image, &models.ocec)
         .map_err(|error| anyhow!("OCEC GPU smoke test failed: {error}"))?;
+    let landmarks = [
+        (38.2946, 51.6963),
+        (73.5318, 51.5014),
+        (56.0252, 71.7366),
+        (41.5493, 92.3655),
+        (70.7299, 92.2041),
+    ];
+    let sface_image = DynamicImage::new_rgb8(112, 112);
+    run_sface_embedding(&sface_image, &landmarks, &models.sface)
+        .map_err(|error| anyhow!("SFace Core ML/DirectML smoke test failed: {error}"))?;
     Ok(())
 }
 

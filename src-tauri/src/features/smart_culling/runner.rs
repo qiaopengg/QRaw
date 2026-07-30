@@ -2,16 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use image::{DynamicImage, GenericImageView};
-use image_hasher::{HashAlg, Hasher, HasherConfig, ImageHash};
+use image::GenericImageView;
+use image_hasher::{HashAlg, Hasher, HasherConfig};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use super::analysis::analyze_image_quality;
 use super::api::{DetectedFaceDto, FailureItem, KeyPersonSelection, ReviewResult};
+use super::face_identity::{KeyPersonReference, match_key_people};
 use super::infrastructure::{CatalogAsset, render_current_state};
 use super::models::SmartCullingFaceModels;
 use super::scoring::{AnalysisCandidate, organize_results};
+use super::types::KeyPersonEvidence;
 use crate::AppState;
 
 pub(crate) struct RunOutcome {
@@ -36,7 +38,7 @@ pub(crate) fn run_analysis(
     let total = assets.len();
     let state = app_handle.state::<AppState>();
     let hasher = analysis_hasher();
-    let key_hashes = build_key_hashes(&state, app_handle, key_people, &hasher);
+    let include_identity = !key_people.is_empty();
     let mut analyzed = Vec::with_capacity(total);
     let mut asset_map = HashMap::with_capacity(total);
     let mut failures = Vec::new();
@@ -53,40 +55,40 @@ pub(crate) fn run_analysis(
             .map(|path| path.to_string_lossy().to_string())
             .collect::<Vec<_>>();
         match render_current_state(&path, &state, app_handle) {
-            Ok(image) => match analyze_image_quality(&image, true, Some(models)) {
-                Ok(quality) => {
-                    let hash = hasher.hash_image(&image.thumbnail(720, 720));
-                    let result_id = Uuid::new_v4().to_string();
-                    let key_person_priority =
-                        match_key_person(&image, &quality.faces, &key_hashes, &hasher);
-                    analyzed.push(AnalysisCandidate {
-                        result_id: result_id.clone(),
-                        path: asset.primary_path.clone(),
-                        member_paths: asset.member_paths.clone(),
-                        hash,
-                        capture_time_millis: asset.capture_time_millis,
-                        capture_time_from_exif: asset.capture_time_from_exif,
-                        sequence_number: asset.sequence_number,
-                        quality_score: quality.quality_score,
-                        sharpness_metric: quality.sharpness_metric,
-                        center_focus_metric: quality.center_focus_metric,
-                        exposure_metric: quality.exposure_metric,
-                        width: quality.width,
-                        height: quality.height,
-                        faces: quality.faces,
-                        key_person_priority,
-                    });
-                    asset_map.insert(result_id, asset);
+            Ok(image) => {
+                match analyze_image_quality(&image, true, include_identity, Some(models)) {
+                    Ok(quality) => {
+                        let hash = hasher.hash_image(&image.thumbnail(720, 720));
+                        let result_id = Uuid::new_v4().to_string();
+                        analyzed.push(AnalysisCandidate {
+                            result_id: result_id.clone(),
+                            path: asset.primary_path.clone(),
+                            member_paths: asset.member_paths.clone(),
+                            hash,
+                            capture_time_millis: asset.capture_time_millis,
+                            capture_time_from_exif: asset.capture_time_from_exif,
+                            sequence_number: asset.sequence_number,
+                            quality_score: quality.quality_score,
+                            sharpness_metric: quality.sharpness_metric,
+                            center_focus_metric: quality.center_focus_metric,
+                            exposure_metric: quality.exposure_metric,
+                            width: quality.width,
+                            height: quality.height,
+                            faces: quality.faces,
+                            key_person_evidence: Vec::new(),
+                        });
+                        asset_map.insert(result_id, asset);
+                    }
+                    Err(error) => failures.push(FailureItem {
+                        path,
+                        member_paths,
+                        stage: "analysis".to_string(),
+                        code: "analysis_failed".to_string(),
+                        detail: error.to_string(),
+                        retryable: false,
+                    }),
                 }
-                Err(error) => failures.push(FailureItem {
-                    path,
-                    member_paths,
-                    stage: "analysis".to_string(),
-                    code: "analysis_failed".to_string(),
-                    detail: error.to_string(),
-                    retryable: false,
-                }),
-            },
+            }
             Err(error) => failures.push(FailureItem {
                 path,
                 member_paths,
@@ -98,6 +100,37 @@ pub(crate) fn run_analysis(
         }
         completed += 1;
         on_progress(completed, total, "analyzing");
+    }
+
+    if include_identity {
+        let (references, unavailable_priorities) = build_key_references(
+            &state,
+            app_handle,
+            key_people,
+            &analyzed,
+            models,
+            &mut failures,
+        );
+        for candidate in &mut analyzed {
+            candidate.key_person_evidence = match_key_people(&references, &mut candidate.faces);
+            candidate
+                .key_person_evidence
+                .extend(
+                    unavailable_priorities
+                        .iter()
+                        .map(|priority| KeyPersonEvidence {
+                            priority: *priority,
+                            face_index: None,
+                            similarity: None,
+                            status: "reference_unavailable".to_string(),
+                            auto_score_eligible: false,
+                            performance_rank: None,
+                        }),
+                );
+            candidate
+                .key_person_evidence
+                .sort_by_key(|evidence| evidence.priority);
+        }
     }
 
     on_progress(completed, total, "organizing");
@@ -121,8 +154,8 @@ pub(crate) fn detect_people(
     let image =
         render_current_state(path, &state, app_handle).map_err(|error| error.to_string())?;
     let (width, height) = image.dimensions();
-    let analyzed =
-        analyze_image_quality(&image, true, Some(models)).map_err(|error| error.to_string())?;
+    let analyzed = analyze_image_quality(&image, true, false, Some(models))
+        .map_err(|error| error.to_string())?;
     Ok(analyzed
         .faces
         .into_iter()
@@ -133,8 +166,18 @@ pub(crate) fn detect_people(
                 face.bbox[2] / width as f32,
                 face.bbox[3] / height as f32,
             ],
-            score: face.eye_open_prob.unwrap_or(0.5),
+            score: face.detection_score,
             thumbnail_data_url: None,
+            landmarks: None,
+            left_eye: None,
+            right_eye: None,
+            expression_state: None,
+            expression_confidence: None,
+            expression_reason: None,
+            sharpness_metric: None,
+            sharpness_confidence: None,
+            exposure_metric: None,
+            exposure_confidence: None,
         })
         .collect())
 }
@@ -146,72 +189,120 @@ fn analysis_hasher() -> Hasher {
         .to_hasher()
 }
 
-fn build_key_hashes(
+fn build_key_references(
     state: &tauri::State<'_, AppState>,
     app_handle: &AppHandle,
     selections: &[KeyPersonSelection],
-    hasher: &Hasher,
-) -> Vec<(usize, ImageHash)> {
-    let mut hashes = Vec::new();
-    for selection in selections {
-        let Ok(image) = render_current_state(&selection.sample_path, state, app_handle) else {
-            continue;
-        };
-        let Some(crop) = crop_normalized(&image, selection.bbox) else {
-            continue;
-        };
-        hashes.push((
-            selection.priority,
-            hasher.hash_image(&crop.thumbnail(256, 256)),
-        ));
-    }
-    hashes.sort_by_key(|(priority, _)| *priority);
-    hashes
-}
+    analyzed: &[AnalysisCandidate],
+    models: &SmartCullingFaceModels,
+    failures: &mut Vec<FailureItem>,
+) -> (Vec<KeyPersonReference>, Vec<usize>) {
+    let mut references = Vec::new();
+    let mut unavailable = Vec::new();
+    let mut rendered_cache = HashMap::new();
 
-fn match_key_person(
-    image: &DynamicImage,
-    faces: &[super::types::FaceResult],
-    key_hashes: &[(usize, ImageHash)],
-    hasher: &Hasher,
-) -> Option<usize> {
-    if key_hashes.is_empty() {
-        return None;
-    }
-    for face in faces {
-        let (width, height) = image.dimensions();
-        let bbox = [
-            face.bbox[0] / width as f32,
-            face.bbox[1] / height as f32,
-            face.bbox[2] / width as f32,
-            face.bbox[3] / height as f32,
-        ];
-        let Some(crop) = crop_normalized(image, bbox) else {
-            continue;
-        };
-        let hash = hasher.hash_image(&crop.thumbnail(256, 256));
-        if let Some((priority, _)) = key_hashes
+    for selection in selections {
+        let cached_face = analyzed
             .iter()
-            .map(|(priority, key_hash)| (*priority, hash.dist(key_hash)))
-            .filter(|(_, distance)| *distance <= 52)
-            .min_by_key(|(priority, distance)| (*distance, *priority))
-        {
-            return Some(priority);
+            .find(|candidate| candidate.path.to_string_lossy() == selection.sample_path)
+            .and_then(|candidate| {
+                find_selected_face(
+                    &candidate.faces,
+                    candidate.width,
+                    candidate.height,
+                    selection.bbox,
+                )
+            });
+        let embedding = if let Some(face) = cached_face {
+            face.identity_embedding.clone()
+        } else {
+            if !rendered_cache.contains_key(&selection.sample_path) {
+                let analyzed_reference =
+                    render_current_state(&selection.sample_path, state, app_handle)
+                        .map_err(|error| error.to_string())
+                        .and_then(|image| {
+                            analyze_image_quality(&image, true, true, Some(models))
+                                .map_err(|error| error.to_string())
+                        });
+                rendered_cache.insert(selection.sample_path.clone(), analyzed_reference);
+            }
+            rendered_cache
+                .get(&selection.sample_path)
+                .and_then(|result| result.as_ref().ok())
+                .and_then(|reference| {
+                    find_selected_face(
+                        &reference.faces,
+                        reference.width,
+                        reference.height,
+                        selection.bbox,
+                    )
+                })
+                .and_then(|face| face.identity_embedding.clone())
+        };
+
+        if let Some(embedding) = embedding {
+            references.push(KeyPersonReference {
+                priority: selection.priority,
+                embedding,
+            });
+        } else {
+            unavailable.push(selection.priority);
+            failures.push(FailureItem {
+                path: selection.sample_path.clone(),
+                member_paths: vec![selection.sample_path.clone()],
+                stage: "identity".to_string(),
+                code: "reference_face_not_reacquired".to_string(),
+                detail:
+                    "The selected reference face could not be reacquired with sufficient overlap"
+                        .to_string(),
+                retryable: false,
+            });
         }
     }
-    None
+    references.sort_by_key(|reference| reference.priority);
+    unavailable.sort_unstable();
+    (references, unavailable)
 }
 
-fn crop_normalized(image: &DynamicImage, bbox: [f32; 4]) -> Option<DynamicImage> {
-    let (width, height) = image.dimensions();
-    let x = (bbox[0].clamp(0.0, 1.0) * width as f32).floor() as u32;
-    let y = (bbox[1].clamp(0.0, 1.0) * height as f32).floor() as u32;
-    let crop_width = (bbox[2].clamp(0.0, 1.0) * width as f32).ceil() as u32;
-    let crop_height = (bbox[3].clamp(0.0, 1.0) * height as f32).ceil() as u32;
-    let crop_width = crop_width.min(width.saturating_sub(x));
-    let crop_height = crop_height.min(height.saturating_sub(y));
-    if crop_width == 0 || crop_height == 0 {
-        return None;
+fn find_selected_face(
+    faces: &[super::types::FaceResult],
+    width: u32,
+    height: u32,
+    selected_bbox: [f32; 4],
+) -> Option<&super::types::FaceResult> {
+    faces
+        .iter()
+        .filter(|face| {
+            face.detection_score >= 0.60
+                && face
+                    .landmarks
+                    .iter()
+                    .all(|point| point.0.is_finite() && point.1.is_finite())
+        })
+        .map(|face| {
+            let bbox = [
+                face.bbox[0] / width.max(1) as f32,
+                face.bbox[1] / height.max(1) as f32,
+                face.bbox[2] / width.max(1) as f32,
+                face.bbox[3] / height.max(1) as f32,
+            ];
+            (face, bbox_iou(bbox, selected_bbox))
+        })
+        .filter(|(_, iou)| *iou >= 0.50)
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(face, _)| face)
+}
+
+fn bbox_iou(left: [f32; 4], right: [f32; 4]) -> f32 {
+    let x1 = left[0].max(right[0]);
+    let y1 = left[1].max(right[1]);
+    let x2 = (left[0] + left[2]).min(right[0] + right[2]);
+    let y2 = (left[1] + left[3]).min(right[1] + right[3]);
+    let intersection = (x2 - x1).max(0.0) * (y2 - y1).max(0.0);
+    let union = left[2] * left[3] + right[2] * right[3] - intersection;
+    if union <= 0.0 {
+        0.0
+    } else {
+        intersection / union
     }
-    Some(image.crop_imm(x, y, crop_width, crop_height))
 }

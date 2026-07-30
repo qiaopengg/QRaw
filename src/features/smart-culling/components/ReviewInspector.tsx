@@ -1,4 +1,4 @@
-import { LockKeyhole, ShieldCheck, X } from 'lucide-react';
+import { Images, LockKeyhole, ShieldCheck, UserRoundSearch, X } from 'lucide-react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { SMART_CULLING_MODES, type SmartCullingMode } from '../constants';
 import { useSmartCullingModes, useSmartCullingReasonText, useSmartCullingText } from '../i18n';
@@ -10,16 +10,22 @@ import { useRenderedPreview } from './useRenderedPreview';
 export function ReviewInspector({
   result,
   onEdit,
+  onModeChange,
   onEditGroupMode,
   onToggle,
+  onOpenGroup,
+  onSetComparison,
   readOnly = false,
   open = false,
   onClose,
 }: {
   result: ReviewResult;
-  onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel' | 'mode'>>) => void;
+  onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => void;
+  onModeChange: (mode: SmartCullingMode) => void;
   onEditGroupMode: (mode: SmartCullingMode) => void;
   onToggle: () => void;
+  onOpenGroup?: () => void;
+  onSetComparison?: (slot: 'a' | 'b') => void;
   readOnly?: boolean;
   open?: boolean;
   onClose?: () => void;
@@ -41,6 +47,7 @@ export function ReviewInspector({
       : result.confidence >= 0.7
         ? tx('confidenceMedium')
         : tx('confidenceLow');
+  const keyPersonEvidence = result.keyPersonEvidence.filter((evidence) => evidence.faceIndex !== null);
   return (
     <aside className={`sc-inspector ${open ? 'is-open' : ''}`}>
       <header>
@@ -77,6 +84,21 @@ export function ReviewInspector({
               </i>
               <em>{confidenceLabel}</em>
             </div>
+            {result.faces.length > 0 ? <p className="sc-expression-pending">{tx('expressionPending')}</p> : null}
+            {keyPersonEvidence.length > 0 ? (
+              <div className="sc-key-person-evidence">
+                <UserRoundSearch size={14} />
+                <div>
+                  {keyPersonEvidence.map((evidence) => (
+                    <span key={evidence.priority}>
+                      {tx('priority')} {evidence.priority} · {tx('keyPersonCandidate')}
+                      {evidence.performanceRank ? ` · ${tx('performanceRank')} ${evidence.performanceRank}` : ''}
+                    </span>
+                  ))}
+                  <span>{tx('identityPending')}</span>
+                </div>
+              </div>
+            ) : null}
           </>
         )}
       </section>
@@ -93,7 +115,7 @@ export function ReviewInspector({
           <select
             disabled={readOnly}
             value={result.mode}
-            onChange={(event) => onEdit({ mode: event.target.value as SmartCullingMode })}
+            onChange={(event) => onModeChange(event.target.value as SmartCullingMode)}
           >
             {SMART_CULLING_MODES.map((mode) => (
               <option key={mode} value={mode}>
@@ -106,6 +128,20 @@ export function ReviewInspector({
           <button className="sc-group-mode-button" disabled={readOnly} onClick={() => onEditGroupMode(result.mode)}>
             {tx('applyModeToGroup')}
           </button>
+        ) : null}
+        {result.groupKind !== 'single' ? (
+          <div className="sc-inspector-group-actions">
+            <button onClick={onOpenGroup}>
+              <Images size={13} />
+              {result.groupKind === 'reviewOnly' ? tx('reviewOnly') : tx('similarGroup')}
+            </button>
+            {result.groupKind === 'similar' ? (
+              <>
+                <button onClick={() => onSetComparison?.('a')}>{tx('setAsA')}</button>
+                <button onClick={() => onSetComparison?.('b')}>{tx('setAsB')}</button>
+              </>
+            ) : null}
+          </div>
         ) : null}
         <div className="sc-source-line">
           {sourceLabel}

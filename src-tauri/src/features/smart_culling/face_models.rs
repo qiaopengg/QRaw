@@ -13,7 +13,9 @@ const YUNET_NMS_THRESHOLD: f32 = 0.45;
 
 const OCEC_INPUT_HEIGHT: u32 = 24;
 const OCEC_INPUT_WIDTH: u32 = 40;
+#[cfg(test)]
 const OCEC_STRONG_CLOSED_THRESHOLD: f32 = 0.30;
+#[cfg(test)]
 const OCEC_CONFIDENT_OPEN_THRESHOLD: f32 = 0.70;
 
 #[derive(Debug, Clone)]
@@ -223,6 +225,7 @@ fn prepare_ocec_input(face_crop: &DynamicImage) -> Array4<f32> {
     input_tensor
 }
 
+#[cfg(test)]
 pub fn summarize_eye_state(probabilities: &[f32]) -> (Option<f32>, bool) {
     if probabilities.len() != 2 || probabilities.iter().any(|value| !value.is_finite()) {
         return (None, false);

@@ -9,7 +9,6 @@ export function SetupScreen({ snapshot, onExit }: { snapshot: SmartCullingSnapsh
   const tx = useSmartCullingText();
   const modeCopy = useSmartCullingModes();
   const { mode, keyPeople, busy, setState } = useSmartCullingStore();
-  const peopleAvailable = ['auto', 'portrait', 'environment', 'group', 'documentary'].includes(mode);
   const start = () =>
     snapshot.rootPath &&
     runSmartCullingCommand({ action: 'start', rootPath: snapshot.rootPath, mode, keyPeople }).catch(() => undefined);
@@ -66,11 +65,7 @@ export function SetupScreen({ snapshot, onExit }: { snapshot: SmartCullingSnapsh
                   <p>{tx('keyPeopleHint')}</p>
                 </div>
               </div>
-              <button
-                className="sc-people-entry"
-                disabled={!peopleAvailable}
-                onClick={() => setState({ screen: 'people' })}
-              >
+              <button className="sc-people-entry" onClick={() => setState({ screen: 'people' })}>
                 <UserRoundCheck size={20} />
                 <span>
                   <strong>{tx('choosePeople')}</strong>

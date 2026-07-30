@@ -63,7 +63,7 @@ pub(crate) fn run_preflight(
 fn provider_name() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        return "Core ML GPU accelerated";
+        return "Core ML MLProgram (no ORT CPU EP fallback)";
     }
     #[cfg(target_os = "windows")]
     {

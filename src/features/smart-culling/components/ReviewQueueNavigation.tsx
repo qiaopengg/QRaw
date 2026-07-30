@@ -1,7 +1,7 @@
 import { Image as ImageIcon, Images } from 'lucide-react';
 import { type CSSProperties, useMemo } from 'react';
 import { List } from 'react-window';
-import { useSmartCullingStoryText, useSmartCullingText } from '../i18n';
+import { useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
 import { fileName } from './LifecycleChrome';
 
@@ -27,7 +27,6 @@ function ReviewQueueRow({
   onSelect,
 }: ReviewQueueRowProps & { index: number; style: CSSProperties }) {
   const tx = useSmartCullingText();
-  const storyText = useSmartCullingStoryText();
   const entry = entries[index];
 
   if (entry.kind === 'header') {
@@ -56,6 +55,7 @@ function ReviewQueueRow({
   }
 
   const primary = entry.results.find((result) => result.adopted) ?? entry.results[0];
+  const label = primary.groupKind === 'reviewOnly' ? tx('reviewOnly') : `${tx('similarGroup')} ${primary.groupIndex}`;
   return (
     <div className="sc-review-queue-row" style={style}>
       <button
@@ -64,7 +64,7 @@ function ReviewQueueRow({
         aria-pressed={focusedGroupId === entry.groupId}
       >
         <Images size={13} />
-        <span>{storyText(primary.story)}</span>
+        <span>{label}</span>
         <em>
           {entry.results.length} {tx('photoUnit')}
         </em>

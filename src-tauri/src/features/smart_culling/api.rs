@@ -81,7 +81,10 @@ pub struct ReviewChange {
     pub rating: u8,
     pub color_label: Option<String>,
     pub mode: String,
-    pub edited: bool,
+    #[serde(default)]
+    pub metadata_edited: bool,
+    #[serde(default)]
+    pub mode_changed: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -160,8 +163,10 @@ pub struct ReviewResult {
     pub path: String,
     pub member_paths: Vec<String>,
     pub folder: String,
-    pub story: String,
     pub group_id: String,
+    pub group_kind: String,
+    pub group_index: usize,
+    pub group_rank: usize,
     pub group_size: usize,
     pub recommended_count: usize,
     pub rating: u8,
@@ -170,11 +175,13 @@ pub struct ReviewResult {
     pub mode: String,
     pub reason_codes: Vec<String>,
     pub confidence: f32,
+    pub ai_initially_adopted: bool,
     pub adopted: bool,
     pub protected: bool,
     pub width: u32,
     pub height: u32,
     pub faces: Vec<DetectedFaceDto>,
+    pub key_person_evidence: Vec<KeyPersonEvidenceDto>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -183,6 +190,37 @@ pub struct DetectedFaceDto {
     pub bbox: [f32; 4],
     pub score: f32,
     pub thumbnail_data_url: Option<String>,
+    pub landmarks: Option<[[f32; 2]; 5]>,
+    pub left_eye: Option<EyeEvidenceDto>,
+    pub right_eye: Option<EyeEvidenceDto>,
+    pub expression_state: Option<String>,
+    pub expression_confidence: Option<f32>,
+    pub expression_reason: Option<String>,
+    pub sharpness_metric: Option<f64>,
+    pub sharpness_confidence: Option<f32>,
+    pub exposure_metric: Option<f64>,
+    pub exposure_confidence: Option<f32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EyeEvidenceDto {
+    pub open_probability: Option<f32>,
+    pub state: String,
+    pub confidence: f32,
+    pub effective_pixels: u32,
+    pub sharpness_metric: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyPersonEvidenceDto {
+    pub priority: usize,
+    pub face_index: Option<usize>,
+    pub similarity: Option<f32>,
+    pub status: String,
+    pub auto_score_eligible: bool,
+    pub performance_rank: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]

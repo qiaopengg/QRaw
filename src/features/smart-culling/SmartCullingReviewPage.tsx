@@ -18,6 +18,7 @@ export default function SmartCullingReviewPage({
   allImageList,
   onBackToLibrary,
   onLibraryRefresh,
+  onRequestThumbnails,
 }: LibraryFeatureViewSlotProps) {
   useSmartCullingEvents();
   const tx = useSmartCullingText();
@@ -54,7 +55,8 @@ export default function SmartCullingReviewPage({
   else if (screen === 'people') content = <PeopleScreen snapshot={snapshot} images={images} />;
   else if (screen === 'analysis')
     content = <AnalysisScreen snapshot={snapshot} images={images} onBrowseLibrary={onBackToLibrary} />;
-  else if (screen === 'review') content = <ReviewWorkbench snapshot={snapshot} />;
+  else if (screen === 'review')
+    content = <ReviewWorkbench snapshot={snapshot} onRequestThumbnails={onRequestThumbnails} />;
   else if (screen === 'write')
     content = <WriteScreen snapshot={snapshot} onExit={onBackToLibrary} onRefresh={onLibraryRefresh} />;
   else content = <SetupScreen snapshot={snapshot} onExit={() => setState({ abandonOpen: true })} />;

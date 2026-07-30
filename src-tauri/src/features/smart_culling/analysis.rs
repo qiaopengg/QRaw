@@ -1,11 +1,10 @@
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
-use super::face_models::{
-    crop_eye_region, run_ocec_classification, run_yunet_detection, summarize_eye_state,
-};
+use super::face_identity::run_sface_embedding;
+use super::face_models::{crop_eye_region, run_ocec_classification, run_yunet_detection};
 use super::models::SmartCullingFaceModels;
-use super::types::FaceResult;
+use super::types::{EyeResult, FaceResult};
 
 const WEIGHT_SHARPNESS: f64 = 0.40;
 const WEIGHT_CENTER_FOCUS: f64 = 0.35;
@@ -89,6 +88,7 @@ pub struct AnalyzedImage {
 pub fn analyze_image_quality(
     img: &DynamicImage,
     detect_faces: bool,
+    include_identity: bool,
     face_models: Option<&SmartCullingFaceModels>,
 ) -> Result<AnalyzedImage> {
     let (width, height) = img.dimensions();
@@ -119,6 +119,7 @@ pub fn analyze_image_quality(
     let faces = if detect_faces {
         detect_faces_in_image(
             img,
+            include_identity,
             face_models.ok_or_else(|| anyhow!("face models are required for this analysis"))?,
         )?
     } else {
@@ -138,6 +139,7 @@ pub fn analyze_image_quality(
 
 fn detect_faces_in_image(
     img: &DynamicImage,
+    include_identity: bool,
     models: &SmartCullingFaceModels,
 ) -> Result<Vec<FaceResult>> {
     let detections = run_yunet_detection(img, &models.yunet)?;
@@ -150,25 +152,94 @@ fn detect_faces_in_image(
             let inter_ocular_distance =
                 ((left_eye.0 - right_eye.0).powi(2) + (left_eye.1 - right_eye.1).powi(2)).sqrt();
 
-            let mut eye_open_probs = Vec::with_capacity(2);
-            if inter_ocular_distance >= MIN_INTER_OCULAR_DISTANCE {
-                for eye_position in [right_eye, left_eye] {
-                    let Some(crop) = crop_eye_region(img, eye_position, inter_ocular_distance)
-                    else {
-                        continue;
-                    };
-                    eye_open_probs.push(run_ocec_classification(&crop, &models.ocec)?);
-                }
-            }
-            let (eye_open_prob, is_closed) = summarize_eye_state(&eye_open_probs);
+            let right_eye_result = analyze_eye(img, right_eye, inter_ocular_distance, models)?;
+            let left_eye_result = analyze_eye(img, left_eye, inter_ocular_distance, models)?;
+            let face_crop = crop_pixel_bbox(img, face.bbox);
+            let (sharpness_metric, exposure_metric, local_confidence) = face_crop
+                .as_ref()
+                .map(|crop| {
+                    let gray = crop.to_luma8();
+                    let effective = gray.width().min(gray.height()) as f32;
+                    (
+                        calculate_laplacian_variance(&gray),
+                        calculate_exposure_metric(&gray),
+                        (effective / 96.0).clamp(0.0, 1.0) * face.score,
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 0.0));
+            let identity_embedding = include_identity
+                .then(|| run_sface_embedding(img, &face.landmarks, &models.sface).ok())
+                .flatten();
 
             Ok(FaceResult {
                 bbox: face.bbox,
-                eye_open_prob,
-                is_closed,
+                landmarks: face.landmarks,
+                detection_score: face.score,
+                left_eye: left_eye_result,
+                right_eye: right_eye_result,
+                expression_state: "unknown".to_string(),
+                expression_confidence: 0.0,
+                expression_reason: "model_unavailable".to_string(),
+                sharpness_metric,
+                sharpness_confidence: local_confidence,
+                exposure_metric,
+                exposure_confidence: local_confidence,
+                identity_embedding,
             })
         })
         .collect()
+}
+
+fn analyze_eye(
+    image: &DynamicImage,
+    position: (f32, f32),
+    inter_ocular_distance: f32,
+    models: &SmartCullingFaceModels,
+) -> Result<EyeResult> {
+    if inter_ocular_distance < MIN_INTER_OCULAR_DISTANCE {
+        return Ok(unknown_eye(0));
+    }
+    let Some(crop) = crop_eye_region(image, position, inter_ocular_distance) else {
+        return Ok(unknown_eye(0));
+    };
+    let effective_pixels = crop.width().saturating_mul(crop.height());
+    let sharpness_metric = Some(calculate_laplacian_variance(&crop.to_luma8()));
+    let probability = run_ocec_classification(&crop, &models.ocec)?;
+    let (state, confidence) = if probability <= 0.30 {
+        ("closed", 1.0 - probability)
+    } else if probability >= 0.70 {
+        ("open", probability)
+    } else {
+        ("unknown", ((probability - 0.5).abs() * 2.0).min(0.39))
+    };
+    Ok(EyeResult {
+        open_probability: Some(probability),
+        state: state.to_string(),
+        confidence,
+        effective_pixels,
+        sharpness_metric,
+    })
+}
+
+fn unknown_eye(effective_pixels: u32) -> EyeResult {
+    EyeResult {
+        open_probability: None,
+        state: "unknown".to_string(),
+        confidence: 0.0,
+        effective_pixels,
+        sharpness_metric: None,
+    }
+}
+
+fn crop_pixel_bbox(image: &DynamicImage, bbox: [f32; 4]) -> Option<DynamicImage> {
+    let (width, height) = image.dimensions();
+    let x = bbox[0].max(0.0).floor() as u32;
+    let y = bbox[1].max(0.0).floor() as u32;
+    let crop_width = bbox[2].max(0.0).ceil() as u32;
+    let crop_height = bbox[3].max(0.0).ceil() as u32;
+    let crop_width = crop_width.min(width.saturating_sub(x));
+    let crop_height = crop_height.min(height.saturating_sub(y));
+    (crop_width > 0 && crop_height > 0).then(|| image.crop_imm(x, y, crop_width, crop_height))
 }
 
 #[cfg(test)]
