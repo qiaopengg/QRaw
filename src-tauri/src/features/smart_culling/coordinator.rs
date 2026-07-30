@@ -322,15 +322,20 @@ fn update_review(
                 continue;
             };
             result.adopted = change.adopted;
-            if change.edited {
+            if change.metadata_edited {
                 result.rating = change.rating;
                 result.color_label = change.color_label;
-                if valid_mode(&change.mode) {
-                    result.mode = change.mode;
-                }
                 result.source = "manual".to_string();
                 result.reason_codes.clear();
                 result.confidence = 0.0;
+            }
+            if change.mode_changed {
+                result.mode = change.mode;
+                if result.source == "ai" {
+                    result.reason_codes = vec!["mode_corrected_review".to_string()];
+                    result.confidence = 0.0;
+                    result.color_label = Some("yellow".to_string());
+                }
             }
         }
         snapshot_for(session)
