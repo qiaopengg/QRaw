@@ -15,6 +15,17 @@
     "tools/smart-culling/"
   ],
   "frozenPaths": ["src/features/appFeatures.ts", "src/features/contracts.ts"],
+  "approvedPostFeatureChanges": {
+    "6e5908e0c118ce39e0a32927871ed4161f804178": {
+      "patchId": "v2-thumbnail-request-context",
+      "paths": [
+        "docs/智能选图需求纠正实施方案.md",
+        "docs/需求纠正.md",
+        "src/components/views/LibraryView.tsx",
+        "src/features/contracts.ts"
+      ]
+    }
+  },
   "mixedOwnershipPaths": ["src-tauri/src/app_state.rs", "src-tauri/src/features/mod.rs", "src-tauri/src/lib.rs"],
   "approvedMixedOwnershipPatchIds": ["v2-single-gateway-and-v1-state-removal"],
   "mixedOwnershipRules": {

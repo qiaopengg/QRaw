@@ -28,6 +28,11 @@
     "src-tauri/resources/smart_culling_models/face_detection_yunet_2023mar.onnx",
     "src-tauri/resources/smart_culling_models/ocec_l.onnx"
   ],
+  "requiredV2BundledModels": [
+    "src-tauri/resources/smart_culling_models/face_detection_yunet_2023mar.onnx",
+    "src-tauri/resources/smart_culling_models/face_recognition_sface_2021dec_coreml.onnx",
+    "src-tauri/resources/smart_culling_models/ocec_l.onnx"
+  ],
   "persistenceKeys": ["featureData.smartCulling"],
   "hostRegistration": "useSmartCullingFeature",
   "unsafeV1Capabilities": [

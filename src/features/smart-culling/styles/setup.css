@@ -1,0 +1,220 @@
+.sc-setup-shell {
+  display: grid;
+  grid-template-columns: 218px 1fr;
+  height: calc(100% - 54px);
+}
+.sc-context-sidebar {
+  padding: 26px 17px;
+  border-right: 1px solid var(--sc-border);
+  background: #151515;
+}
+.sc-context-sidebar strong,
+.sc-context-sidebar span {
+  display: block;
+}
+.sc-context-sidebar strong {
+  font-size: 11px;
+}
+.sc-context-sidebar span {
+  margin-top: 7px;
+  color: #777;
+  font-size: 9px;
+}
+.sc-context-sidebar p {
+  margin-top: 26px;
+  color: #666;
+  font-size: 9px;
+  line-height: 1.8;
+}
+.sc-setup-workspace {
+  overflow: auto;
+  padding: 34px clamp(32px, 6vw, 76px);
+  background: #141414;
+}
+.sc-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(600px, 1fr) 260px;
+  gap: 16px;
+  max-width: 990px;
+  margin-top: 24px;
+}
+.sc-setup-card,
+.sc-summary-card {
+  border: 1px solid var(--sc-border);
+  border-radius: 9px;
+  background: var(--sc-surface);
+}
+.sc-setup-card {
+  padding: 22px;
+}
+.sc-section-title {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.sc-section-title > b {
+  flex: 0 0 23px;
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  color: #111;
+  background: #eee;
+  border-radius: 50%;
+  font-size: 10px;
+}
+.sc-section-title h2 {
+  font-size: 13px;
+}
+.sc-section-title p {
+  margin-top: 5px;
+  color: #767676;
+  font-size: 9px;
+}
+.sc-section-title em {
+  color: #777;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 400;
+}
+.sc-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 16px 0 0 35px;
+}
+.sc-mode-grid button {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  grid-template-rows: 21px 17px;
+  padding: 9px 11px;
+  border: 1px solid #343434 !important;
+  border-radius: 5px;
+  text-align: left;
+  background: #1d1d1d !important;
+}
+.sc-mode-grid button:hover {
+  border-color: #555 !important;
+}
+.sc-mode-grid button.is-selected {
+  border-color: #eee !important;
+  box-shadow: inset 0 0 0 1px #eee;
+  background: #292929 !important;
+}
+.sc-mode-grid i {
+  grid-row: 1 / 3;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #555;
+  border-radius: 50%;
+  font-style: normal;
+}
+.sc-mode-grid .is-selected i {
+  color: #111;
+  background: #eee;
+}
+.sc-mode-grid strong {
+  font-size: 10px;
+}
+.sc-mode-grid small {
+  color: #717171;
+  font-size: 8px;
+}
+.sc-people-title {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #292929;
+}
+.sc-people-entry {
+  width: calc(100% - 35px);
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 15px 0 0 35px;
+  padding: 0 14px;
+  border: 1px solid #343434 !important;
+  border-radius: 5px;
+  text-align: left;
+  background: #1e1e1e !important;
+}
+.sc-people-entry span {
+  flex: 1;
+}
+.sc-people-entry strong,
+.sc-people-entry small {
+  display: block;
+}
+.sc-people-entry strong {
+  font-size: 10px;
+}
+.sc-people-entry small {
+  margin-top: 5px;
+  color: #707070;
+  font-size: 8px;
+}
+.sc-summary-card {
+  height: fit-content;
+  padding: 21px;
+}
+.sc-summary-card h2 {
+  font-size: 13px;
+}
+.sc-summary-card dl {
+  margin-top: 18px;
+}
+.sc-summary-card dl > div {
+  padding: 13px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+.sc-summary-card dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #777;
+  font-size: 9px;
+}
+.sc-summary-card dd {
+  margin-top: 8px;
+  color: #bdbdbd;
+  font-size: 9px;
+}
+.sc-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid #31455b;
+  border-radius: 4px;
+  color: #9bb2ca;
+  background: #1d2a36;
+}
+.sc-info p {
+  color: inherit !important;
+  font-size: 8px !important;
+  line-height: 1.55;
+}
+.sc-summary-card .sc-info {
+  margin-top: 17px;
+}
+.sc-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 17px;
+}
+.sc-summary-card > small {
+  display: block;
+  margin-top: 11px;
+  color: #666;
+  font-size: 8px;
+  text-align: center;
+}
+.sc-error {
+  margin-top: 10px !important;
+  color: #df7772 !important;
+  font-size: 9px !important;
+}

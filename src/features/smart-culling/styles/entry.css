@@ -1,0 +1,81 @@
+.sc-library-badge {
+  display: inline-grid;
+  max-width: 150px;
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 3px;
+  color: #eee;
+  background: rgba(10, 10, 10, 0.72);
+  backdrop-filter: blur(6px);
+  font-size: 8px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+.sc-library-badge.has-reason {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.sc-library-badge-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1;
+}
+.sc-library-badge-main svg {
+  display: block;
+  flex: none;
+}
+.sc-library-badge-main > span {
+  display: block;
+  line-height: 11px;
+}
+.sc-library-badge small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #c5c5c5;
+  font-size: 7px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-entry-button {
+  position: relative;
+  width: 48px !important;
+  height: 48px !important;
+  padding: 0 !important;
+  color: var(--color-text-primary) !important;
+  background: var(--color-surface) !important;
+  box-shadow: none !important;
+}
+.sc-entry-dot {
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #111;
+  border-radius: 50%;
+  background: #79c568;
+}
+.sc-loading {
+  display: grid;
+  place-items: center;
+  color: #999;
+  font-size: 11px;
+}
+.sc-command-error {
+  position: fixed;
+  z-index: 1200;
+  right: 20px;
+  bottom: 20px;
+  max-width: 360px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #74403b;
+  border-radius: 4px;
+  color: #f1d0cd;
+  background: #321f1d;
+  font-size: 10px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}

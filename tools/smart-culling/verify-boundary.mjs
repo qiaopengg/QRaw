@@ -7,9 +7,10 @@ const toolDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(toolDir, '../..');
 const baselinePath = resolve(toolDir, 'ownership-baseline.json');
 const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+const checkWorktree = process.argv.includes('--worktree');
 
 function git(args) {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim();
+  return execFileSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoRoot, encoding: 'utf8' }).trim();
 }
 
 function gitOrEmpty(args) {
@@ -33,11 +34,25 @@ function isAllowed(path) {
   return baseline.allowedPathPrefixes.some((prefix) => path.startsWith(prefix));
 }
 
+const approvedPostFeatureChanges = new Map(
+  Object.entries(baseline.approvedPostFeatureChanges ?? {}).map(([commit, change]) => [
+    commit,
+    new Set(change.paths),
+  ]),
+);
+
 git(['cat-file', '-e', `${baseline.taskBaseCommit}^{commit}`]);
 git(['cat-file', '-e', `${baseline.upstreamCommit}^{commit}`]);
 git(['cat-file', '-e', `${baseline.featureTipCommit}^{commit}`]);
+for (const commit of approvedPostFeatureChanges.keys()) {
+  git(['cat-file', '-e', `${commit}^{commit}`]);
+}
 
-const changed = new Set(lines(git(['diff', '--name-only', baseline.taskBaseCommit, baseline.featureTipCommit])));
+const baseFeatureChanges = new Set(
+  lines(git(['diff', '--name-only', baseline.taskBaseCommit, baseline.featureTipCommit])),
+);
+const changed = new Set(baseFeatureChanges);
+const policyChanges = new Set(baseFeatureChanges);
 const postFeatureChanges = new Set();
 const postFeatureCommits = lines(
   git(['rev-list', '--reverse', '--first-parent', '--no-merges', `${baseline.featureTipCommit}..HEAD`]),
@@ -45,27 +60,32 @@ const postFeatureCommits = lines(
 
 for (const commit of postFeatureCommits) {
   const parent = git(['rev-parse', `${commit}^`]);
+  const approvedPaths = approvedPostFeatureChanges.get(commit);
   for (const path of lines(git(['diff', '--name-only', parent, commit]))) {
     changed.add(path);
+    if (approvedPaths?.has(path)) continue;
+    policyChanges.add(path);
     postFeatureChanges.add(path);
   }
 }
 
 const mergeInProgress = Boolean(gitOrEmpty(['rev-parse', '--verify', '-q', 'MERGE_HEAD']));
-if (!mergeInProgress) {
-  for (const path of lines(git(['diff', '--name-only']))) {
+if (checkWorktree && !mergeInProgress) {
+  for (const path of lines(git(['diff', '--name-only', 'HEAD']))) {
     changed.add(path);
+    policyChanges.add(path);
     postFeatureChanges.add(path);
   }
   for (const path of lines(git(['ls-files', '--others', '--exclude-standard']))) {
     changed.add(path);
+    policyChanges.add(path);
     postFeatureChanges.add(path);
   }
 }
 
-const frozenChanges = [...changed].filter((path) => baseline.frozenPaths.includes(path));
-const mixedChanges = [...changed].filter((path) => baseline.mixedOwnershipPaths.includes(path));
-const outsideAllowlist = [...changed].filter(
+const frozenChanges = [...policyChanges].filter((path) => baseline.frozenPaths.includes(path));
+const mixedChanges = [...policyChanges].filter((path) => baseline.mixedOwnershipPaths.includes(path));
+const outsideAllowlist = [...policyChanges].filter(
   (path) => !isAllowed(path) && !baseline.mixedOwnershipPaths.includes(path),
 );
 
@@ -111,4 +131,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`Smart-culling boundary verified: ${changed.size} changed path(s), all owned by the feature allowlist.`);
+console.log(
+  `Smart-culling boundary verified: ${changed.size} changed path(s), all owned by the feature allowlist${
+    checkWorktree ? ' (including worktree).' : '.'
+  }`,
+);

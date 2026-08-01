@@ -61,8 +61,9 @@ if (!appFeatures.includes(inventory.hostRegistration)) {
 const bundledModels = walk('src-tauri/resources/smart_culling_models')
   .filter((path) => path.endsWith('.onnx'))
   .sort();
-if (JSON.stringify(bundledModels) !== JSON.stringify([...inventory.bundledModels].sort())) {
-  failures.push(`bundled model inventory drifted: ${bundledModels.join(', ')}`);
+const requiredV2BundledModels = inventory.requiredV2BundledModels ?? inventory.bundledModels;
+if (JSON.stringify(bundledModels) !== JSON.stringify([...requiredV2BundledModels].sort())) {
+  failures.push(`bundled V2 model inventory drifted: ${bundledModels.join(', ')}`);
 }
 
 if (failures.length > 0) {

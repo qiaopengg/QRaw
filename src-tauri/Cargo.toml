@@ -50,7 +50,6 @@ tauri-plugin-shell = "2.3.5"
 tempfile = "3.27.0"
 mimalloc = "0.1.52"
 image_hasher = "3.1.1"
-ab_glyph = "0.2"
 regex = "1.12.4"
 memmap2 = "0.9.11"
 half = { version = "2.7.1", features = ["bytemuck"] }
