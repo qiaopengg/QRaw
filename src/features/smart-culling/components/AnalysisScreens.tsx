@@ -12,10 +12,18 @@ import {
 import { useState } from 'react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import type { ImageFile } from '../../../components/ui/AppProperties';
-import { useSmartCullingText } from '../i18n';
+import { type SmartCullingTextKey, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { LifecycleChrome, Modal, fileName, formatEta } from './LifecycleChrome';
+
+const PROGRESS_STAGE_KEYS: Record<string, SmartCullingTextKey> = {
+  indexing: 'indexingStageDetail',
+  rendering: 'renderingStageDetail',
+  analyzing: 'analyzingStageDetail',
+  organizing: 'organizingStageDetail',
+  cancelling: 'cancellingStageDetail',
+};
 
 function PhotoGrid({ images }: { images: ImageFile[] }) {
   const thumbnails = useProcessStore((state) => state.thumbnails);
@@ -47,12 +55,14 @@ export function AnalysisScreen({
   const tx = useSmartCullingText();
   const { cancelOpen, setState } = useSmartCullingStore();
   const progress = snapshot.progress;
+  const readyForReview = snapshot.state === 'readyForReview';
+  const progressStage = tx(PROGRESS_STAGE_KEYS[progress.stage] ?? 'analyzingStageDetail');
   return (
     <div className="sc-page">
       <LifecycleChrome screen="analysis">
-        <span className="sc-status">
-          <LoaderCircle className="animate-spin" size={14} />
-          {tx('analyzing')}
+        <span className={`sc-status ${readyForReview ? 'good' : ''}`}>
+          {readyForReview ? <CheckCircle2 size={14} /> : <LoaderCircle className="animate-spin" size={14} />}
+          {readyForReview ? tx('readyForReview') : tx('analyzing')}
         </span>
         <button className="sc-text-button" onClick={onBrowseLibrary}>
           <FolderOpen size={14} />
@@ -75,27 +85,33 @@ export function AnalysisScreen({
         <PhotoGrid images={images} />
         <section className="sc-analysis-dock">
           <div className="sc-running-icon">
-            <LoaderCircle className="animate-spin" size={20} />
+            {readyForReview ? <CheckCircle2 size={20} /> : <LoaderCircle className="animate-spin" size={20} />}
           </div>
           <div>
-            <strong>{tx('renderedState')}</strong>
-            <small>{tx('analysisSignals')}</small>
+            <strong>{readyForReview ? tx('readyForReview') : progressStage}</strong>
+            <small>{readyForReview ? tx('unconfirmedNotWritten') : tx('analysisSignals')}</small>
           </div>
           <div className="sc-progress">
             <span>
               {tx('completed')} {progress.completed.toLocaleString()} / {progress.total.toLocaleString()}
             </span>
             <em>
-              {tx('eta')} {formatEta(progress.etaSeconds)}
+              {progress.etaSeconds === null ? tx('etaPending') : `${tx('eta')} ${formatEta(progress.etaSeconds)}`}
             </em>
             <i>
               <b style={{ width: `${progress.percent}%` }} />
             </i>
           </div>
-          <button className="sc-secondary" onClick={() => setState({ cancelOpen: true })}>
-            <X size={15} />
-            {tx('cancelTask')}
-          </button>
+          {readyForReview ? (
+            <button className="sc-primary" onClick={() => setState({ screen: 'review' })}>
+              {tx('openReview')}
+            </button>
+          ) : (
+            <button className="sc-secondary" onClick={() => setState({ cancelOpen: true })}>
+              <X size={15} />
+              {tx('cancelTask')}
+            </button>
+          )}
         </section>
       </main>
       {cancelOpen ? (

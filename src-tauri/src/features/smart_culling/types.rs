@@ -1,3 +1,5 @@
+pub(crate) const MIN_RELIABLE_FACE_DETECTION_SCORE: f32 = 0.60;
+
 #[derive(Debug, Clone)]
 pub struct EyeResult {
     pub open_probability: Option<f32>,

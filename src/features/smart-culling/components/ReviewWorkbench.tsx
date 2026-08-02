@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   FileWarning,
   Folder,
+  LockKeyhole,
   PanelLeftOpen,
   PanelRightOpen,
   Search,
@@ -23,8 +24,12 @@ import { ReviewInspector } from './ReviewInspector';
 import { ReviewQueueNavigation } from './ReviewQueueNavigation';
 import { SimilarGroupReview } from './SimilarGroupReview';
 
-type ReviewFilter = 'all' | 'selected' | 'unselected' | 'pending' | `keyPerson:${number}`;
+type ReviewFilter = 'all' | 'pending' | 'adopted' | 'manual';
 type CompareSlots = { groupId: string | null; a: string | null; b: string | null };
+type PendingMetadataEdit = {
+  result: ReviewResult;
+  patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>;
+};
 
 export function ReviewWorkbench({
   snapshot,
@@ -39,7 +44,9 @@ export function ReviewWorkbench({
   const readOnly = snapshot.state === 'completed';
   const { focusedResultId, confirmOpen, setState } = useSmartCullingStore();
   const [folder, setFolder] = useState('all');
-  const [filter, setFilter] = useState<ReviewFilter>('all');
+  const [filter, setFilter] = useState<ReviewFilter>(() =>
+    snapshot.results.some((result) => result.colorLabel === 'yellow') ? 'pending' : 'all',
+  );
   const [query, setQuery] = useState('');
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -48,16 +55,11 @@ export function ReviewWorkbench({
   const [pendingGroupMode, setPendingGroupMode] = useState<ReviewResult['mode'] | null>(null);
   const [compareSlots, setCompareSlots] = useState<CompareSlots>({ groupId: null, a: null, b: null });
   const [compareOpen, setCompareOpen] = useState(false);
+  const [pendingMetadataEdit, setPendingMetadataEdit] = useState<PendingMetadataEdit | null>(null);
+  const [manualEditAcknowledged, setManualEditAcknowledged] = useState(false);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const folders = useMemo(
     () => Array.from(new Set(snapshot.results.map((result) => result.folder))),
-    [snapshot.results],
-  );
-  const keyPersonPriorities = useMemo(
-    () =>
-      Array.from(
-        new Set(snapshot.results.flatMap((result) => result.keyPersonEvidence.map((evidence) => evidence.priority))),
-      ).sort((left, right) => left - right),
     [snapshot.results],
   );
   const visible = useMemo(
@@ -70,14 +72,9 @@ export function ReviewWorkbench({
           result.path.toLocaleLowerCase().includes(normalizedQuery);
         const matchesFilter =
           filter === 'all' ||
-          (filter === 'selected' && result.adopted) ||
-          (filter === 'unselected' && !result.adopted) ||
-          (filter === 'pending' && result.colorLabel === 'yellow') ||
-          (filter.startsWith('keyPerson:') &&
-            result.keyPersonEvidence.some(
-              (evidence) =>
-                evidence.priority === Number(filter.slice('keyPerson:'.length)) && evidence.faceIndex !== null,
-            ));
+          (filter === 'adopted' && result.adopted) ||
+          (filter === 'manual' && result.source === 'manual') ||
+          (filter === 'pending' && result.colorLabel === 'yellow');
         return matchesFolder && matchesQuery && matchesFilter;
       }),
     [filter, folder, normalizedQuery, snapshot.results],
@@ -94,9 +91,12 @@ export function ReviewWorkbench({
   const activeGroup = activeGroupId ? snapshot.results.filter((result) => result.groupId === activeGroupId) : [];
   const compareA = snapshot.results.find((result) => result.resultId === compareSlots.a) ?? null;
   const compareB = snapshot.results.find((result) => result.resultId === compareSlots.b) ?? null;
-  const picked = snapshot.results.filter((result) => result.colorLabel === 'green').length;
-  const pending = snapshot.results.filter((result) => result.colorLabel === 'yellow').length;
-  const rejected = snapshot.results.filter((result) => result.colorLabel === 'red').length;
+  const adopted = snapshot.results.filter((result) => result.adopted).length;
+  const pendingQueue = snapshot.results.filter((result) => result.colorLabel === 'yellow');
+  const pending = pendingQueue.length;
+  const pendingPosition = focused
+    ? Math.max(0, pendingQueue.findIndex((result) => result.resultId === focused.resultId) + 1)
+    : 0;
   const hasFailures = snapshot.failures.length > 0;
 
   const update = (changes: ReviewChange[]) =>
@@ -115,8 +115,15 @@ export function ReviewWorkbench({
     mode: patch.mode ?? result.mode,
     ...flags,
   });
-  const editMetadata = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) =>
+  const commitMetadataEdit = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) =>
     void update([changeFor(result, patch, { metadataEdited: true, modeChanged: false })]);
+  const editMetadata = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => {
+    if (result.source === 'ai' && !manualEditAcknowledged) {
+      setPendingMetadataEdit({ result, patch });
+      return;
+    }
+    commitMetadataEdit(result, patch);
+  };
   const changeMode = (result: ReviewResult, mode: ReviewResult['mode']) =>
     void update([changeFor(result, { mode }, { metadataEdited: false, modeChanged: true })]);
   const toggle = (result: ReviewResult) =>
@@ -141,15 +148,27 @@ export function ReviewWorkbench({
     const other = slot === 'a' ? next.b : next.a;
     if (other && other !== result.resultId) setCompareOpen(true);
   };
-  const filterText = (item: ReviewFilter) => {
-    if (item === 'all' || item === 'selected' || item === 'unselected' || item === 'pending') {
-      return tx(item);
-    }
-    return `${tx('keyPersonCandidates')} ${item.slice('keyPerson:'.length)}`;
+  const filterText = (item: ReviewFilter) =>
+    item === 'adopted' ? tx('adoptedFilter') : item === 'manual' ? tx('manualFilter') : tx(item);
+  const goToNextPending = () => {
+    if (pendingQueue.length === 0) return;
+    const currentIndex = pendingQueue.findIndex((result) => result.resultId === focused?.resultId);
+    const next = pendingQueue[currentIndex < 0 ? 0 : (currentIndex + 1) % pendingQueue.length];
+    setFolder('all');
+    setFilter('pending');
+    setQuery('');
+    setState({ focusedResultId: next.resultId });
+    setInspectorOpen(false);
   };
 
   useEffect(() => {
+    const focusedIsVisible = visible.some((result) => result.resultId === focusedResultId);
+    if (!activeGroupId && visible[0] && !focusedIsVisible) setState({ focusedResultId: visible[0].resultId });
+  }, [activeGroupId, focusedResultId, setState, visible]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (pendingMetadataEdit) return;
       const target = event.target as HTMLElement | null;
       if (
         event.metaKey ||
@@ -175,23 +194,17 @@ export function ReviewWorkbench({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focused, readOnly, setState, visible]);
+  }, [focused, pendingMetadataEdit, readOnly, setState, visible]);
 
   return (
     <div className="sc-page sc-review-page">
       <LifecycleChrome screen="review">
         <div className="sc-review-counts">
           <span>
-            {tx('pickedCount')} {picked}
-          </span>
-          <span>
             {tx('pendingCount')} {pending}
           </span>
           <span>
-            {tx('rejectedCount')} {rejected}
-          </span>
-          <span>
-            {tx('failureCount')} {snapshot.failures.length}
+            {tx('adopted')} {adopted}
           </span>
         </div>
         <button
@@ -209,7 +222,7 @@ export function ReviewWorkbench({
         </button>
       </LifecycleChrome>
       <main className="sc-review-layout">
-        <aside className={`sc-story-sidebar ${navigationOpen ? 'is-open' : ''}`}>
+        <aside className={`sc-review-sidebar ${navigationOpen ? 'is-open' : ''}`}>
           <header>
             <button onClick={() => setState({ abandonOpen: true })} aria-label={tx('back')}>
               <ChevronLeft size={15} />
@@ -281,22 +294,21 @@ export function ReviewWorkbench({
             >
               <PanelLeftOpen size={16} />
             </button>
-            <div>
+            <div className="sc-review-queue-heading-main">
+              <span>{tx('reviewQueueTitle')}</span>
               <h1>{folder === 'all' ? tx('allResults') : folder}</h1>
               <span>
                 {visible.length} {tx('photoUnit')}
               </span>
             </div>
+            <div className="sc-review-next-control">
+              <span>{pending ? `${tx('pending')} ${pendingPosition || 1} / ${pending}` : tx('noPending')}</span>
+              <button className="sc-secondary" disabled={pending === 0} onClick={goToNextPending}>
+                {tx('nextPending')}
+              </button>
+            </div>
             <nav>
-              {(
-                [
-                  'all',
-                  'selected',
-                  'unselected',
-                  'pending',
-                  ...keyPersonPriorities.map((priority) => `keyPerson:${priority}` as const),
-                ] as ReviewFilter[]
-              ).map((item) => (
+              {(['all', 'pending', 'adopted', 'manual'] as ReviewFilter[]).map((item) => (
                 <button key={item} className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)}>
                   {filterText(item)}
                 </button>
@@ -313,7 +325,7 @@ export function ReviewWorkbench({
             <button
               className="sc-review-panel-button"
               onClick={() => setInspectorOpen(true)}
-              aria-label={tx('aiReason')}
+              aria-label={tx('reviewEvidence')}
             >
               <PanelRightOpen size={16} />
             </button>
@@ -456,6 +468,30 @@ export function ReviewWorkbench({
           }}
           readOnly={readOnly}
         />
+      ) : null}
+      {pendingMetadataEdit ? (
+        <Modal onClose={() => setPendingMetadataEdit(null)}>
+          <span className="sc-dialog-icon warning">
+            <LockKeyhole size={22} />
+          </span>
+          <h2>{tx('manualEditTitle')}</h2>
+          <p>{tx('manualEditBody')}</p>
+          <footer>
+            <button className="sc-secondary" onClick={() => setPendingMetadataEdit(null)}>
+              {tx('cancel')}
+            </button>
+            <button
+              className="sc-primary"
+              onClick={() => {
+                setManualEditAcknowledged(true);
+                commitMetadataEdit(pendingMetadataEdit.result, pendingMetadataEdit.patch);
+                setPendingMetadataEdit(null);
+              }}
+            >
+              {tx('saveAsManual')}
+            </button>
+          </footer>
+        </Modal>
       ) : null}
       {confirmOpen && !readOnly ? <ConfirmModal snapshot={snapshot} /> : null}
     </div>

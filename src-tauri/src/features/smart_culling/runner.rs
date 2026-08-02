@@ -13,7 +13,7 @@ use super::face_identity::{KeyPersonReference, match_key_people};
 use super::infrastructure::{CatalogAsset, render_current_state};
 use super::models::SmartCullingFaceModels;
 use super::scoring::{AnalysisCandidate, organize_results};
-use super::types::KeyPersonEvidence;
+use super::types::{KeyPersonEvidence, MIN_RELIABLE_FACE_DETECTION_SCORE};
 use crate::AppState;
 
 pub(crate) struct RunOutcome {
@@ -273,7 +273,7 @@ fn find_selected_face(
     faces
         .iter()
         .filter(|face| {
-            face.detection_score >= 0.60
+            face.detection_score >= MIN_RELIABLE_FACE_DETECTION_SCORE
                 && face
                     .landmarks
                     .iter()

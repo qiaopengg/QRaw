@@ -5,7 +5,9 @@ use image_hasher::ImageHash;
 
 use super::api::{DetectedFaceDto, EyeEvidenceDto, KeyPersonEvidenceDto, ReviewResult};
 use super::grouping::{CaptureDescriptor, group_capture_sequence};
-use super::key_person_scoring::{candidate_reason, rank_key_person_performance};
+use super::key_person_scoring::{
+    candidate_reason, is_multi_person_comparable_group, rank_key_person_performance,
+};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-2.4";
@@ -54,7 +56,13 @@ pub(crate) fn organize_results(
             })
             .collect::<Vec<_>>();
         for group in group_capture_sequence(&descriptors) {
-            rank_key_person_performance(&mut folder_items, &group.indices);
+            if is_multi_person_comparable_group(&folder_items, &group.indices) {
+                rank_key_person_performance(&mut folder_items, &group.indices);
+            } else {
+                for index in &group.indices {
+                    folder_items[*index].key_person_evidence.clear();
+                }
+            }
             let mut ranked = group
                 .indices
                 .iter()
@@ -443,6 +451,36 @@ fn normalize_bbox(bbox: [f32; 4], width: u32, height: u32) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    fn face() -> FaceResult {
+        FaceResult {
+            bbox: [0.0; 4],
+            landmarks: [(0.0, 0.0); 5],
+            detection_score: 1.0,
+            left_eye: super::super::types::EyeResult {
+                open_probability: None,
+                state: "open".to_string(),
+                confidence: 1.0,
+                effective_pixels: 100,
+                sharpness_metric: Some(100.0),
+            },
+            right_eye: super::super::types::EyeResult {
+                open_probability: None,
+                state: "open".to_string(),
+                confidence: 1.0,
+                effective_pixels: 100,
+                sharpness_metric: Some(100.0),
+            },
+            expression_state: "unknown".to_string(),
+            expression_confidence: 0.0,
+            expression_reason: "model_unavailable".to_string(),
+            sharpness_metric: 100.0,
+            sharpness_confidence: 1.0,
+            exposure_metric: 0.8,
+            exposure_confidence: 1.0,
+            identity_embedding: None,
+        }
+    }
+
     fn candidate(path: &str, capture_time_millis: i64, sequence_number: u64) -> AnalysisCandidate {
         AnalysisCandidate {
             result_id: path.to_string(),
@@ -461,6 +499,25 @@ mod tests {
             faces: Vec::new(),
             key_person_evidence: Vec::new(),
         }
+    }
+
+    fn key_person_candidate(
+        path: &str,
+        capture_time_millis: i64,
+        sequence_number: u64,
+        face_count: usize,
+    ) -> AnalysisCandidate {
+        let mut item = candidate(path, capture_time_millis, sequence_number);
+        item.faces = (0..face_count).map(|_| face()).collect();
+        item.key_person_evidence = vec![KeyPersonEvidence {
+            priority: 1,
+            face_index: Some(0),
+            similarity: Some(0.9),
+            status: "matched".to_string(),
+            auto_score_eligible: false,
+            performance_rank: None,
+        }];
+        item
     }
 
     #[test]
@@ -551,6 +608,37 @@ mod tests {
         assert_eq!(
             reasons_for(&item, "documentary", 0, 3, 5, 0.9),
             vec!["documentary_moment_review", "group_best"]
+        );
+    }
+
+    #[test]
+    fn key_person_evidence_only_survives_real_multi_person_groups() {
+        let single_person_results = organize_results(
+            Path::new("."),
+            "group",
+            vec![
+                key_person_candidate("single-a.jpg", 1_000, 1, 1),
+                key_person_candidate("single-b.jpg", 1_100, 2, 1),
+            ],
+        );
+        assert!(
+            single_person_results
+                .iter()
+                .all(|result| result.key_person_evidence.is_empty())
+        );
+
+        let multi_person_results = organize_results(
+            Path::new("."),
+            "group",
+            vec![
+                key_person_candidate("multi-a.jpg", 1_000, 1, 2),
+                key_person_candidate("multi-b.jpg", 1_100, 2, 1),
+            ],
+        );
+        assert!(
+            multi_person_results
+                .iter()
+                .all(|result| !result.key_person_evidence.is_empty())
         );
     }
 }

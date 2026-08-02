@@ -72,10 +72,8 @@ export function WriteScreen({
             <span>{tx('existingProtected')}</span>
           </article>
           <article>
-            <strong>
-              {snapshot.failures.filter((failure) => ['render', 'analysis'].includes(failure.stage)).length}
-            </strong>
-            <span>{tx('analysisFailures')}</span>
+            <strong>{summary?.skipped ?? 0}</strong>
+            <span>{tx('writeSkipped')}</span>
           </article>
         </section>
         <div className="sc-write-columns">
@@ -123,7 +121,8 @@ export function WriteScreen({
             ))}
             <aside>
               <ShieldCheck size={16} />
-              {tx('successfulKept')}
+              <span>{tx('successfulKept')}</span>
+              {(summary?.skipped ?? 0) > 0 ? <small>{tx('writeSkippedHint')}</small> : null}
             </aside>
           </section>
         </div>

@@ -100,3 +100,42 @@ not superseded by the review UI validation above.
   Windows DirectML hardware.
 - Run the 1,000-photo performance corpus and the frozen photography-effect
   validation corpus before marking the feature release-ready.
+
+---
+
+# 2026-08-02 安全决策队列 UI 重构 — 当前设计 QA
+
+- Source visual truth: `/Users/qiaopeng/.codex/generated_images/019fbb7e-a87b-74c0-a89a-1453b64915f6/exec-13c8e266-8956-4447-8a49-2bb374a3b7f7.png`
+- Source pixels: 1672 × 941
+- Intended implementation viewport: 1280 × 720 desktop content area, dark theme, Smart Culling full lifecycle / review queue state
+- Implementation screenshot: unavailable
+- Implementation pixel dimensions and density normalization: unavailable because a native-window capture could not be obtained; no comparison normalization was performed
+
+**Findings**
+
+- [P1] 本轮无法取得可比较的原生实现截图。
+  Location: macOS desktop client / Smart Culling feature view.
+  Evidence: `target/debug/RapidRAW` successfully started against the existing Vite server, but the desktop-control runtime could not enumerate or inspect the native process (`RapidRAW` is reported as an invalid app target). A freshly packaged `RapidRAW.app` also did not appear as a capturable application. Therefore there is no screenshot at the required state and viewport.
+  Impact: source design and rendered implementation cannot be put into the same comparison input. It would be misleading to claim visual fidelity from code or build output alone.
+  Fix: make the native Tauri window available to the desktop-control runtime (macOS Screen Recording and Accessibility permission), open the Smart Culling review state at 1280 × 720, capture it, normalize it against the source visual, and run the comparison loop.
+
+**Open Questions**
+
+- None for product behavior. The remaining blocker is capture access, not an unresolved UI decision.
+
+**Implementation Checklist**
+
+1. Grant the review desktop-control tool macOS Screen Recording and Accessibility access.
+2. Relaunch the native client, enter the Smart Culling configuration and review queue states, and capture the same 1280 × 720 state as the selected visual.
+3. Compare the source and implementation in one image input; record any P0–P2 findings, apply fixes, then repeat the capture.
+
+**Follow-up Polish**
+
+- After capture access is restored, compare the compact filters, pending-queue header, optional key-person drawer, evidence drawer, and confirmation card at full view and focused scale.
+
+## Comparison history
+
+1. Build verification completed: Vite production build succeeds. This is not visual QA evidence.
+2. Native launch verification completed: the Rust/Tauri executable launches, and a debug macOS app bundle builds successfully, but neither exposes a controllable or capturable native window to the QA runtime.
+
+final result: blocked

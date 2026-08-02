@@ -159,3 +159,21 @@
   color: #71866f;
   font-size: 8px;
 }
+.sc-ready-card > .sc-primary {
+  margin-right: 22px;
+}
+.sc-ready-dismiss {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 4px;
+  color: #89a086;
+}
+.sc-ready-dismiss:hover {
+  color: #d7e4d2;
+  background: rgba(255, 255, 255, 0.08);
+}

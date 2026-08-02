@@ -1,14 +1,26 @@
-import { Check, ChevronRight, FolderTree, Info, ShieldCheck, UserRoundCheck, Zap } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, FolderTree, Info, ShieldCheck, UserRoundCheck, Zap } from 'lucide-react';
+import { useState } from 'react';
+import type { ImageFile } from '../../../components/ui/AppProperties';
 import { SMART_CULLING_MODES } from '../constants';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { LifecycleChrome, fileName } from './LifecycleChrome';
+import { KeyPeoplePicker } from './KeyPeoplePicker';
 
-export function SetupScreen({ snapshot, onExit }: { snapshot: SmartCullingSnapshot; onExit: () => void }) {
+export function SetupScreen({
+  snapshot,
+  images,
+  onExit,
+}: {
+  snapshot: SmartCullingSnapshot;
+  images: ImageFile[];
+  onExit: () => void;
+}) {
   const tx = useSmartCullingText();
   const modeCopy = useSmartCullingModes();
   const { mode, keyPeople, busy, setState } = useSmartCullingStore();
+  const [peopleOpen, setPeopleOpen] = useState(false);
   const start = () =>
     snapshot.rootPath &&
     runSmartCullingCommand({ action: 'start', rootPath: snapshot.rootPath, mode, keyPeople }).catch(() => undefined);
@@ -60,19 +72,26 @@ export function SetupScreen({ snapshot, onExit }: { snapshot: SmartCullingSnapsh
                 <b>2</b>
                 <div>
                   <h2>
-                    {tx('keyPeople')} <em>{tx('optional')}</em>
+                    {tx('keyPeopleSetupTitle')} <em>{tx('optional')}</em>
                   </h2>
-                  <p>{tx('keyPeopleHint')}</p>
+                  <p>{tx('keyPeopleSetupHint')}</p>
                 </div>
               </div>
-              <button className="sc-people-entry" onClick={() => setState({ screen: 'people' })}>
+              <button
+                className={`sc-people-entry ${peopleOpen ? 'is-open' : ''}`}
+                aria-expanded={peopleOpen}
+                onClick={() => setPeopleOpen((open) => !open)}
+              >
                 <UserRoundCheck size={20} />
                 <span>
                   <strong>{tx('choosePeople')}</strong>
                   <small>{keyPeople.length ? `${keyPeople.length} ${tx('selectedPeople')}` : tx('noPeople')}</small>
                 </span>
-                <ChevronRight size={18} />
+                {peopleOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
               </button>
+              {peopleOpen ? (
+                <KeyPeoplePicker snapshot={snapshot} images={images} onClose={() => setPeopleOpen(false)} />
+              ) : null}
             </section>
             <aside className="sc-summary-card">
               <h2>{tx('taskSummary')}</h2>

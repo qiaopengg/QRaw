@@ -165,4 +165,4 @@ export type SmartCullingRequest =
   | { action: 'reconcileManual'; paths: string[] }
   | { action: 'abandon' };
 
-export type LifecycleScreen = 'setup' | 'people' | 'analysis' | 'review' | 'write' | 'unsupported';
+export type LifecycleScreen = 'setup' | 'analysis' | 'review' | 'write' | 'unsupported';

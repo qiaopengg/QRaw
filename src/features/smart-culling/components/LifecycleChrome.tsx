@@ -5,7 +5,7 @@ import type { LifecycleScreen } from '../types';
 const APP_NAME = 'QRaw';
 
 function stageIndex(screen: LifecycleScreen) {
-  if (screen === 'setup' || screen === 'people' || screen === 'unsupported') return 0;
+  if (screen === 'setup' || screen === 'unsupported') return 0;
   if (screen === 'analysis') return 1;
   if (screen === 'review') return 2;
   return 3;

@@ -6,6 +6,7 @@ import type { LibraryHeaderActionSlotProps } from '../contracts';
 import { SMART_CULLING_VIEW } from './constants';
 import { useSmartCullingText } from './i18n';
 import { needsManualOwnershipReconciliation } from './metadata';
+import { SmartCullingReadyNotice } from './components/SmartCullingReadyNotice';
 import { runSmartCullingCommand, useSmartCullingStore } from './useSmartCulling';
 import { useSmartCullingEvents } from './useSmartCullingEvents';
 
@@ -17,7 +18,7 @@ export default function SmartCullingEntry({
 }: LibraryHeaderActionSlotProps) {
   useSmartCullingEvents();
   const tx = useSmartCullingText();
-  const snapshot = useSmartCullingStore((state) => state.snapshot);
+  const { snapshot, setState: setSmartCullingState } = useSmartCullingStore();
   const setUI = useUIStore((state) => state.setUI);
   const reconciled = useRef('');
   const running =
@@ -42,7 +43,12 @@ export default function SmartCullingEntry({
   }, [allImageList, imageList, onLibraryRefresh]);
 
   const open = async () => {
-    if (running || pending || snapshot?.state === 'completed') {
+    if (pending) {
+      setSmartCullingState({ screen: 'review' });
+      setUI({ activeView: SMART_CULLING_VIEW });
+      return;
+    }
+    if (running || snapshot?.state === 'completed') {
       setUI({ activeView: SMART_CULLING_VIEW });
       return;
     }
@@ -53,9 +59,23 @@ export default function SmartCullingEntry({
   };
 
   return (
-    <Button className="sc-entry-button" onClick={() => void open()} data-tooltip={tx('title')} aria-label={tx('title')}>
-      {running ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
-      {pending ? <span className="sc-entry-dot" /> : null}
-    </Button>
+    <>
+      <Button
+        className="sc-entry-button"
+        onClick={() => void open()}
+        data-tooltip={tx('title')}
+        aria-label={tx('title')}
+      >
+        {running ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
+        {pending ? <span className="sc-entry-dot" /> : null}
+      </Button>
+      <SmartCullingReadyNotice
+        snapshot={snapshot}
+        onOpenReview={() => {
+          setSmartCullingState({ screen: 'review' });
+          setUI({ activeView: SMART_CULLING_VIEW });
+        }}
+      />
+    </>
   );
 }

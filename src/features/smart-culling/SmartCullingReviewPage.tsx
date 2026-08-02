@@ -3,7 +3,6 @@ import { useEffect } from 'react';
 import type { LibraryFeatureViewSlotProps } from '../contracts';
 import { AnalysisScreen, UnsupportedScreen } from './components/AnalysisScreens';
 import { Modal } from './components/LifecycleChrome';
-import { PeopleScreen } from './components/PeopleScreen';
 import { ReviewWorkbench } from './components/ReviewWorkbench';
 import { SetupScreen } from './components/SetupScreen';
 import { WriteScreen } from './components/WriteScreen';
@@ -52,14 +51,13 @@ export default function SmartCullingReviewPage({
     );
   let content;
   if (screen === 'unsupported') content = <UnsupportedScreen snapshot={snapshot} onExit={onBackToLibrary} />;
-  else if (screen === 'people') content = <PeopleScreen snapshot={snapshot} images={images} />;
   else if (screen === 'analysis')
     content = <AnalysisScreen snapshot={snapshot} images={images} onBrowseLibrary={onBackToLibrary} />;
   else if (screen === 'review')
     content = <ReviewWorkbench snapshot={snapshot} onRequestThumbnails={onRequestThumbnails} />;
   else if (screen === 'write')
     content = <WriteScreen snapshot={snapshot} onExit={onBackToLibrary} onRefresh={onLibraryRefresh} />;
-  else content = <SetupScreen snapshot={snapshot} onExit={() => setState({ abandonOpen: true })} />;
+  else content = <SetupScreen snapshot={snapshot} images={images} onExit={() => setState({ abandonOpen: true })} />;
   const leavingReview = screen === 'review';
   return (
     <>

@@ -41,12 +41,6 @@ export function ReviewInspector({
       ? `${result.rating}/5 ${tx('starRating')} · ${result.groupSize} ${tx('groupSuffix')}`
       : `${result.rating}/5 ${tx('starRating')} · ${tx('singlePhoto')}`;
   const sourceLabel = `${tx('source')}:`;
-  const confidenceLabel =
-    result.confidence >= 0.84
-      ? tx('confidenceHigh')
-      : result.confidence >= 0.7
-        ? tx('confidenceMedium')
-        : tx('confidenceLow');
   const keyPersonEvidence = result.keyPersonEvidence.filter((evidence) => evidence.faceIndex !== null);
   return (
     <aside className={`sc-inspector ${open ? 'is-open' : ''}`}>
@@ -67,7 +61,7 @@ export function ReviewInspector({
       </div>
       <section>
         <h3>
-          {tx('aiReason')} <i>{result.source === 'ai' ? 'AI' : tx('manual')}</i>
+          {tx('reviewEvidence')} <i>{result.source === 'ai' ? 'AI' : tx('manual')}</i>
         </h3>
         {result.source === 'manual' ? (
           <p className="sc-manual-reason">
@@ -77,13 +71,8 @@ export function ReviewInspector({
         ) : (
           <>
             <p>{reason(result.reasonCodes)}</p>
-            <div className="sc-confidence">
-              <span>{tx('confidence')}</span>
-              <i>
-                <b style={{ width: `${Math.round(result.confidence * 100)}%` }} />
-              </i>
-              <em>{confidenceLabel}</em>
-            </div>
+            <p className="sc-review-evidence-hint">{tx('reviewEvidenceHint')}</p>
+            {result.colorLabel === 'yellow' ? <p className="sc-review-human-check">{tx('needsHumanReview')}</p> : null}
             {result.faces.length > 0 ? <p className="sc-expression-pending">{tx('expressionPending')}</p> : null}
             {keyPersonEvidence.length > 0 ? (
               <div className="sc-key-person-evidence">

@@ -79,7 +79,6 @@ export function ReviewCompareWorkspace({
       results.find((result) => result.resultId !== focused?.resultId),
     [focused?.resultId, results, secondaryResultId],
   );
-  const isComparison = results.length > 1 && Boolean(secondary);
 
   useEffect(() => {
     setSharedView(FIT_VIEW);
@@ -87,57 +86,15 @@ export function ReviewCompareWorkspace({
   }, [focused?.groupId]);
 
   useEffect(() => {
-    if (!isComparison) {
-      setSecondaryResultId(null);
-      return;
-    }
     const hasValidSecondary = results.some(
       (result) => result.resultId === secondaryResultId && result.resultId !== focused?.resultId,
     );
     if (!hasValidSecondary) {
       setSecondaryResultId(secondary?.resultId ?? null);
     }
-  }, [focused?.resultId, isComparison, results, secondary?.resultId, secondaryResultId]);
+  }, [focused?.resultId, results, secondary?.resultId, secondaryResultId]);
 
-  if (!focused) return null;
-
-  if (!isComparison || !secondary) {
-    return (
-      <section className="sc-decision-workspace is-single">
-        <header className="sc-decision-header">
-          <div>
-            <strong>{tx('singleReviewTitle')}</strong>
-            <span>{tx('singleReviewHint')}</span>
-          </div>
-          <button onClick={onOpenInspector}>
-            <PanelRightOpen size={14} />
-            {tx('viewEvidence')}
-          </button>
-        </header>
-        <div className="sc-single-review-stage">
-          <PhotoEvidenceViewport
-            path={focused.path}
-            fallbackUrl={thumbnails[focused.path]}
-            alt={fileName(focused.path)}
-            faces={focused.faces}
-          />
-        </div>
-        <footer className="sc-single-review-footer">
-          <div>
-            <strong>{fileName(focused.path)}</strong>
-            <span>{focused.source === 'ai' ? reason(focused.reasonCodes) : tx('manualReason')}</span>
-          </div>
-          <DecisionControls
-            result={focused}
-            onToggle={onToggle}
-            onRating={onRating}
-            onLabel={onLabel}
-            readOnly={readOnly}
-          />
-        </footer>
-      </section>
-    );
-  }
+  if (!focused || !secondary) return null;
 
   const selectFilmstripResult = (resultId: string) => {
     if (resultId === focused.resultId) {

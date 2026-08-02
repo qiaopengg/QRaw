@@ -8,6 +8,9 @@ import './smart-culling.css';
 import './smart-culling-workbench.css';
 import './smart-culling-review.css';
 import './smart-culling-gallery.css';
+import './styles/setup-decision-queue.css';
+import './styles/analysis-decision-queue.css';
+import './styles/review-decision-queue.css';
 
 export function useSmartCullingFeature(): AppFeatureRegistration {
   return {

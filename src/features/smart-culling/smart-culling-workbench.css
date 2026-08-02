@@ -377,7 +377,7 @@
     border-radius: 4px;
   }
 
-  .sc-story-sidebar,
+  .sc-review-sidebar,
   .sc-inspector {
     position: absolute;
     top: 0;
@@ -388,12 +388,12 @@
     transition: transform 160ms ease;
   }
 
-  .sc-story-sidebar {
+  .sc-review-sidebar {
     left: 0;
     transform: translateX(-105%);
   }
 
-  .sc-story-sidebar.is-open {
+  .sc-review-sidebar.is-open {
     transform: translateX(0);
   }
 
@@ -541,8 +541,9 @@
     grid-template-columns: 38px 1fr;
   }
 
-  .sc-ready-card > button {
+  .sc-ready-card > .sc-primary {
     grid-column: 1 / -1;
+    margin-right: 0;
   }
 
   .sc-review-counts {

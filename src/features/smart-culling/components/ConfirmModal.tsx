@@ -48,6 +48,13 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
           <span>{tx('analysisFailures')}</span>
         </article>
       </div>
+      <div className="sc-confirm-recheck">
+        <AlertCircle size={16} />
+        <div>
+          <strong>{tx('confirmationCheckTitle')}</strong>
+          <p>{tx('confirmationCheckBody')}</p>
+        </div>
+      </div>
       <div className="sc-confirm-list">
         <p>
           <Check size={15} />

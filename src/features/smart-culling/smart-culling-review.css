@@ -7,7 +7,7 @@
   grid-template-columns: 218px minmax(0, 1fr);
 }
 
-.sc-review-page .sc-story-sidebar {
+.sc-review-page .sc-review-sidebar {
   overflow: hidden;
 }
 
@@ -207,8 +207,7 @@
   background: #080808;
 }
 
-.sc-ab-photo .sc-evidence-viewport,
-.sc-single-review-stage .sc-evidence-viewport {
+.sc-ab-photo .sc-evidence-viewport {
   min-height: 0;
   background: #080808;
 }
@@ -433,44 +432,6 @@
   font-size: 6px !important;
 }
 
-.sc-single-review-stage {
-  height: clamp(360px, 60vh, 690px);
-  background: #080808;
-}
-
-.sc-single-review-footer {
-  min-height: 72px;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 10px;
-  border-top: 1px solid #2d2d2d;
-}
-
-.sc-single-review-footer > div:first-child {
-  min-width: 0;
-}
-
-.sc-single-review-footer strong,
-.sc-single-review-footer span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sc-single-review-footer strong {
-  color: #d2d2d2;
-  font-size: 10px;
-}
-
-.sc-single-review-footer span {
-  margin-top: 5px;
-  color: #777;
-  font-size: 8px;
-}
-
 .sc-review-empty {
   min-height: clamp(320px, 56vh, 620px);
   display: grid;
@@ -522,7 +483,7 @@
     border-radius: 4px;
   }
 
-  .sc-review-page .sc-story-sidebar {
+  .sc-review-page .sc-review-sidebar {
     position: absolute;
     z-index: 30;
     top: 0;
@@ -534,7 +495,7 @@
     transition: transform 160ms ease;
   }
 
-  .sc-review-page .sc-story-sidebar.is-open {
+  .sc-review-page .sc-review-sidebar.is-open {
     transform: translateX(0);
   }
 }
@@ -576,8 +537,7 @@
     display: grid;
   }
 
-  .sc-ab-pane > footer,
-  .sc-single-review-footer {
+  .sc-ab-pane > footer {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -594,10 +554,6 @@
     width: 136px;
     min-width: 136px;
   }
-
-  .sc-single-review-stage {
-    height: clamp(300px, 48vh, 470px);
-  }
 }
 
 @media (max-height: 760px) {
@@ -611,9 +567,5 @@
 
   .sc-review-filmstrip-card {
     grid-template-rows: 66px auto;
-  }
-
-  .sc-single-review-stage {
-    height: clamp(300px, 52vh, 460px);
   }
 }

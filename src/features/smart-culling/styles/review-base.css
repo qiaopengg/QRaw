@@ -16,26 +16,26 @@
   grid-template-columns: 205px minmax(540px, 1fr) 280px;
   height: calc(100% - 54px);
 }
-.sc-story-sidebar {
+.sc-review-sidebar {
   display: flex;
   min-width: 0;
   flex-direction: column;
   border-right: 1px solid var(--sc-border);
   background: #171717;
 }
-.sc-story-sidebar > header {
+.sc-review-sidebar > header {
   min-height: 54px;
   padding: 13px 13px 9px;
   border-bottom: 1px solid var(--sc-border);
 }
-.sc-story-sidebar > header strong,
-.sc-story-sidebar > header span {
+.sc-review-sidebar > header strong,
+.sc-review-sidebar > header span {
   display: block;
 }
-.sc-story-sidebar > header strong {
+.sc-review-sidebar > header strong {
   font-size: 10px;
 }
-.sc-story-sidebar > header span {
+.sc-review-sidebar > header span {
   margin-top: 5px;
   color: #666;
   font-size: 8px;
@@ -64,7 +64,7 @@
 .sc-search input::placeholder {
   color: #676767;
 }
-.sc-story-sidebar h3 {
+.sc-review-sidebar h3 {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -73,7 +73,7 @@
   font-size: 8px;
   font-weight: 400;
 }
-.sc-story-sidebar > button {
+.sc-review-sidebar > button {
   min-height: 29px;
   display: flex;
   align-items: center;
@@ -85,21 +85,21 @@
   font-size: 8px !important;
   text-align: left;
 }
-.sc-story-sidebar > button:hover {
+.sc-review-sidebar > button:hover {
   color: #ddd !important;
   background: #232323 !important;
 }
-.sc-story-sidebar > button.is-active {
+.sc-review-sidebar > button.is-active {
   color: #fff !important;
   background: #303030 !important;
   box-shadow: inset 2px 0 0 #fff;
 }
-.sc-story-sidebar button em {
+.sc-review-sidebar button em {
   color: #666;
   font-size: 8px;
   font-style: normal;
 }
-.sc-story-sidebar > footer {
+.sc-review-sidebar > footer {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -109,10 +109,10 @@
   color: #777;
   font-size: 8px;
 }
-.sc-story-sidebar > footer span {
+.sc-review-sidebar > footer span {
   width: 100%;
 }
-.sc-story-sidebar > footer button {
+.sc-review-sidebar > footer button {
   color: #bbb;
   font-size: 8px;
 }
