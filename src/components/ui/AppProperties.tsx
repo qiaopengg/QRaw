@@ -123,7 +123,10 @@ export enum Panel {
   Masks = 'masks',
   Metadata = 'metadata',
   Presets = 'presets',
+  FolderTree = 'folderTree',
 }
+
+export type PanelRegion = 'leftTop' | 'leftBottom' | 'rightTop' | 'rightBottom';
 
 export enum RawStatus {
   All = 'all',
@@ -157,6 +160,16 @@ export enum Theme {
 export enum ThumbnailAspectRatio {
   Cover = 'cover',
   Contain = 'contain',
+}
+
+export interface WorkspaceState {
+  leftPanelWidth: number;
+  rightPanelWidth: number;
+  leftTopHeight: number;
+  rightTopHeight: number;
+  panelLayout: Record<PanelRegion, Panel[]>;
+  activePanels: Record<PanelRegion, Panel | null>;
+  panelSwitcherPlacement: Record<PanelRegion, 'left' | 'right' | 'top' | 'bottom'>;
 }
 
 export type GroupPreference = 'jpeg' | 'raw';
@@ -222,6 +235,7 @@ export interface AppSettings {
   groupEditedFiles?: boolean;
   groupPreferredType?: GroupPreference; // legacy
   alwaysDecodeRawThumbnails?: boolean;
+  workspace?: WorkspaceState;
 }
 
 export interface BrushSettings {
