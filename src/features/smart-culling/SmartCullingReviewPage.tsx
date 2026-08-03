@@ -57,7 +57,15 @@ export default function SmartCullingReviewPage({
     content = <ReviewWorkbench snapshot={snapshot} onRequestThumbnails={onRequestThumbnails} />;
   else if (screen === 'write')
     content = <WriteScreen snapshot={snapshot} onExit={onBackToLibrary} onRefresh={onLibraryRefresh} />;
-  else content = <SetupScreen snapshot={snapshot} images={images} onExit={() => setState({ abandonOpen: true })} />;
+  else
+    content = (
+      <SetupScreen
+        snapshot={snapshot}
+        images={images}
+        onExit={() => setState({ abandonOpen: true })}
+        onRequestThumbnails={onRequestThumbnails}
+      />
+    );
   const leavingReview = screen === 'review';
   return (
     <>

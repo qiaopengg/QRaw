@@ -1,14 +1,4 @@
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Info,
-  ScanFace,
-  Trash2,
-  UserRoundCheck,
-  X,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScanFace, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
 import { useProcessStore } from '../../../store/useProcessStore';
@@ -24,10 +14,12 @@ export function KeyPeoplePicker({
   snapshot,
   images,
   onClose,
+  onRequestThumbnails,
 }: {
   snapshot: SmartCullingSnapshot;
   images: ImageFile[];
   onClose: () => void;
+  onRequestThumbnails?: (paths: string[]) => void;
 }) {
   const tx = useSmartCullingText();
   const thumbnails = useProcessStore((state) => state.thumbnails);
@@ -42,7 +34,14 @@ export function KeyPeoplePicker({
   }, [images, samplePath]);
   const faces = snapshot.detectedImagePath === samplePath ? snapshot.detectedFaces : [];
   const pageCount = Math.max(1, Math.ceil(images.length / PHOTO_PAGE_SIZE));
-  const pageImages = images.slice(photoPage * PHOTO_PAGE_SIZE, (photoPage + 1) * PHOTO_PAGE_SIZE);
+  const pageImages = useMemo(
+    () => images.slice(photoPage * PHOTO_PAGE_SIZE, (photoPage + 1) * PHOTO_PAGE_SIZE),
+    [images, photoPage],
+  );
+  useEffect(() => {
+    const paths = pageImages.map((image) => image.path);
+    if (paths.length > 0) onRequestThumbnails?.(paths);
+  }, [onRequestThumbnails, pageImages]);
   const selectedKeys = useMemo(
     () => new Set(keyPeople.map((person) => faceSelectionKey(person.samplePath, person.bbox))),
     [keyPeople],
@@ -52,40 +51,28 @@ export function KeyPeoplePicker({
     if (!samplePath) return;
     await runSmartCullingCommand({ action: 'detectPeople', path: samplePath }, true).catch(() => undefined);
   };
-  const selectFace = (bbox: [number, number, number, number]) => {
+  const toggleFace = (bbox: [number, number, number, number]) => {
     const key = faceSelectionKey(samplePath, bbox);
-    if (selectedKeys.has(key)) return;
-    setState({ keyPeople: [...keyPeople, { samplePath, bbox, priority: keyPeople.length + 1 }] });
+    if (!selectedKeys.has(key)) {
+      setState({ keyPeople: [...keyPeople, { samplePath, bbox, priority: keyPeople.length + 1 }] });
+      return;
+    }
+    setState({
+      keyPeople: keyPeople
+        .filter((person) => faceSelectionKey(person.samplePath, person.bbox) !== key)
+        .map((person, priority) => ({ ...person, priority: priority + 1 })),
+    });
   };
   const selectImageAt = (index: number) => {
     if (index < 0 || index >= images.length) return;
     setSamplePath(images[index].path);
     setPhotoPage(Math.floor(index / PHOTO_PAGE_SIZE));
   };
-  const move = (index: number, direction: -1 | 1) => {
-    const next = [...keyPeople];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setState({ keyPeople: next.map((person, priority) => ({ ...person, priority: priority + 1 })) });
-  };
-  const remove = (index: number) =>
-    setState({
-      keyPeople: keyPeople
-        .filter((_, current) => current !== index)
-        .map((person, priority) => ({ ...person, priority: priority + 1 })),
-    });
-
   return (
     <section className="sc-key-people-picker" aria-labelledby="sc-key-people-title">
       <header>
         <div>
-          <span>
-            <UserRoundCheck size={15} />
-            {tx('optional')}
-          </span>
           <h2 id="sc-key-people-title">{tx('selectPeopleTitle')}</h2>
-          <p>{tx('selectPeopleDescription')}</p>
         </div>
         <button className="sc-key-people-close" onClick={onClose} aria-label={tx('close')}>
           <X size={16} />
@@ -100,7 +87,7 @@ export function KeyPeoplePicker({
               alt={fileName(samplePath)}
               faces={faces}
               selectedFaceKeys={selectedKeys}
-              onFaceClick={(face) => selectFace(face.bbox)}
+              onFaceClick={(face) => toggleFace(face.bbox)}
               onPrevious={() => selectImageAt(currentImageIndex - 1)}
               onNext={() => selectImageAt(currentImageIndex + 1)}
             />
@@ -146,48 +133,6 @@ export function KeyPeoplePicker({
             </button>
           </div>
         </section>
-        <aside className="sc-key-people-priority">
-          <div>
-            <h3>
-              {tx('selectedPeople')} · {keyPeople.length}
-            </h3>
-            <p>{tx('keyPeopleHint')}</p>
-          </div>
-          <div className="sc-key-people-list">
-            {keyPeople.length ? (
-              keyPeople.map((person, index) => (
-                <article key={`${person.samplePath}-${person.bbox.join('-')}`}>
-                  <b>{index + 1}</b>
-                  <div>
-                    <strong>{fileName(person.samplePath)}</strong>
-                    <small>{index === 0 ? tx('highestPriority') : `${tx('priority')} ${index + 1}`}</small>
-                  </div>
-                  <span>
-                    <button disabled={index === 0} aria-label={tx('moveEarlier')} onClick={() => move(index, -1)}>
-                      <ChevronUp size={14} />
-                    </button>
-                    <button
-                      disabled={index === keyPeople.length - 1}
-                      aria-label={tx('moveLater')}
-                      onClick={() => move(index, 1)}
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                    <button aria-label={tx('removePerson')} onClick={() => remove(index)}>
-                      <Trash2 size={14} />
-                    </button>
-                  </span>
-                </article>
-              ))
-            ) : (
-              <p className="sc-key-people-empty">{tx('noPeople')}</p>
-            )}
-          </div>
-          <div className="sc-info">
-            <Info size={15} />
-            <p>{tx('currentTaskOnly')}</p>
-          </div>
-        </aside>
       </div>
     </section>
   );

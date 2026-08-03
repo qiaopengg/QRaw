@@ -1,21 +1,23 @@
-import { Check, ChevronDown, ChevronUp, FolderTree, Info, ShieldCheck, UserRoundCheck, Zap } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import { useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
 import { SMART_CULLING_MODES } from '../constants';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
-import { LifecycleChrome, fileName } from './LifecycleChrome';
+import { LifecycleChrome } from './LifecycleChrome';
 import { KeyPeoplePicker } from './KeyPeoplePicker';
 
 export function SetupScreen({
   snapshot,
   images,
   onExit,
+  onRequestThumbnails,
 }: {
   snapshot: SmartCullingSnapshot;
   images: ImageFile[];
   onExit: () => void;
+  onRequestThumbnails?: (paths: string[]) => void;
 }) {
   const tx = useSmartCullingText();
   const modeCopy = useSmartCullingModes();
@@ -25,7 +27,7 @@ export function SetupScreen({
     snapshot.rootPath &&
     runSmartCullingCommand({ action: 'start', rootPath: snapshot.rootPath, mode, keyPeople }).catch(() => undefined);
   return (
-    <div className="sc-page">
+    <div className="sc-page sc-setup-page">
       <LifecycleChrome screen="setup">
         <span className="sc-status good">
           <ShieldCheck size={14} />
@@ -33,17 +35,6 @@ export function SetupScreen({
         </span>
       </LifecycleChrome>
       <main className="sc-setup-shell">
-        <aside className="sc-context-sidebar">
-          <strong>{fileName(snapshot.rootPath ?? '')}</strong>
-          <span>
-            {snapshot.inventory.folderCount} {tx('foldersUnit')}
-          </span>
-          <p>
-            {snapshot.device.provider}
-            <br />
-            {snapshot.device.modelVersion}
-          </p>
-        </aside>
         <section className="sc-setup-workspace">
           <header className="sc-heading">
             <span>{tx('title')}</span>
@@ -90,58 +81,28 @@ export function SetupScreen({
                 {peopleOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
               </button>
               {peopleOpen ? (
-                <KeyPeoplePicker snapshot={snapshot} images={images} onClose={() => setPeopleOpen(false)} />
+                <KeyPeoplePicker
+                  snapshot={snapshot}
+                  images={images}
+                  onClose={() => setPeopleOpen(false)}
+                  onRequestThumbnails={onRequestThumbnails}
+                />
               ) : null}
+              <footer className="sc-setup-footer">
+                <div className="sc-actions">
+                  <button className="sc-secondary" onClick={onExit}>
+                    {tx('cancel')}
+                  </button>
+                  <button
+                    className="sc-primary"
+                    disabled={busy || snapshot.inventory.eligibleAssets === 0}
+                    onClick={() => void start()}
+                  >
+                    {tx('start')}
+                  </button>
+                </div>
+              </footer>
             </section>
-            <aside className="sc-summary-card">
-              <h2>{tx('taskSummary')}</h2>
-              <dl>
-                <div>
-                  <dt>
-                    <FolderTree size={15} />
-                    {tx('scope')}
-                  </dt>
-                  <dd>
-                    {fileName(snapshot.rootPath ?? '')} · {snapshot.inventory.folderCount} {tx('foldersUnit')}
-                  </dd>
-                </div>
-                <div>
-                  <dt>
-                    <Zap size={15} />
-                    {tx('estimated')}
-                  </dt>
-                  <dd>
-                    {snapshot.inventory.totalAssets.toLocaleString()} {tx('assetsUnit')}
-                  </dd>
-                </div>
-                <div>
-                  <dt>
-                    <ShieldCheck size={15} />
-                    {tx('manualProtection')}
-                  </dt>
-                  <dd>
-                    {snapshot.inventory.protectedAssets.toLocaleString()} {tx('protectedSuffix')}
-                  </dd>
-                </div>
-              </dl>
-              <div className="sc-info">
-                <Info size={15} />
-                <p>{tx('formatNote')}</p>
-              </div>
-              <div className="sc-actions">
-                <button className="sc-secondary" onClick={onExit}>
-                  {tx('cancel')}
-                </button>
-                <button
-                  className="sc-primary"
-                  disabled={busy || snapshot.inventory.eligibleAssets === 0}
-                  onClick={() => void start()}
-                >
-                  {tx('start')}
-                </button>
-              </div>
-              <small>{tx('offline')}</small>
-            </aside>
           </div>
         </section>
       </main>
