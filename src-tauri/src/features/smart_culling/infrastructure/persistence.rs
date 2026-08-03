@@ -5,15 +5,22 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use tempfile::NamedTempFile;
 
+#[cfg(test)]
 use crate::exif_processing::load_sidecar;
 use crate::image_processing::ImageMetadata;
 
 use super::super::domain::{
-    ConfirmedResult, MetadataOwnership, MetadataSnapshot, ResultSource, classify_metadata_ownership,
+    ConfirmedResult, MetadataSnapshot, ResultSource, asset_has_conflicting_results,
+    asset_is_protected, metadata_has_unknown_source,
 };
+#[cfg(test)]
+use super::super::domain::{MetadataOwnership, classify_metadata_ownership};
 use super::baseline::{
     FileBaseline, SidecarBaseline, capture_file_baseline, capture_sidecar_baseline,
 };
+use super::catalog::read_sidecar_strict;
+#[cfg(test)]
+use super::manual_reconciliation::reconcile_manual_ownership;
 
 const COLOR_TAG_PREFIX: &str = "color:";
 const SCHEMA_VERSION: u32 = 1;
@@ -42,7 +49,7 @@ pub(crate) struct ApplyReport {
 
 pub(crate) struct ConfirmedWrite {
     pub sidecar_path: PathBuf,
-    pub sidecar_baseline: SidecarBaseline,
+    pub member_sidecar_baselines: Vec<(PathBuf, SidecarBaseline)>,
     pub file_baselines: Vec<(PathBuf, FileBaseline)>,
     pub result: ConfirmedResult,
 }
@@ -64,121 +71,61 @@ pub(crate) fn apply_confirmed_results(items: Vec<ConfirmedWrite>) -> ApplyReport
     report
 }
 
-pub(crate) fn reconcile_manual_ownership(paths: Vec<PathBuf>) -> ApplyReport {
-    let mut report = ApplyReport::default();
-    for image_path in paths {
-        let sidecar_path = crate::exif_processing::get_primary_sidecar_path(&image_path);
-        match reconcile_one(&sidecar_path) {
-            Ok(true) => report.succeeded.push(sidecar_path),
-            Ok(false) => {}
-            Err((reason, detail)) => report.failed.push(ApplyFailure {
-                sidecar_path,
-                reason,
-                detail,
-            }),
-        }
-    }
-    report
-}
-
-fn reconcile_one(sidecar_path: &Path) -> Result<bool, (ApplyFailureReason, String)> {
-    let baseline =
-        capture_sidecar_baseline(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error))?;
-    if !baseline.exists {
-        return Ok(false);
-    }
-    let bytes =
-        fs::read(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error.to_string()))?;
-    let mut metadata: ImageMetadata = serde_json::from_slice(&bytes).map_err(|error| {
-        (
-            ApplyFailureReason::Io,
-            format!("Invalid sidecar JSON: {error}"),
-        )
-    })?;
-    let ownership = classify_metadata_ownership(&MetadataSnapshot {
-        rating: metadata.rating,
-        tags: metadata.tags.clone().unwrap_or_default(),
-        feature_data: metadata.feature_data.clone(),
-    });
-    if ownership != MetadataOwnership::Manual {
-        return Ok(false);
-    }
-    if metadata.feature_data.is_none() {
-        metadata.feature_data = Some(json!({}));
-    }
-    let Some(feature_data) = metadata
-        .feature_data
-        .as_mut()
-        .and_then(Value::as_object_mut)
-    else {
-        return Err((
-            ApplyFailureReason::InvalidResult,
-            "featureData must be an object before manual ownership can be recorded".to_string(),
-        ));
-    };
-    let existing_source = feature_data
-        .get("smartCullingV2")
-        .and_then(|value| value.get("source"))
-        .and_then(Value::as_str);
-    let color_label = metadata
-        .tags
-        .as_ref()
-        .into_iter()
-        .flatten()
-        .find_map(|tag| tag.strip_prefix(COLOR_TAG_PREFIX))
-        .map(str::to_string);
-    if existing_source == Some("manual") {
-        let record = feature_data
-            .get("smartCullingV2")
-            .expect("manual source was read from this record");
-        let record_rating = record.get("rating").and_then(Value::as_u64);
-        let record_color = record.get("colorLabel").and_then(Value::as_str);
-        if record_rating == Some(metadata.rating as u64) && record_color == color_label.as_deref() {
-            return Ok(false);
-        }
-    }
-    feature_data.insert(
-        "smartCullingV2".to_string(),
-        json!({
-            "schemaVersion": SCHEMA_VERSION,
-            "source": "manual",
-            "edited": true,
-            "rating": metadata.rating,
-            "colorLabel": color_label,
-            "confirmedAt": chrono::Utc::now().to_rfc3339(),
-        }),
-    );
-    ensure_baseline_matches(sidecar_path, &baseline)?;
-    atomic_write_sidecar(sidecar_path, &metadata)
-        .map_err(|error| (ApplyFailureReason::Io, error))?;
-    Ok(true)
-}
-
 fn apply_one(item: &ConfirmedWrite) -> Result<(), (ApplyFailureReason, String)> {
     item.result
         .validate()
         .map_err(|reason| (ApplyFailureReason::InvalidResult, reason.to_string()))?;
     ensure_file_baselines_match(&item.file_baselines)?;
-    ensure_baseline_matches(&item.sidecar_path, &item.sidecar_baseline)?;
+    ensure_asset_sidecars_writable(&item.member_sidecar_baselines)?;
 
-    let mut metadata = load_sidecar(&item.sidecar_path);
-    let ownership = classify_metadata_ownership(&MetadataSnapshot {
-        rating: metadata.rating,
-        tags: metadata.tags.clone().unwrap_or_default(),
-        feature_data: metadata.feature_data.clone(),
-    });
-    if ownership == MetadataOwnership::Manual {
-        return Err((
-            ApplyFailureReason::ManualProtection,
-            "sidecar contains a protected manual rating or color label".to_string(),
-        ));
+    let mut updates = Vec::with_capacity(item.member_sidecar_baselines.len());
+    for (sidecar_path, _) in &item.member_sidecar_baselines {
+        let mut metadata =
+            read_sidecar_strict(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error))?;
+        merge_result(&mut metadata, &item.result);
+        updates.push((sidecar_path, metadata));
     }
-
-    merge_result(&mut metadata, &item.result);
     ensure_file_baselines_match(&item.file_baselines)?;
-    ensure_baseline_matches(&item.sidecar_path, &item.sidecar_baseline)?;
-    atomic_write_sidecar(&item.sidecar_path, &metadata)
-        .map_err(|error| (ApplyFailureReason::Io, error))
+    ensure_asset_sidecars_writable(&item.member_sidecar_baselines)?;
+    for (sidecar_path, metadata) in updates {
+        atomic_write_sidecar(sidecar_path, &metadata)
+            .map_err(|error| (ApplyFailureReason::Io, error))?;
+    }
+    Ok(())
+}
+
+fn ensure_asset_sidecars_writable(
+    baselines: &[(PathBuf, SidecarBaseline)],
+) -> Result<(), (ApplyFailureReason, String)> {
+    let mut snapshots = Vec::with_capacity(baselines.len());
+    for (sidecar_path, baseline) in baselines {
+        ensure_baseline_matches(sidecar_path, baseline)?;
+        let metadata =
+            read_sidecar_strict(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error))?;
+        snapshots.push(MetadataSnapshot {
+            rating: metadata.rating,
+            tags: metadata.tags.unwrap_or_default(),
+            feature_data: metadata.feature_data,
+        });
+    }
+    if snapshots.iter().any(metadata_has_unknown_source) {
+        Err((
+            ApplyFailureReason::InvalidResult,
+            "RAW/JPEG metadata contains an unknown or malformed smart-culling source".to_string(),
+        ))
+    } else if asset_has_conflicting_results(&snapshots) {
+        Err((
+            ApplyFailureReason::BaselineConflict,
+            "RAW/JPEG members contain conflicting rating or color results".to_string(),
+        ))
+    } else if asset_is_protected(&snapshots) {
+        Err((
+            ApplyFailureReason::ManualProtection,
+            "RAW/JPEG asset contains a user-locked rating or color label".to_string(),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn ensure_file_baselines_match(
@@ -197,7 +144,7 @@ fn ensure_file_baselines_match(
     Ok(())
 }
 
-fn ensure_baseline_matches(
+pub(crate) fn ensure_baseline_matches(
     sidecar_path: &Path,
     baseline: &SidecarBaseline,
 ) -> Result<(), (ApplyFailureReason, String)> {
@@ -233,6 +180,8 @@ fn merge_result(metadata: &mut ImageMetadata, result: &ConfirmedResult) {
             "schemaVersion": SCHEMA_VERSION,
             "source": result.source,
             "edited": true,
+            "locked": true,
+            "assetSynchronized": true,
             "resultId": result.result_id,
             "rating": result.rating,
             "colorLabel": result.color_label,
@@ -243,6 +192,7 @@ fn merge_result(metadata: &mut ImageMetadata, result: &ConfirmedResult) {
             "schemaVersion": SCHEMA_VERSION,
             "source": result.source,
             "edited": false,
+            "locked": false,
             "resultId": result.result_id,
             "rating": result.rating,
             "colorLabel": result.color_label,
@@ -261,7 +211,7 @@ fn merge_result(metadata: &mut ImageMetadata, result: &ConfirmedResult) {
     metadata.feature_data = Some(feature_data);
 }
 
-fn atomic_write_sidecar(path: &Path, metadata: &ImageMetadata) -> Result<(), String> {
+pub(crate) fn atomic_write_sidecar(path: &Path, metadata: &ImageMetadata) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("Sidecar has no parent directory: {}", path.display()))?;
@@ -283,6 +233,9 @@ fn atomic_write_sidecar(path: &Path, metadata: &ImageMetadata) -> Result<(), Str
 
     Ok(())
 }
+
+#[cfg(test)]
+mod asset_tests;
 
 #[cfg(test)]
 mod tests {
@@ -328,8 +281,8 @@ mod tests {
         result: ConfirmedResult,
     ) -> ConfirmedWrite {
         ConfirmedWrite {
-            sidecar_path,
-            sidecar_baseline,
+            sidecar_path: sidecar_path.clone(),
+            member_sidecar_baselines: vec![(sidecar_path, sidecar_baseline)],
             file_baselines: Vec::new(),
             result,
         }
@@ -374,6 +327,10 @@ mod tests {
         assert_eq!(
             updated.feature_data.as_ref().unwrap()["smartCullingV2"]["source"],
             "ai"
+        );
+        assert_eq!(
+            updated.feature_data.as_ref().unwrap()["smartCullingV2"]["locked"],
+            false
         );
     }
 
@@ -425,6 +382,74 @@ mod tests {
     }
 
     #[test]
+    fn rejects_the_whole_asset_when_a_non_primary_member_is_user_locked() {
+        let directory = tempdir().unwrap();
+        let raw_sidecar = directory.path().join("IMG_0001.dng.rrdata");
+        let jpeg_sidecar = directory.path().join("IMG_0001.jpg.rrdata");
+        write_metadata(&raw_sidecar, &ImageMetadata::default());
+        write_metadata(
+            &jpeg_sidecar,
+            &ImageMetadata {
+                rating: 5,
+                ..ImageMetadata::default()
+            },
+        );
+        let raw_baseline = capture_sidecar_baseline(&raw_sidecar).unwrap();
+        let jpeg_baseline = capture_sidecar_baseline(&jpeg_sidecar).unwrap();
+
+        let report = apply_confirmed_results(vec![ConfirmedWrite {
+            sidecar_path: raw_sidecar.clone(),
+            member_sidecar_baselines: vec![
+                (raw_sidecar.clone(), raw_baseline),
+                (jpeg_sidecar, jpeg_baseline),
+            ],
+            file_baselines: Vec::new(),
+            result: result(ResultSource::Ai),
+        }]);
+
+        assert!(report.succeeded.is_empty());
+        assert_eq!(
+            report.failed[0].reason,
+            ApplyFailureReason::ManualProtection
+        );
+        assert_eq!(load_sidecar(&raw_sidecar).rating, 0);
+    }
+
+    #[test]
+    fn an_ai_update_does_not_relock_an_unlocked_manual_result() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("photo.jpg.rrdata");
+        write_metadata(
+            &path,
+            &ImageMetadata {
+                rating: 3,
+                feature_data: Some(json!({
+                    "smartCullingV2": {
+                        "source": "manual",
+                        "rating": 3,
+                        "colorLabel": null,
+                        "locked": false
+                    }
+                })),
+                ..ImageMetadata::default()
+            },
+        );
+        let baseline = capture_sidecar_baseline(&path).unwrap();
+
+        let report = apply_confirmed_results(vec![write_item(
+            path.clone(),
+            baseline,
+            result(ResultSource::Ai),
+        )]);
+
+        assert_eq!(report.succeeded, vec![path.clone()]);
+        let metadata = load_sidecar(&path);
+        let record = &metadata.feature_data.unwrap()["smartCullingV2"];
+        assert_eq!(record["source"], "ai");
+        assert_eq!(record["locked"], false);
+    }
+
+    #[test]
     fn persists_a_review_edit_as_manual_when_rating_and_color_are_cancelled() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("photo.jpg.rrdata");
@@ -444,6 +469,10 @@ mod tests {
         assert_eq!(
             updated.feature_data.as_ref().unwrap()["smartCullingV2"]["source"],
             "manual"
+        );
+        assert_eq!(
+            updated.feature_data.as_ref().unwrap()["smartCullingV2"]["locked"],
+            true
         );
         assert!(
             updated.feature_data.as_ref().unwrap()["smartCullingV2"]
@@ -506,7 +535,7 @@ mod tests {
 
         let report = apply_confirmed_results(vec![ConfirmedWrite {
             sidecar_path: sidecar_path.clone(),
-            sidecar_baseline,
+            member_sidecar_baselines: vec![(sidecar_path.clone(), sidecar_baseline)],
             file_baselines: vec![(image_path, image_baseline)],
             result: result(ResultSource::Ai),
         }]);
@@ -545,6 +574,7 @@ mod tests {
         let record = &updated.feature_data.unwrap()["smartCullingV2"];
         assert_eq!(record["source"], "manual");
         assert_eq!(record["rating"], 0);
+        assert_eq!(record["locked"], true);
         assert!(record.get("reasonCodes").is_none());
     }
 
@@ -570,6 +600,7 @@ mod tests {
         assert_eq!(record["source"], "manual");
         assert_eq!(record["rating"], 3);
         assert_eq!(record["edited"], true);
+        assert_eq!(record["locked"], true);
 
         let mut cancelled = load_sidecar(&sidecar_path);
         cancelled.rating = 0;
@@ -579,5 +610,37 @@ mod tests {
         assert_eq!(report.succeeded, vec![sidecar_path.clone()]);
         let updated = load_sidecar(&sidecar_path);
         assert_eq!(updated.feature_data.unwrap()["smartCullingV2"]["rating"], 0);
+    }
+
+    #[test]
+    fn does_not_reconcile_over_an_unknown_source_record() {
+        let directory = tempdir().unwrap();
+        let image_path = directory.path().join("photo.jpg");
+        File::create(&image_path).unwrap();
+        let sidecar_path = crate::exif_processing::get_primary_sidecar_path(&image_path);
+        write_metadata(
+            &sidecar_path,
+            &ImageMetadata {
+                rating: 3,
+                feature_data: Some(json!({
+                    "smartCullingV2": {
+                        "source": "unknown",
+                        "rating": 2,
+                        "colorLabel": null
+                    }
+                })),
+                ..ImageMetadata::default()
+            },
+        );
+
+        let report = reconcile_manual_ownership(vec![image_path]);
+
+        assert!(report.succeeded.is_empty());
+        assert_eq!(report.failed[0].reason, ApplyFailureReason::InvalidResult);
+        let metadata = load_sidecar(&sidecar_path);
+        assert_eq!(
+            metadata.feature_data.unwrap()["smartCullingV2"]["source"],
+            "unknown"
+        );
     }
 }

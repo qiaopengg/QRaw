@@ -100,6 +100,7 @@ export interface ReviewResult {
   aiInitiallyAdopted: boolean;
   adopted: boolean;
   protected: boolean;
+  requiresHumanReview: boolean;
   width: number;
   height: number;
   faces: DetectedFace[];
@@ -163,6 +164,7 @@ export type SmartCullingRequest =
   | { action: 'confirm' }
   | { action: 'retryFailures' }
   | { action: 'reconcileManual'; paths: string[] }
+  | { action: 'setLock'; paths: string[]; locked: boolean }
   | { action: 'abandon' };
 
 export type LifecycleScreen = 'setup' | 'analysis' | 'review' | 'write' | 'unsupported';

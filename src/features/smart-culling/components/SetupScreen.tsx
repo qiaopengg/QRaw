@@ -1,7 +1,7 @@
 import { Check, ChevronDown, ChevronUp, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import { useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
-import { SMART_CULLING_MODES } from '../constants';
+import { SMART_CULLING_MODES, smartCullingModeSupportsKeyPeople } from '../constants';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
@@ -23,9 +23,23 @@ export function SetupScreen({
   const modeCopy = useSmartCullingModes();
   const { mode, keyPeople, busy, setState } = useSmartCullingStore();
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const supportsKeyPeople = smartCullingModeSupportsKeyPeople(mode);
+  const selectMode = (nextMode: typeof mode) => {
+    const nextSupportsKeyPeople = smartCullingModeSupportsKeyPeople(nextMode);
+    if (!nextSupportsKeyPeople) setPeopleOpen(false);
+    setState({
+      mode: nextMode,
+      keyPeople: nextSupportsKeyPeople ? keyPeople : [],
+    });
+  };
   const start = () =>
     snapshot.rootPath &&
-    runSmartCullingCommand({ action: 'start', rootPath: snapshot.rootPath, mode, keyPeople }).catch(() => undefined);
+    runSmartCullingCommand({
+      action: 'start',
+      rootPath: snapshot.rootPath,
+      mode,
+      keyPeople: supportsKeyPeople ? keyPeople : [],
+    }).catch(() => undefined);
   return (
     <div className="sc-page sc-setup-page">
       <LifecycleChrome screen="setup">
@@ -52,41 +66,45 @@ export function SetupScreen({
               </div>
               <div className="sc-mode-grid">
                 {SMART_CULLING_MODES.map((id) => (
-                  <button key={id} className={mode === id ? 'is-selected' : ''} onClick={() => setState({ mode: id })}>
+                  <button key={id} className={mode === id ? 'is-selected' : ''} onClick={() => selectMode(id)}>
                     <i>{mode === id ? <Check size={12} /> : null}</i>
                     <strong>{modeCopy[id][0]}</strong>
                     <small>{modeCopy[id][1]}</small>
                   </button>
                 ))}
               </div>
-              <div className="sc-section-title sc-people-title">
-                <b>2</b>
-                <div>
-                  <h2>
-                    {tx('keyPeopleSetupTitle')} <em>{tx('optional')}</em>
-                  </h2>
-                  <p>{tx('keyPeopleSetupHint')}</p>
-                </div>
-              </div>
-              <button
-                className={`sc-people-entry ${peopleOpen ? 'is-open' : ''}`}
-                aria-expanded={peopleOpen}
-                onClick={() => setPeopleOpen((open) => !open)}
-              >
-                <UserRoundCheck size={20} />
-                <span>
-                  <strong>{tx('choosePeople')}</strong>
-                  <small>{keyPeople.length ? `${keyPeople.length} ${tx('selectedPeople')}` : tx('noPeople')}</small>
-                </span>
-                {peopleOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
-              {peopleOpen ? (
-                <KeyPeoplePicker
-                  snapshot={snapshot}
-                  images={images}
-                  onClose={() => setPeopleOpen(false)}
-                  onRequestThumbnails={onRequestThumbnails}
-                />
+              {supportsKeyPeople ? (
+                <>
+                  <div className="sc-section-title sc-people-title">
+                    <b>2</b>
+                    <div>
+                      <h2>
+                        {tx('keyPeopleSetupTitle')} <em>{tx('optional')}</em>
+                      </h2>
+                      <p>{tx('keyPeopleSetupHint')}</p>
+                    </div>
+                  </div>
+                  <button
+                    className={`sc-people-entry ${peopleOpen ? 'is-open' : ''}`}
+                    aria-expanded={peopleOpen}
+                    onClick={() => setPeopleOpen((open) => !open)}
+                  >
+                    <UserRoundCheck size={20} />
+                    <span>
+                      <strong>{tx('choosePeople')}</strong>
+                      <small>{keyPeople.length ? `${keyPeople.length} ${tx('selectedPeople')}` : tx('noPeople')}</small>
+                    </span>
+                    {peopleOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </button>
+                  {peopleOpen ? (
+                    <KeyPeoplePicker
+                      snapshot={snapshot}
+                      images={images}
+                      onClose={() => setPeopleOpen(false)}
+                      onRequestThumbnails={onRequestThumbnails}
+                    />
+                  ) : null}
+                </>
               ) : null}
               <footer className="sc-setup-footer">
                 <div className="sc-actions">

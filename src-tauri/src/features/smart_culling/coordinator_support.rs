@@ -37,7 +37,7 @@ pub(crate) fn catalog_failures(catalog: &Catalog) -> Vec<FailureItem> {
         .filter(|asset| asset.status == CatalogAssetStatus::Protected)
     {
         failures.push(FailureItem {
-            path: asset.primary_path.to_string_lossy().to_string(),
+            path: asset.display_path.to_string_lossy().to_string(),
             member_paths: asset
                 .member_paths
                 .iter()
@@ -176,17 +176,12 @@ pub(crate) fn valid_color(value: Option<&str>) -> bool {
 pub(crate) fn valid_mode(mode: &str) -> bool {
     matches!(
         mode,
-        "auto"
-            | "landscape"
-            | "portrait"
-            | "environment"
-            | "group"
-            | "documentary"
-            | "wildlife"
-            | "architecture"
-            | "product"
-            | "astro"
+        "auto" | "landscape" | "portrait" | "environment" | "group"
     )
+}
+
+pub(crate) fn mode_supports_key_people(mode: &str) -> bool {
+    matches!(mode, "portrait" | "environment" | "group")
 }
 
 pub(crate) fn state_name(state: TaskState) -> &'static str {
@@ -234,7 +229,7 @@ pub(crate) fn apply_failure_code(reason: ApplyFailureReason) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_normalized_bbox;
+    use super::{mode_supports_key_people, valid_mode, valid_normalized_bbox};
 
     #[test]
     fn key_person_boxes_must_be_finite_and_inside_the_photo() {
@@ -242,5 +237,31 @@ mod tests {
         assert!(!valid_normalized_bbox([0.8, 0.2, 0.3, 0.4]));
         assert!(!valid_normalized_bbox([f32::NAN, 0.2, 0.3, 0.4]));
         assert!(!valid_normalized_bbox([0.1, 0.2, 0.0, 0.4]));
+    }
+
+    #[test]
+    fn accepts_only_the_five_supported_modes() {
+        for mode in ["auto", "landscape", "portrait", "environment", "group"] {
+            assert!(valid_mode(mode));
+        }
+        for mode in [
+            "documentary",
+            "wildlife",
+            "architecture",
+            "product",
+            "astro",
+        ] {
+            assert!(!valid_mode(mode));
+        }
+    }
+
+    #[test]
+    fn key_people_are_limited_to_people_focused_modes() {
+        for mode in ["portrait", "environment", "group"] {
+            assert!(mode_supports_key_people(mode));
+        }
+        for mode in ["auto", "landscape"] {
+            assert!(!mode_supports_key_people(mode));
+        }
     }
 }

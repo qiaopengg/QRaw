@@ -48,7 +48,7 @@ pub(crate) fn run_analysis(
         if cancellation.load(Ordering::Acquire) {
             break;
         }
-        let path = asset.primary_path.to_string_lossy().to_string();
+        let path = asset.display_path.to_string_lossy().to_string();
         let member_paths = asset
             .member_paths
             .iter()
@@ -62,7 +62,7 @@ pub(crate) fn run_analysis(
                         let result_id = Uuid::new_v4().to_string();
                         analyzed.push(AnalysisCandidate {
                             result_id: result_id.clone(),
-                            path: asset.primary_path.clone(),
+                            path: asset.display_path.clone(),
                             member_paths: asset.member_paths.clone(),
                             hash,
                             capture_time_millis: asset.capture_time_millis,

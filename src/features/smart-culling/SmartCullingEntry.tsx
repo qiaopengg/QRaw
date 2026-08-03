@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import Button from '../../components/ui/Button';
+import { toast } from 'react-toastify';
 import { useUIStore } from '../../store/useUIStore';
 import type { LibraryHeaderActionSlotProps } from '../contracts';
 import { SMART_CULLING_VIEW } from './constants';
@@ -29,7 +30,9 @@ export default function SmartCullingEntry({
     void runSmartCullingCommand({ action: 'status' }).catch(() => undefined);
   }, []);
   useEffect(() => {
-    const stale = (allImageList ?? imageList).filter(needsManualOwnershipReconciliation).map((image) => image.path);
+    const stale = (allImageList ?? imageList)
+      .filter((image) => !image.is_virtual_copy && needsManualOwnershipReconciliation(image))
+      .map((image) => image.path);
     const key = stale.join('\n');
     if (!key) {
       reconciled.current = '';
@@ -39,8 +42,11 @@ export default function SmartCullingEntry({
     reconciled.current = key;
     void runSmartCullingCommand({ action: 'reconcileManual', paths: stale }, true)
       .then(() => onLibraryRefresh?.())
-      .catch(() => undefined);
-  }, [allImageList, imageList, onLibraryRefresh]);
+      .catch(() => {
+        toast.error(tx('manualSyncFailed'));
+        return onLibraryRefresh?.();
+      });
+  }, [allImageList, imageList, onLibraryRefresh, tx]);
 
   const open = async () => {
     if (pending) {

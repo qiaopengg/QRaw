@@ -10,7 +10,7 @@ use super::key_person_scoring::{
 };
 use super::types::{FaceResult, KeyPersonEvidence};
 
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-2.4";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-2.5";
 pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+ocec-l-bgr+sface-coreml-v3";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
@@ -99,7 +99,7 @@ pub(crate) fn organize_results(
                 let candidate = &folder_items[candidate_index];
                 let (rank, score) = rank_by_index[&candidate_index];
                 let confidence = confidence(score, candidate);
-                let rating = rating_for(score, rank, recommended_count);
+                let rating = rating_for(score);
                 let color_label = color_for(rank, recommended_count, confidence, group_kind);
                 let resolved_mode = resolve_mode(mode, candidate);
                 let reason_codes = reasons_for(
@@ -134,6 +134,7 @@ pub(crate) fn organize_results(
                     ai_initially_adopted: group_kind == "reviewOnly" || rank < recommended_count,
                     adopted: group_kind == "reviewOnly" || rank < recommended_count,
                     protected: false,
+                    requires_human_review: false,
                     width: candidate.width,
                     height: candidate.height,
                     faces: candidate
@@ -205,10 +206,8 @@ fn resolve_mode<'a>(requested: &'a str, item: &AnalysisCandidate) -> &'a str {
         "group"
     } else if !item.faces.is_empty() {
         "portrait"
-    } else if item.width > item.height {
-        "landscape"
     } else {
-        "product"
+        "landscape"
     }
 }
 
@@ -232,10 +231,8 @@ fn mode_score(mode: &str, item: &AnalysisCandidate) -> f64 {
     // photography validation gate passes, so identity presence has no weight.
     let (sharp_w, center_w, exposure_w, people_w) = match mode {
         "portrait" | "group" => (0.30, 0.20, 0.20, 0.30),
-        "environment" | "documentary" => (0.30, 0.19, 0.24, 0.27),
-        "wildlife" => (0.40, 0.24, 0.18, 0.18),
-        "landscape" | "architecture" | "astro" => (0.38, 0.29, 0.31, 0.02),
-        "product" => (0.39, 0.31, 0.28, 0.02),
+        "environment" => (0.30, 0.19, 0.24, 0.27),
+        "landscape" => (0.38, 0.29, 0.31, 0.02),
         _ if item.faces.is_empty() => (0.39, 0.29, 0.30, 0.02),
         _ => (0.32, 0.20, 0.21, 0.27),
     };
@@ -270,12 +267,12 @@ fn confidence(score: f64, item: &AnalysisCandidate) -> f32 {
     (0.58 + (score - 0.5).abs() * 0.72 - face_penalty).clamp(0.5, 0.96) as f32
 }
 
-fn rating_for(score: f64, rank: usize, recommended_count: usize) -> u8 {
-    if rank == 0 && score >= 0.76 {
+fn rating_for(score: f64) -> u8 {
+    if score >= 0.76 {
         5
-    } else if rank < recommended_count && score >= 0.62 {
+    } else if score >= 0.62 {
         4
-    } else if rank < recommended_count || score >= 0.52 {
+    } else if score >= 0.52 {
         3
     } else if score >= 0.38 {
         2
@@ -333,7 +330,6 @@ fn reasons_for(
 
 fn mode_reason(item: &AnalysisCandidate, mode: &str) -> String {
     let sharp = normalize_focus(item.sharpness_metric) >= 0.7;
-    let center_sharp = normalize_focus(item.center_focus_metric) >= 0.7;
     let exposure_balanced = item.exposure_metric >= 0.72;
     let has_closed_eyes = item.faces.iter().any(FaceResult::has_closed_eye);
     let eye_state_reliable =
@@ -352,18 +348,9 @@ fn mode_reason(item: &AnalysisCandidate, mode: &str) -> String {
             "environment_people_exposure"
         }
         "environment" => "environment_balance_review",
-        "documentary" if sharp => "documentary_moment_sharp",
-        "documentary" => "documentary_moment_review",
         "landscape" if exposure_balanced => "landscape_exposure_balanced",
         "landscape" if sharp => "landscape_detail_strong",
         "landscape" => "landscape_detail_review",
-        "wildlife" if sharp => "wildlife_detail_strong",
-        "wildlife" => "wildlife_detail_review",
-        "architecture" if center_sharp => "architecture_center_detail",
-        "architecture" => "architecture_detail_review",
-        "product" if center_sharp && exposure_balanced => "product_center_detail",
-        "product" => "product_detail_review",
-        "astro" => "astro_detail_review",
         _ if sharp => "sharp_subject",
         _ => "soft_focus",
     };
@@ -578,17 +565,15 @@ mod tests {
             mode_reason(&item, "landscape"),
             "landscape_exposure_balanced"
         );
-        assert_eq!(
-            mode_reason(&item, "documentary"),
-            "documentary_moment_review"
-        );
-        assert_eq!(
-            mode_reason(&item, "architecture"),
-            "architecture_detail_review"
-        );
-        assert_eq!(mode_reason(&item, "wildlife"), "wildlife_detail_review");
-        assert_eq!(mode_reason(&item, "product"), "product_detail_review");
-        assert_eq!(mode_reason(&item, "astro"), "astro_detail_review");
+    }
+
+    #[test]
+    fn absolute_rating_does_not_depend_on_group_rank_or_selection_count() {
+        assert_eq!(rating_for(0.80), 5);
+        assert_eq!(rating_for(0.70), 4);
+        assert_eq!(rating_for(0.57), 3);
+        assert_eq!(rating_for(0.45), 2);
+        assert_eq!(rating_for(0.20), 1);
     }
 
     #[test]
@@ -606,8 +591,8 @@ mod tests {
         let item = candidate("frame.jpg", 1_000, 1);
 
         assert_eq!(
-            reasons_for(&item, "documentary", 0, 3, 5, 0.9),
-            vec!["documentary_moment_review", "group_best"]
+            reasons_for(&item, "landscape", 0, 3, 5, 0.9),
+            vec!["landscape_exposure_balanced", "group_best"]
         );
     }
 

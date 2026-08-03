@@ -41,6 +41,7 @@ const zhCommands: Record<string, string> = {
   confirm_failed: '确认写入失败',
   retry_failures_failed: '重试失败项失败',
   reconcile_manual_failed: '记录人工处理来源失败',
+  set_lock_failed: '修改智能选图锁定状态失败',
   abandon_failed: '清除本次任务失败',
   unexpected_error: '发生未预期错误',
 };
@@ -56,6 +57,7 @@ const enCommands: Record<string, string> = {
   confirm_failed: 'Could not confirm and write results',
   retry_failures_failed: 'Could not retry failed items',
   reconcile_manual_failed: 'Could not record the manual source',
+  set_lock_failed: 'Could not change the Smart Culling lock',
   abandon_failed: 'Could not clear this task',
   unexpected_error: 'An unexpected error occurred',
 };

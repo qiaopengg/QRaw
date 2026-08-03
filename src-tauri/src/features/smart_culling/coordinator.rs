@@ -14,12 +14,13 @@ use super::api::{
 };
 use super::coordinator_support::{
     apply_failure_code, catalog_failures, confirmed_result, eta_seconds, inventory_summary,
-    state_name, valid_color, valid_key_people, valid_mode,
+    mode_supports_key_people, state_name, valid_color, valid_key_people, valid_mode,
 };
 use super::domain::{ConfirmedResult, TaskState};
 use super::infrastructure::{
     ApplyFailureReason, Catalog, CatalogAsset, CatalogAssetStatus, ConfirmedWrite,
-    apply_confirmed_results, capture_sidecar_baseline, reconcile_manual_ownership, scan_catalog,
+    apply_confirmed_results, capture_sidecar_baseline, change_asset_lock_state,
+    reconcile_manual_ownership, scan_catalog,
 };
 use super::models::SmartCullingFaceModels;
 use super::preflight::run_preflight;
@@ -74,6 +75,7 @@ pub(crate) fn handle(
         SmartCullingRequest::Confirm => confirm(&app_handle),
         SmartCullingRequest::RetryFailures => retry_failures(&app_handle),
         SmartCullingRequest::ReconcileManual { paths } => reconcile_manual(paths, &app_handle),
+        SmartCullingRequest::SetLock { paths, locked } => set_lock(paths, locked, &app_handle),
         SmartCullingRequest::Abandon => abandon(&app_handle),
     }
 }
@@ -187,6 +189,11 @@ fn start(
 ) -> Result<SmartCullingSnapshot, String> {
     if !valid_mode(&mode) {
         return Err(format!("Unknown smart-culling mode: {mode}"));
+    }
+    if !key_people.is_empty() && !mode_supports_key_people(&mode) {
+        return Err(format!(
+            "Key people are not supported in smart-culling mode: {mode}"
+        ));
     }
 
     let (task_id, root, assets, models, cancellation) = {
@@ -328,6 +335,8 @@ fn update_review(
                 result.source = "manual".to_string();
                 result.reason_codes.clear();
                 result.confidence = 0.0;
+                result.protected = true;
+                result.requires_human_review = false;
             }
             if change.mode_changed {
                 result.mode = change.mode;
@@ -382,7 +391,7 @@ fn confirm(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
                 .insert(asset.sidecar_path.clone(), confirmed.clone());
             items.push(ConfirmedWrite {
                 sidecar_path: asset.sidecar_path.clone(),
-                sidecar_baseline: asset.sidecar_baseline.clone(),
+                member_sidecar_baselines: asset.member_sidecar_baselines.clone(),
                 file_baselines: asset.file_baselines.clone(),
                 result: confirmed,
             });
@@ -413,11 +422,20 @@ fn retry_failures(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String
                     .values()
                     .find(|asset| asset.sidecar_path == *sidecar)
                     .map(|asset| {
-                        let refreshed_baseline = capture_sidecar_baseline(sidecar)
-                            .unwrap_or_else(|_| asset.sidecar_baseline.clone());
+                        let member_sidecar_baselines = asset
+                            .member_sidecar_baselines
+                            .iter()
+                            .map(|(path, baseline)| {
+                                (
+                                    path.clone(),
+                                    capture_sidecar_baseline(path)
+                                        .unwrap_or_else(|_| baseline.clone()),
+                                )
+                            })
+                            .collect();
                         ConfirmedWrite {
                             sidecar_path: sidecar.clone(),
-                            sidecar_baseline: refreshed_baseline,
+                            member_sidecar_baselines,
                             file_baselines: asset.file_baselines.clone(),
                             result: result.clone(),
                         }
@@ -477,7 +495,23 @@ fn reconcile_manual(
             failure.sidecar_path.display(),
             failure.detail
         );
+        return Err(format!(
+            "Could not protect the complete RAW/JPEG asset at {}: {}",
+            failure.sidecar_path.display(),
+            failure.detail
+        ));
     }
+    let snapshot = current_snapshot();
+    emit_snapshot(app_handle, &snapshot);
+    Ok(snapshot)
+}
+
+fn set_lock(
+    paths: Vec<String>,
+    locked: bool,
+    app_handle: &AppHandle,
+) -> Result<SmartCullingSnapshot, String> {
+    change_asset_lock_state(paths.into_iter().map(PathBuf::from).collect(), locked)?;
     let snapshot = current_snapshot();
     emit_snapshot(app_handle, &snapshot);
     Ok(snapshot)
@@ -542,7 +576,7 @@ fn finish_write(
                         .assets
                         .values()
                         .find(|asset| asset.sidecar_path == *sidecar)
-                        .map(|asset| asset.primary_path.to_string_lossy().to_string())
+                        .map(|asset| asset.display_path.to_string_lossy().to_string())
                 })
                 .collect::<Vec<_>>(),
         );

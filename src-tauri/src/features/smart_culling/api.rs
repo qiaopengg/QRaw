@@ -29,6 +29,10 @@ pub enum SmartCullingRequest {
     ReconcileManual {
         paths: Vec<String>,
     },
+    SetLock {
+        paths: Vec<String>,
+        locked: bool,
+    },
     Abandon,
 }
 
@@ -44,6 +48,7 @@ impl SmartCullingRequest {
             Self::Confirm => "confirm",
             Self::RetryFailures => "retry_failures",
             Self::ReconcileManual { .. } => "reconcile_manual",
+            Self::SetLock { .. } => "set_lock",
             Self::Abandon => "abandon",
         }
     }
@@ -178,6 +183,7 @@ pub struct ReviewResult {
     pub ai_initially_adopted: bool,
     pub adopted: bool,
     pub protected: bool,
+    pub requires_human_review: bool,
     pub width: u32,
     pub height: u32,
     pub faces: Vec<DetectedFaceDto>,

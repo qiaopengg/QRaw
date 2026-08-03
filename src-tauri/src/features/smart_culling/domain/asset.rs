@@ -23,6 +23,7 @@ pub(crate) enum SkipReason {
 pub(crate) enum AssetDecision {
     Eligible {
         primary_path: PathBuf,
+        display_path: PathBuf,
         member_paths: Vec<PathBuf>,
     },
     Skipped {
@@ -64,6 +65,7 @@ pub(crate) fn group_assets(candidates: Vec<AssetCandidate>) -> Vec<AssetDecision
                 .into_iter()
                 .map(|candidate| AssetDecision::Eligible {
                     primary_path: candidate.path.clone(),
+                    display_path: candidate.path.clone(),
                     member_paths: vec![candidate.path],
                 }),
         );
@@ -74,6 +76,7 @@ pub(crate) fn group_assets(candidates: Vec<AssetCandidate>) -> Vec<AssetDecision
                     .into_iter()
                     .map(|candidate| AssetDecision::Eligible {
                         primary_path: candidate.path.clone(),
+                        display_path: candidate.path.clone(),
                         member_paths: vec![candidate.path],
                     }),
             );
@@ -84,9 +87,14 @@ pub(crate) fn group_assets(candidates: Vec<AssetCandidate>) -> Vec<AssetDecision
             let raw = raw_members.pop().expect("length was checked");
             let primary_path = raw.path.clone();
             let mut member_paths = vec![raw.path];
+            let display_path = jpeg_members
+                .first()
+                .map(|candidate| candidate.path.clone())
+                .unwrap_or_else(|| primary_path.clone());
             member_paths.extend(jpeg_members.into_iter().map(|candidate| candidate.path));
             decisions.push(AssetDecision::Eligible {
                 primary_path,
+                display_path,
                 member_paths,
             });
             continue;
@@ -127,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn pairs_one_raw_with_one_jpeg_and_uses_raw_as_primary() {
+    fn pairs_one_raw_with_one_jpeg_and_displays_the_jpeg() {
         let decisions = group_assets(vec![
             candidate("/shoot/IMG_0001.jpg", AssetMemberKind::Jpeg),
             candidate("/shoot/IMG_0001.CR3", AssetMemberKind::Raw),
@@ -137,6 +145,7 @@ mod tests {
             decisions,
             vec![AssetDecision::Eligible {
                 primary_path: PathBuf::from("/shoot/IMG_0001.CR3"),
+                display_path: PathBuf::from("/shoot/IMG_0001.jpg"),
                 member_paths: vec![
                     PathBuf::from("/shoot/IMG_0001.CR3"),
                     PathBuf::from("/shoot/IMG_0001.jpg"),
@@ -188,10 +197,12 @@ mod tests {
             vec![
                 AssetDecision::Eligible {
                     primary_path: PathBuf::from("/shoot/IMG_0003.CR3"),
+                    display_path: PathBuf::from("/shoot/IMG_0003.CR3"),
                     member_paths: vec![PathBuf::from("/shoot/IMG_0003.CR3")],
                 },
                 AssetDecision::Eligible {
                     primary_path: PathBuf::from("/shoot/IMG_0003.png"),
+                    display_path: PathBuf::from("/shoot/IMG_0003.png"),
                     member_paths: vec![PathBuf::from("/shoot/IMG_0003.png")],
                 },
             ]
@@ -217,8 +228,13 @@ mod tests {
         ));
         assert!(matches!(
             &decisions[1],
-            AssetDecision::Eligible { primary_path, member_paths }
+            AssetDecision::Eligible {
+                primary_path,
+                display_path,
+                member_paths,
+            }
                 if primary_path == &PathBuf::from("/shoot/IMG_0004.png") && member_paths.len() == 1
+                    && display_path == primary_path
         ));
     }
 }

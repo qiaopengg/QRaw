@@ -2,6 +2,7 @@ import type { ImageFile } from '../../components/ui/AppProperties';
 
 export interface SmartCullingImageMetadata {
   source: 'ai' | 'manual';
+  locked: boolean;
   rating: number;
   colorLabel: 'green' | 'yellow' | 'red' | 'blue' | 'purple' | null;
   reasonCodes?: string[];
@@ -20,13 +21,20 @@ export function getSmartCullingImageMetadata(image: ImageFile): SmartCullingImag
   if (!value || typeof value !== 'object') {
     const colorLabel = imageColor(image) as SmartCullingImageMetadata['colorLabel'];
     if (image.rating === 0 && colorLabel === null) return undefined;
-    return { source: 'manual', rating: image.rating, colorLabel };
+    return { source: 'manual', locked: true, rating: image.rating, colorLabel };
   }
-  const record = value as SmartCullingImageMetadata;
+  const stored = value as Omit<SmartCullingImageMetadata, 'locked'> & { locked?: boolean };
+  const source = stored.source === 'ai' || stored.source === 'manual' ? stored.source : 'manual';
+  const record: SmartCullingImageMetadata = {
+    ...stored,
+    source,
+    locked: source !== stored.source || (stored.locked ?? source === 'manual'),
+  };
   if (record.rating !== image.rating || record.colorLabel !== imageColor(image)) {
     return {
       ...record,
       source: 'manual',
+      locked: true,
       rating: image.rating,
       colorLabel: imageColor(image) as SmartCullingImageMetadata['colorLabel'],
       reasonCodes: undefined,
