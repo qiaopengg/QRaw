@@ -34,7 +34,7 @@
 .sc-modal > p {
   margin-top: 9px;
   color: #858585;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .sc-modal > footer {
@@ -65,7 +65,7 @@
   border-radius: 5px;
   color: #858585;
   background: #151515;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-dialog-facts span {
   display: flex;
@@ -83,7 +83,7 @@
 .sc-confirm-heading p {
   margin-top: 6px;
   color: #777;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-confirm-metrics {
   display: grid;
@@ -110,7 +110,7 @@
 .sc-confirm-metrics span {
   margin-top: 7px;
   color: #686868;
-  font-size: 7px;
+  font-size: 11px;
 }
 .sc-confirm-list {
   margin-top: 15px;
@@ -127,12 +127,12 @@
   display: block;
 }
 .sc-confirm-list strong {
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-confirm-list small {
   margin-top: 5px;
   color: #6e6e6e;
-  font-size: 7px;
+  font-size: 11px;
 }
 .sc-warning {
   display: flex;
@@ -145,6 +145,6 @@
   background: #302617;
 }
 .sc-warning p {
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.5;
 }

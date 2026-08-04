@@ -60,7 +60,7 @@
   place-items: center;
   padding: 12px;
   color: #555;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .sc-gallery-source,
@@ -76,7 +76,7 @@
   border-radius: 3px;
   color: #d0d0d0;
   background: rgba(14, 14, 14, 0.8);
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -107,7 +107,7 @@
   min-width: 0;
   overflow: hidden;
   color: #d3d3d3;
-  font-size: 8px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -119,7 +119,7 @@
   align-items: center;
   gap: 3px;
   color: #828282 !important;
-  font-size: 7px !important;
+  font-size: 11px !important;
   white-space: nowrap;
 }
 
@@ -138,9 +138,12 @@
 
 .sc-gallery-card-body > p {
   overflow: hidden;
-  color: #747474;
-  font-size: 7px;
-  line-height: 1.35;
+  color: #8a8a8a;
+  /* Fine print, now that this text actually renders at its declared size instead
+     of inheriting the 16px browser default through the old global override. Two
+     lines keep the reason readable without dominating a small thumbnail card. */
+  font-size: var(--sc-text-fine);
+  line-height: 1.4;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -184,7 +187,20 @@
   border: 1px solid #3b3b3b !important;
   border-radius: 4px !important;
   color: #a2a2a2 !important;
-  font-size: 8px !important;
+  font-size: 11px !important;
+}
+
+/* Visible confirmation once a photo has been picked as A or B; without this the
+   "Set as A/B" buttons gave no feedback and the comparison feature looked broken. */
+.sc-group-ab-actions button.is-active {
+  border-color: #7fbf6c !important;
+  color: #a8e295 !important;
+  background: #1f2f1c !important;
+}
+
+.sc-group-card-shell.is-in-comparison .sc-gallery-card {
+  border-color: #7fbf6c;
+  box-shadow: 0 0 0 1px #7fbf6c;
 }
 
 .sc-group-review-header nav {
@@ -200,7 +216,7 @@
   display: block;
   margin-top: 3px;
   color: #747474;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .sc-review-only-banner {
@@ -216,13 +232,13 @@
 }
 
 .sc-review-only-banner strong {
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .sc-review-only-banner p {
   margin-top: 3px;
   color: #a28f5a;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .sc-group-expanded {
@@ -267,14 +283,14 @@
   border: 1px solid #48402b;
   border-radius: 4px;
   color: #b7a369;
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
 .sc-expression-pending {
   margin-top: 9px;
   color: #858585 !important;
-  font-size: 8px !important;
+  font-size: 11px !important;
   line-height: 1.45 !important;
 }
 
@@ -302,7 +318,13 @@
   border: 1px solid #3c3c3c !important;
   border-radius: 3px;
   color: #999 !important;
-  font-size: 8px !important;
+  font-size: 11px !important;
+}
+
+.sc-inspector-group-actions button.is-active {
+  border-color: #7fbf6c !important;
+  color: #a8e295 !important;
+  background: #1f2f1c !important;
 }
 
 .sc-modal:has(.sc-compare-dialog-title) {

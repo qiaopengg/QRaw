@@ -4,6 +4,7 @@ mod coordinator;
 mod coordinator_session;
 mod coordinator_support;
 pub(crate) mod domain;
+mod face_geometry;
 mod face_identity;
 mod face_models;
 mod grouping;

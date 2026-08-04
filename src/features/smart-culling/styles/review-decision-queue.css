@@ -47,6 +47,13 @@
     visibility 0s linear 160ms;
 }
 
+/* The shared drawer backdrop sits at z-index 31. The inspector drawer must stay
+   above it (matching the sidebar drawer) or the backdrop intercepts every click
+   inside the open inspector, making its controls appear unresponsive. */
+.sc-review-page .sc-inspector {
+  z-index: 32;
+}
+
 .sc-review-page .sc-review-sidebar.is-open {
   transform: translateX(0);
   visibility: visible;
@@ -87,7 +94,7 @@
 .sc-review-canvas > header .sc-review-queue-heading-main > span:first-child {
   margin: 0;
   color: #98a795;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -99,7 +106,7 @@
 }
 
 .sc-review-canvas > header .sc-review-queue-heading-main > span:last-child {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sc-review-next-control {
@@ -120,7 +127,7 @@
 .sc-review-next-control .sc-secondary {
   min-height: 32px;
   padding: 0 11px;
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 
 .sc-review-canvas > header nav {
@@ -134,7 +141,7 @@
   padding: 0 10px;
   border: 1px solid #393939 !important;
   border-radius: 5px;
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 
 .sc-review-canvas > header nav button.is-active {
@@ -148,7 +155,7 @@
   border: 1px solid #454545 !important;
   border-radius: 5px !important;
   color: #c3c3c3 !important;
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 
 .sc-review-page .sc-failures {
@@ -159,7 +166,7 @@
 .sc-failures > button strong,
 .sc-failures > button span,
 .sc-failures p {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sc-review-evidence-hint {
@@ -198,13 +205,13 @@
 }
 
 .sc-confirm-recheck strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sc-confirm-recheck p {
   margin-top: 4px;
   color: #83aaa3;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -220,5 +227,5 @@
 .sc-write-columns aside small {
   width: 100%;
   color: #7992a8;
-  font-size: 8px;
+  font-size: 11px;
 }

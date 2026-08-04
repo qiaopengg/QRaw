@@ -1,9 +1,39 @@
-/* Keep the extension readable inside the host application's resizable center pane. */
-.sc-page :where(button, input, select, textarea, label, p, span, small, em, strong, i),
-.sc-modal :where(button, input, select, textarea, label, p, span, small, em, strong, i) {
-  font-size: max(11px, 1em) !important;
+/* Typography baseline for the smart-culling feature.
+ *
+ * This file previously carried a blanket `font-size: max(11px, 1em) !important`
+ * on every text element. In a font-size declaration `1em` resolves to the PARENT
+ * font size, so that rule did not act as an 11px floor at all: it discarded each
+ * element's own declared size and replaced it with the parent's. Because
+ * `.sc-page` never set a base size, the whole feature inherited the browser
+ * default (16px), which is why small captions such as the review card reason
+ * text rendered far larger than intended.
+ *
+ * The feature now sets an explicit base size and every local rule declares a
+ * value from the readable scale below, so no global override is needed.
+ */
+
+.sc-page,
+.sc-modal {
+  /* Fine print, secondary text, body text, then the heading steps. */
+  --sc-text-fine: 11px;
+  --sc-text-sm: 12px;
+  --sc-text-base: 13px;
+  --sc-text-lg: 15px;
+  --sc-text-xl: 17px;
+  --sc-text-title: 22px;
+
+  font-size: var(--sc-text-base);
+  line-height: 1.5;
 }
 
+/* Controls do not inherit font settings from their container by default. */
+.sc-page :where(button, input, select, textarea),
+.sc-modal :where(button, input, select, textarea) {
+  font-size: inherit;
+  font-family: inherit;
+}
+
+/* Reliable pointer targets for the feature's dense control clusters. */
 .sc-page button:not(.sc-evidence-face),
 .sc-modal button {
   min-height: 30px;
@@ -13,14 +43,17 @@
   min-height: 32px;
 }
 
-.sc-library-badge,
-.sc-library-badge :where(span, small),
-.sc-command-error {
-  font-size: max(11px, 1em) !important;
-}
-
 .sc-library-badge {
   min-height: 24px;
+  font-size: 11px;
+}
+
+.sc-library-badge :where(span, small) {
+  font-size: 11px;
+}
+
+.sc-command-error {
+  font-size: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {

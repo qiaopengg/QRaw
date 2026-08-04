@@ -18,12 +18,12 @@
 .sc-context-sidebar span {
   margin-top: 7px;
   color: #777;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-context-sidebar p {
   margin-top: 26px;
   color: #666;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.8;
 }
 .sc-setup-workspace {
@@ -55,7 +55,7 @@
 .sc-recovery-notice small {
   margin-top: 4px;
   color: #a99767;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 .sc-recovery-notice small {
@@ -91,7 +91,7 @@
   color: #111;
   background: #eee;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: 12px;
 }
 .sc-section-title h2 {
   font-size: 13px;
@@ -99,11 +99,11 @@
 .sc-section-title p {
   margin-top: 5px;
   color: #767676;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-section-title em {
   color: #777;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 400;
 }
@@ -147,11 +147,11 @@
   background: #eee;
 }
 .sc-mode-grid strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 .sc-mode-grid small {
   color: #717171;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-people-title {
   margin-top: 20px;
@@ -179,12 +179,12 @@
   display: block;
 }
 .sc-people-entry strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 .sc-people-entry small {
   margin-top: 5px;
   color: #707070;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-summary-card {
   height: fit-content;
@@ -205,12 +205,12 @@
   align-items: center;
   gap: 7px;
   color: #777;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-summary-card dd {
   margin-top: 8px;
   color: #bdbdbd;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-info {
   display: flex;
@@ -224,7 +224,7 @@
 }
 .sc-info p {
   color: inherit !important;
-  font-size: 8px !important;
+  font-size: 11px !important;
   line-height: 1.55;
 }
 .sc-summary-card .sc-info {
@@ -240,11 +240,11 @@
   display: block;
   margin-top: 11px;
   color: #666;
-  font-size: 8px;
+  font-size: 11px;
   text-align: center;
 }
 .sc-error {
   margin-top: 10px !important;
   color: #df7772 !important;
-  font-size: 9px !important;
+  font-size: 12px !important;
 }

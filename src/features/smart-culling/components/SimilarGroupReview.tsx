@@ -7,19 +7,25 @@ import { ReviewResultCard } from './ReviewResultCard';
 function GroupCard({
   result,
   focusedResultId,
+  compareAId,
+  compareBId,
   onSelect,
   onSetComparison,
 }: {
   result: ReviewResult;
   focusedResultId: string | null;
+  compareAId: string | null;
+  compareBId: string | null;
   onSelect: (result: ReviewResult) => void;
   onSetComparison: (slot: 'a' | 'b', result: ReviewResult) => void;
 }) {
   const tx = useSmartCullingText();
   const width = 220;
   const imageHeight = Math.min(260, Math.max(150, width * (result.height / Math.max(result.width, 1))));
+  const isA = compareAId === result.resultId;
+  const isB = compareBId === result.resultId;
   return (
-    <div className="sc-group-card-shell">
+    <div className={`sc-group-card-shell ${isA || isB ? 'is-in-comparison' : ''}`}>
       <ReviewResultCard
         result={result}
         width={width}
@@ -29,8 +35,12 @@ function GroupCard({
       />
       {result.groupKind === 'similar' ? (
         <div className="sc-group-ab-actions">
-          <button onClick={() => onSetComparison('a', result)}>{tx('setAsA')}</button>
-          <button onClick={() => onSetComparison('b', result)}>{tx('setAsB')}</button>
+          <button className={isA ? 'is-active' : ''} aria-pressed={isA} onClick={() => onSetComparison('a', result)}>
+            {isA ? `${tx('setAsA')} ✓` : tx('setAsA')}
+          </button>
+          <button className={isB ? 'is-active' : ''} aria-pressed={isB} onClick={() => onSetComparison('b', result)}>
+            {isB ? `${tx('setAsB')} ✓` : tx('setAsB')}
+          </button>
         </div>
       ) : null}
     </div>
@@ -40,6 +50,8 @@ function GroupCard({
 export function SimilarGroupReview({
   results,
   focusedResultId,
+  compareAId = null,
+  compareBId = null,
   onBack,
   onSelect,
   onSetComparison,
@@ -47,6 +59,8 @@ export function SimilarGroupReview({
 }: {
   results: ReviewResult[];
   focusedResultId: string | null;
+  compareAId?: string | null;
+  compareBId?: string | null;
   onBack: () => void;
   onSelect: (result: ReviewResult) => void;
   onSetComparison: (slot: 'a' | 'b', result: ReviewResult) => void;
@@ -65,6 +79,8 @@ export function SimilarGroupReview({
       key={result.resultId}
       result={result}
       focusedResultId={focusedResultId}
+      compareAId={compareAId}
+      compareBId={compareBId}
       onSelect={onSelect}
       onSetComparison={onSetComparison}
     />

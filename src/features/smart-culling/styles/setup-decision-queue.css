@@ -86,7 +86,7 @@
 }
 
 .sc-mode-grid small {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -102,24 +102,26 @@
 }
 
 .sc-key-people-picker {
-  margin-top: 12px;
+  margin-top: 14px;
   overflow: hidden;
-  border: 1px solid #354335;
-  border-radius: 9px;
-  background: #171b17;
+  border: 1px solid #3a463a;
+  border-radius: 10px;
+  background: #161a16;
 }
 
 .sc-key-people-picker > header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 17px 18px 14px;
-  border-bottom: 1px solid #303a30;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2f382f;
+  background: #1a201a;
 }
 
 .sc-key-people-picker h2 {
-  font-size: 15px;
+  font-size: var(--sc-text-base);
+  font-weight: 600;
 }
 
 .sc-key-people-close {
@@ -128,45 +130,56 @@
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid #414841 !important;
-  border-radius: 5px;
-  color: #b2bdb0 !important;
+  border: 1px solid #46503f !important;
+  border-radius: 6px;
+  color: #b8c4b5 !important;
+}
+
+.sc-key-people-close:hover {
+  color: #eef2ec !important;
+  background: #2b332a !important;
 }
 
 .sc-key-people-grid {
   display: block;
-  min-height: 350px;
 }
 
 .sc-key-people-browser {
   min-width: 0;
-  padding: 14px;
+  padding: 16px;
 }
 
 .sc-key-people-stage {
-  height: clamp(230px, 34vh, 350px);
+  height: clamp(260px, 38vh, 380px);
   overflow: hidden;
   border: 1px solid #3c443b;
-  border-radius: 7px;
+  border-radius: 8px;
   background: #0a0a0a;
 }
 
+/* Action row: the detect button leads, the explanation sits beside it and is
+   allowed to wrap instead of pushing the button out of the panel. */
 .sc-key-people-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 12px;
 }
 
 .sc-key-people-controls .sc-secondary {
-  min-height: 32px;
-  padding: 0 11px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  font-size: var(--sc-text-sm) !important;
 }
 
 .sc-key-people-controls p {
-  color: #869185;
-  font-size: 10px;
-  line-height: 1.45;
+  min-width: 200px;
+  flex: 1 1 240px;
+  color: #939e91;
+  font-size: var(--sc-text-fine);
+  line-height: 1.5;
 }
 
 .sc-setup-footer {
@@ -198,4 +211,99 @@
   .sc-mode-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Photo strip inside the key-people picker. The shared .sc-filmstrip rules in
+   styles/people.css were sized for the removed standalone people screen, so the
+   picker restates the sizes it needs instead of editing that shared baseline. */
+.sc-key-people-browser .sc-filmstrip-row {
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #2c342c;
+}
+
+.sc-key-people-browser .sc-filmstrip {
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.sc-key-people-browser .sc-filmstrip button {
+  flex: 0 0 84px;
+  height: 62px;
+  border-radius: 6px;
+  border-color: #3b433a !important;
+}
+
+.sc-key-people-browser .sc-filmstrip button:hover {
+  border-color: #6c7a68 !important;
+}
+
+.sc-key-people-browser .sc-filmstrip button.is-active {
+  border-color: #8fd07c !important;
+  box-shadow: 0 0 0 2px rgba(143, 208, 124, 0.35);
+}
+
+.sc-key-people-browser .sc-filmstrip span {
+  padding: 6px;
+  color: #8c968a;
+  font-size: var(--sc-text-fine);
+  line-height: 1.3;
+}
+
+.sc-key-people-browser .sc-filmstrip-nav {
+  flex: 0 0 30px;
+  height: 62px;
+  border-radius: 6px;
+  border-color: #3b433a !important;
+  color: #a9b5a6 !important;
+  background: #1d231c !important;
+}
+
+.sc-key-people-browser .sc-filmstrip-nav:hover:not(:disabled) {
+  color: #eef2ec !important;
+  background: #2b332a !important;
+}
+
+/* Shooting-mode cards and the key-people entry share the setup card rhythm. */
+.sc-mode-grid button {
+  row-gap: 6px;
+}
+
+.sc-mode-grid strong {
+  font-size: var(--sc-text-sm);
+}
+
+.sc-mode-grid small {
+  color: #7e857c;
+  font-size: var(--sc-text-fine);
+}
+
+.sc-people-entry {
+  min-height: 60px;
+  gap: 13px;
+  padding: 0 16px;
+}
+
+.sc-people-entry strong {
+  font-size: var(--sc-text-sm);
+}
+
+.sc-people-entry small {
+  margin-top: 4px;
+  color: #7e857c;
+  font-size: var(--sc-text-fine);
+}
+
+.sc-section-title h2 {
+  font-size: var(--sc-text-base);
+}
+
+.sc-section-title p {
+  color: #82887f;
+  font-size: var(--sc-text-fine);
+}
+
+.sc-section-title em {
+  font-size: var(--sc-text-fine);
 }

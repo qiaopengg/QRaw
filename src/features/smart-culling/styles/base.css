@@ -13,7 +13,13 @@
   --sc-red: #d75c55;
   width: 100%;
   height: 100%;
-  min-width: 960px;
+  /* Do not force a wide minimum here: this element is also the container-query
+     root (container-type: inline-size below). A large min-width prevents the
+     @container breakpoints in the other stylesheets from ever reaching their
+     narrow tiers when the host panel is resized small, which is what caused
+     text/buttons to overlap and wrap incorrectly instead of switching to the
+     compact layouts that already exist for this case. */
+  min-width: 0;
   overflow: hidden;
   color: var(--sc-text);
   background: var(--sc-deep);
@@ -123,7 +129,7 @@
   border: 1px solid #444;
   border-radius: 15px;
   color: #aaa;
-  font-size: 10px;
+  font-size: 12px;
 }
 .sc-status.good {
   border-color: #40593a;
@@ -134,7 +140,7 @@
   align-items: center;
   gap: 6px;
   color: var(--sc-muted) !important;
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 .sc-primary,
 .sc-secondary,
@@ -168,21 +174,24 @@
   background: #963b37 !important;
 }
 .sc-heading > span {
-  color: #8c8c8c;
-  font-size: 9px;
+  color: #8f9a8d;
+  font-size: var(--sc-text-fine);
   font-weight: 700;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .sc-heading h1 {
-  margin-top: 7px;
-  font-size: 24px;
-  letter-spacing: -0.025em;
+  margin-top: 6px;
+  font-size: var(--sc-text-title);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 .sc-heading p {
-  margin-top: 7px;
-  color: #858585;
-  font-size: 10px;
-  line-height: 1.55;
+  margin-top: 8px;
+  max-width: 62ch;
+  color: #8d8d8d;
+  font-size: var(--sc-text-sm);
+  line-height: 1.6;
 }
 
 .sc-task-root {

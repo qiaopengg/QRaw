@@ -19,7 +19,7 @@
 .sc-analysis-shell > header p {
   margin-top: 5px;
   color: #777;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-analysis-grid {
   display: grid;
@@ -45,7 +45,7 @@
   place-items: center;
   height: 100%;
   color: #5e5e5e;
-  font-size: 9px;
+  font-size: 12px;
 }
 .sc-analysis-grid article span {
   position: absolute;
@@ -55,7 +55,7 @@
   border-radius: 2px;
   color: #777;
   background: rgba(0, 0, 0, 0.66);
-  font-size: 7px;
+  font-size: 11px;
 }
 .sc-analysis-dock {
   position: fixed;
@@ -88,19 +88,19 @@
   display: block;
 }
 .sc-analysis-dock strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 .sc-analysis-dock small {
   margin-top: 6px;
   color: #686868;
-  font-size: 7px;
+  font-size: 11px;
 }
 .sc-progress {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 7px;
   color: #777;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-progress em {
   font-style: normal;
@@ -149,7 +149,7 @@
 .sc-ready-card p {
   margin-top: 6px;
   color: #89a086;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-ready-card small {
   display: flex;
@@ -157,7 +157,7 @@
   gap: 5px;
   margin-top: 9px;
   color: #71866f;
-  font-size: 8px;
+  font-size: 11px;
 }
 .sc-ready-card > .sc-primary {
   margin-right: 22px;

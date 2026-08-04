@@ -14,12 +14,24 @@ export const ReviewInspector = forwardRef<
     onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => void;
     onOpenGroup?: () => void;
     onSetComparison?: (slot: 'a' | 'b') => void;
+    compareAId?: string | null;
+    compareBId?: string | null;
     readOnly?: boolean;
     open?: boolean;
     onClose?: () => void;
   }
 >(function ReviewInspector(
-  { result, onEdit, onOpenGroup, onSetComparison, readOnly = false, open = false, onClose },
+  {
+    result,
+    onEdit,
+    onOpenGroup,
+    onSetComparison,
+    compareAId = null,
+    compareBId = null,
+    readOnly = false,
+    open = false,
+    onClose,
+  },
   ref,
 ) {
   const tx = useSmartCullingText();
@@ -126,8 +138,20 @@ export const ReviewInspector = forwardRef<
             </button>
             {result.groupKind === 'similar' ? (
               <>
-                <button onClick={() => onSetComparison?.('a')}>{tx('setAsA')}</button>
-                <button onClick={() => onSetComparison?.('b')}>{tx('setAsB')}</button>
+                <button
+                  className={compareAId === result.resultId ? 'is-active' : ''}
+                  aria-pressed={compareAId === result.resultId}
+                  onClick={() => onSetComparison?.('a')}
+                >
+                  {compareAId === result.resultId ? `${tx('setAsA')} ✓` : tx('setAsA')}
+                </button>
+                <button
+                  className={compareBId === result.resultId ? 'is-active' : ''}
+                  aria-pressed={compareBId === result.resultId}
+                  onClick={() => onSetComparison?.('b')}
+                >
+                  {compareBId === result.resultId ? `${tx('setAsB')} ✓` : tx('setAsB')}
+                </button>
               </>
             ) : null}
           </div>

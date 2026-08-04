@@ -153,20 +153,31 @@ export function PhotoEvidenceViewport({
     else updateView({ zoom: actualZoom, pan: { x: 0, y: 0 } });
   };
 
+  // React registers wheel listeners as passive at the root, so event.preventDefault()
+  // inside a JSX onWheel handler is silently ignored and the ambient scroll container
+  // still moves instead of the image zooming. A native, non-passive listener is required
+  // for wheel-to-zoom to actually take effect.
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const handleNativeWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = element.getBoundingClientRect();
+      zoomAt(viewRef.current.zoom * Math.exp(-event.deltaY * 0.002), {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+    };
+    element.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => element.removeEventListener('wheel', handleNativeWheel);
+  }, [zoomAt]);
+
   return (
     <div
       ref={containerRef}
       className={`sc-evidence-viewport ${compact ? 'is-compact' : ''}`}
       tabIndex={0}
       onDoubleClick={toggleActualSize}
-      onWheel={(event) => {
-        event.preventDefault();
-        const rect = event.currentTarget.getBoundingClientRect();
-        zoomAt(viewRef.current.zoom * Math.exp(-event.deltaY * 0.002), {
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-        });
-      }}
       onPointerDown={(event) => {
         if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return;
         event.currentTarget.focus();

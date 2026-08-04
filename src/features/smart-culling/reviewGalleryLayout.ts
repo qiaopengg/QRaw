@@ -12,9 +12,9 @@ export interface ReviewGalleryRow {
 }
 
 const GAP = 12;
-// Title, rating controls, lock/identity state, and a two-line reason must remain
-// visible at the extension's 11px minimum text size.
-const CARD_META_HEIGHT = 136;
+// Title, rating controls, lock/identity state, and a two-line reason at the
+// feature's 11px fine-print size.
+const CARD_META_HEIGHT = 112;
 const TARGET_IMAGE_HEIGHT = 250;
 const MIN_IMAGE_HEIGHT = 170;
 const MAX_IMAGE_HEIGHT = 310;

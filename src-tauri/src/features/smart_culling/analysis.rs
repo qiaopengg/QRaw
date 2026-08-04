@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
+use super::face_geometry::estimate_pose;
 use super::face_identity::run_sface_embedding;
 use super::face_models::{crop_eye_region, run_ocec_classification, run_yunet_detection};
 use super::models::SmartCullingFaceModels;
@@ -149,9 +150,19 @@ fn detect_faces_in_image(
             let inter_ocular_distance =
                 ((left_eye.0 - right_eye.0).powi(2) + (left_eye.1 - right_eye.1).powi(2)).sqrt();
 
-            let right_eye_result = analyze_eye(img, right_eye, inter_ocular_distance, models)?;
-            ensure_not_cancelled(cancellation)?;
-            let left_eye_result = analyze_eye(img, left_eye, inter_ocular_distance, models)?;
+            // On a strongly turned head the per-eye crops handed to OCEC are
+            // foreshortened and partly self-occluded, so a "closed" reading there
+            // is not evidence of a blink. Report the eye state as unknown instead
+            // of letting a profile shot take a closed-eye penalty.
+            let pose_hides_eyes = estimate_pose(&face.landmarks).suppresses_eye_state();
+            let (right_eye_result, left_eye_result) = if pose_hides_eyes {
+                (unknown_eye(0), unknown_eye(0))
+            } else {
+                let right = analyze_eye(img, right_eye, inter_ocular_distance, models)?;
+                ensure_not_cancelled(cancellation)?;
+                let left = analyze_eye(img, left_eye, inter_ocular_distance, models)?;
+                (right, left)
+            };
             let face_crop = crop_pixel_bbox(img, face.bbox);
             let (sharpness_metric, exposure_metric, local_confidence) = face_crop
                 .as_ref()

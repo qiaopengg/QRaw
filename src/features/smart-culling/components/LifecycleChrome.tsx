@@ -41,8 +41,10 @@ export function Modal({ children, onClose }: { children: React.ReactNode; onClos
     const firstControl = dialogRef.current?.querySelector<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     );
-    (firstControl ?? dialogRef.current)?.focus();
-    return () => previousFocus?.focus();
+    // preventScroll avoids the browser auto-scrolling the underlying page to reveal
+    // the newly focused control, which can otherwise perturb layout behind the modal.
+    (firstControl ?? dialogRef.current)?.focus({ preventScroll: true });
+    return () => previousFocus?.focus({ preventScroll: true });
   }, []);
 
   return (
@@ -76,10 +78,10 @@ export function Modal({ children, onClose }: { children: React.ReactNode; onClos
           const last = controls[controls.length - 1];
           if (event.shiftKey && document.activeElement === first) {
             event.preventDefault();
-            last.focus();
+            last.focus({ preventScroll: true });
           } else if (!event.shiftKey && document.activeElement === last) {
             event.preventDefault();
-            first.focus();
+            first.focus({ preventScroll: true });
           }
         }}
       >

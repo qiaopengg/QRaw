@@ -388,6 +388,8 @@ export function ReviewWorkbench({
                 <SimilarGroupReview
                   results={activeGroup}
                   focusedResultId={focused?.resultId ?? null}
+                  compareAId={compareA?.resultId ?? null}
+                  compareBId={compareB?.resultId ?? null}
                   onBack={() => setActiveGroupId(null)}
                   onSelect={(result) => {
                     setState({ focusedResultId: result.resultId });
@@ -429,6 +431,8 @@ export function ReviewWorkbench({
           <ReviewInspector
             ref={inspectorRef}
             result={focused}
+            compareAId={compareA?.resultId ?? null}
+            compareBId={compareB?.resultId ?? null}
             onEdit={(patch) => editMetadata(focused, patch)}
             onOpenGroup={() => setActiveGroupId(focused.groupId)}
             onSetComparison={(slot) => setComparison(slot, focused)}
