@@ -21,7 +21,7 @@ export function screenForTaskTransition(
     return 'analysis';
   }
 
-  if (snapshot.state === 'readyForReview') return currentScreen === 'analysis' ? 'analysis' : 'review';
+  if (snapshot.state === 'readyForReview') return 'review';
 
   if (snapshot.state === 'idle') return 'setup';
 

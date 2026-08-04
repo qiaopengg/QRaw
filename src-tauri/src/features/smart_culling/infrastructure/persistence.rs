@@ -1,9 +1,6 @@
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use tempfile::NamedTempFile;
 
 #[cfg(test)]
 use crate::exif_processing::load_sidecar;
@@ -21,6 +18,7 @@ use super::baseline::{
 use super::catalog::read_sidecar_strict;
 #[cfg(test)]
 use super::manual_reconciliation::reconcile_manual_ownership;
+use super::sidecar_transaction::write_sidecar_transaction_guarded;
 
 const COLOR_TAG_PREFIX: &str = "color:";
 const SCHEMA_VERSION: u32 = 1;
@@ -45,6 +43,7 @@ pub(crate) struct ApplyFailure {
 pub(crate) struct ApplyReport {
     pub succeeded: Vec<PathBuf>,
     pub failed: Vec<ApplyFailure>,
+    pub unchanged: Vec<PathBuf>,
 }
 
 pub(crate) struct ConfirmedWrite {
@@ -87,10 +86,15 @@ fn apply_one(item: &ConfirmedWrite) -> Result<(), (ApplyFailureReason, String)> 
     }
     ensure_file_baselines_match(&item.file_baselines)?;
     ensure_asset_sidecars_writable(&item.member_sidecar_baselines)?;
-    for (sidecar_path, metadata) in updates {
-        atomic_write_sidecar(sidecar_path, &metadata)
-            .map_err(|error| (ApplyFailureReason::Io, error))?;
-    }
+    let updates = updates
+        .into_iter()
+        .map(|(path, metadata)| (path.clone(), metadata))
+        .collect::<Vec<_>>();
+    write_sidecar_transaction_guarded(&updates, || {
+        ensure_file_baselines_match(&item.file_baselines).map_err(|(_, detail)| detail)?;
+        ensure_asset_sidecars_writable(&item.member_sidecar_baselines).map_err(|(_, detail)| detail)
+    })
+    .map_err(|error| (ApplyFailureReason::Io, error))?;
     Ok(())
 }
 
@@ -209,29 +213,6 @@ fn merge_result(metadata: &mut ImageMetadata, result: &ConfirmedResult) {
         .expect("feature_data was normalized to an object")
         .insert("smartCullingV2".to_string(), record);
     metadata.feature_data = Some(feature_data);
-}
-
-pub(crate) fn atomic_write_sidecar(path: &Path, metadata: &ImageMetadata) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("Sidecar has no parent directory: {}", path.display()))?;
-    let bytes = serde_json::to_vec_pretty(metadata).map_err(|error| error.to_string())?;
-    let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
-    temporary
-        .write_all(&bytes)
-        .map_err(|error| error.to_string())?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|error| error.to_string())?;
-    temporary.persist(path).map_err(|error| error.to_string())?;
-
-    #[cfg(unix)]
-    fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| error.to_string())?;
-
-    Ok(())
 }
 
 #[cfg(test)]

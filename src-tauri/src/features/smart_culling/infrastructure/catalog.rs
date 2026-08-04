@@ -13,6 +13,7 @@ use super::super::domain::{
 use super::baseline::{
     FileBaseline, SidecarBaseline, capture_file_baseline, capture_sidecar_baseline,
 };
+use super::sidecar_transaction::recover_pending_sidecar_transactions;
 use crate::exif_processing::get_primary_sidecar_path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,6 +68,8 @@ pub(crate) fn scan_catalog(root: &Path) -> Result<Catalog, String> {
             root.display()
         ));
     }
+
+    recover_pending_sidecar_transactions(root)?;
 
     let (decisions, mut skipped, mut failures) = scan_direct_asset_decisions(root)?;
     let mut assets = Vec::new();
@@ -154,7 +157,14 @@ fn scan_direct_asset_decisions(
         } else {
             AssetMemberKind::Other
         };
-        candidates.push(AssetCandidate { path, kind });
+        let capture_identity = matches!(kind, AssetMemberKind::Raw | AssetMemberKind::Jpeg)
+            .then(|| try_get_exif_creation_date(&path).map(|date| date.timestamp()))
+            .flatten();
+        candidates.push(AssetCandidate {
+            path,
+            kind,
+            capture_identity,
+        });
     }
 
     Ok((group_assets(candidates), skipped, failures))
@@ -174,6 +184,7 @@ pub(crate) fn resolve_asset_member_groups(paths: &[PathBuf]) -> Result<Vec<Vec<P
 
     let mut resolved = BTreeMap::<PathBuf, Vec<PathBuf>>::new();
     for (folder, requested_paths) in by_folder {
+        recover_pending_sidecar_transactions(&folder)?;
         let (decisions, skipped, _) = scan_direct_asset_decisions(&folder)?;
         for requested in requested_paths {
             let asset = decisions.iter().find_map(|decision| match decision {
@@ -331,6 +342,7 @@ pub(crate) fn read_sidecar_strict(path: &Path) -> Result<ImageMetadata, String> 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs::File;
 
     use tempfile::tempdir;
@@ -339,6 +351,19 @@ mod tests {
 
     fn touch(path: &Path) {
         File::create(path).unwrap();
+    }
+
+    fn with_capture_identity(mut metadata: ImageMetadata) -> ImageMetadata {
+        metadata.exif = Some(HashMap::from([(
+            "DateTimeOriginal".to_string(),
+            "2026-08-04 12:00:00".to_string(),
+        )]));
+        metadata
+    }
+
+    fn write_capture_metadata(path: &Path, metadata: ImageMetadata) {
+        let file = File::create(get_primary_sidecar_path(path)).unwrap();
+        serde_json::to_writer_pretty(file, &with_capture_identity(metadata)).unwrap();
     }
 
     #[test]
@@ -396,13 +421,12 @@ mod tests {
         let jpeg = root.path().join("IMG_0001.jpg");
         touch(&raw);
         touch(&jpeg);
-        let jpeg_sidecar = get_primary_sidecar_path(&jpeg);
+        write_capture_metadata(&raw, ImageMetadata::default());
         let metadata = ImageMetadata {
             rating: 5,
             ..ImageMetadata::default()
         };
-        let file = File::create(jpeg_sidecar).unwrap();
-        serde_json::to_writer_pretty(file, &metadata).unwrap();
+        write_capture_metadata(&jpeg, metadata);
 
         let catalog = scan_catalog(root.path()).unwrap();
 
@@ -450,8 +474,7 @@ mod tests {
                 })),
                 ..ImageMetadata::default()
             };
-            let file = File::create(get_primary_sidecar_path(path)).unwrap();
-            serde_json::to_writer_pretty(file, &metadata).unwrap();
+            write_capture_metadata(path, metadata);
         }
 
         let catalog = scan_catalog(root.path()).unwrap();
@@ -510,9 +533,24 @@ mod tests {
         let jpeg = root.path().join("IMG_0008.jpg");
         touch(&raw);
         touch(&jpeg);
+        write_capture_metadata(&raw, ImageMetadata::default());
+        write_capture_metadata(&jpeg, ImageMetadata::default());
 
         let resolved = resolve_asset_member_groups(std::slice::from_ref(&jpeg)).unwrap();
 
         assert_eq!(resolved, vec![vec![raw, jpeg]]);
+    }
+
+    #[test]
+    fn skips_a_same_stem_pair_when_capture_identity_is_unavailable() {
+        let root = tempdir().unwrap();
+        touch(&root.path().join("IMG_0009.dng"));
+        touch(&root.path().join("IMG_0009.jpg"));
+
+        let catalog = scan_catalog(root.path()).unwrap();
+
+        assert!(catalog.assets.is_empty());
+        assert_eq!(catalog.skipped.len(), 1);
+        assert_eq!(catalog.skipped[0].reason, CatalogSkipReason::AmbiguousPair);
     }
 }

@@ -19,6 +19,7 @@ interface SmartCullingState {
   confirmOpen: boolean;
   abandonOpen: boolean;
   cancelOpen: boolean;
+  manualSyncPending: boolean;
   busy: boolean;
   error: SmartCullingCommandError | null;
   setState: (update: Partial<SmartCullingState>) => void;
@@ -33,6 +34,7 @@ export const useSmartCullingStore = create<SmartCullingState>((set) => ({
   confirmOpen: false,
   abandonOpen: false,
   cancelOpen: false,
+  manualSyncPending: false,
   busy: false,
   error: null,
   setState: (update) => set(update),
@@ -51,7 +53,7 @@ export async function runSmartCullingCommand(request: SmartCullingRequest, prese
     current.setState({
       snapshot,
       screen: preserveScreen ? current.screen : screenForTaskTransition(current.screen, snapshot),
-      mode: snapshot.mode ?? current.mode,
+      mode: request.action === 'detectPeople' ? current.mode : (snapshot.mode ?? current.mode),
       keyPeople: clearPeople ? [] : current.keyPeople,
       focusedResultId,
       busy: false,

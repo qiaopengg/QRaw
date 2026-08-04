@@ -5,12 +5,12 @@ use image_hasher::ImageHash;
 
 use super::api::{DetectedFaceDto, EyeEvidenceDto, KeyPersonEvidenceDto, ReviewResult};
 use super::grouping::{CaptureDescriptor, group_capture_sequence};
-use super::key_person_scoring::{
-    candidate_reason, is_multi_person_comparable_group, rank_key_person_performance,
-};
+use super::key_person_policy::apply_key_person_gate;
+use super::key_person_scoring::rank_key_person_performance;
+use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::types::{FaceResult, KeyPersonEvidence};
 
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-2.5";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.0";
 pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+ocec-l-bgr+sface-coreml-v3";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
@@ -20,7 +20,6 @@ pub(crate) struct AnalysisCandidate {
     pub capture_time_millis: i64,
     pub capture_time_from_exif: bool,
     pub sequence_number: Option<u64>,
-    pub quality_score: f64,
     pub sharpness_metric: f64,
     pub center_focus_metric: f64,
     pub exposure_metric: f64,
@@ -56,29 +55,28 @@ pub(crate) fn organize_results(
             })
             .collect::<Vec<_>>();
         for group in group_capture_sequence(&descriptors) {
-            if is_multi_person_comparable_group(&folder_items, &group.indices) {
+            if group.indices.len() > 1 {
                 rank_key_person_performance(&mut folder_items, &group.indices);
-            } else {
-                for index in &group.indices {
-                    folder_items[*index].key_person_evidence.clear();
-                }
             }
             let mut ranked = group
                 .indices
                 .iter()
-                .map(|index| (*index, mode_score(mode, &folder_items[*index])))
+                .map(|index| (*index, evaluate_mode(mode, &folder_items[*index])))
                 .collect::<Vec<_>>();
             ranked.sort_by(|left, right| {
                 right
                     .1
-                    .partial_cmp(&left.1)
+                    .score
+                    .partial_cmp(&left.1.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
             let group_size = ranked.len();
+            let capture_review_reason =
+                capture_review_reason(&folder_items, &group.indices, group.requires_manual_review);
             let group_kind = if group_size == 1 {
                 "single"
-            } else if capture_combination_suspected(&folder_items, &group.indices) {
+            } else if capture_review_reason.is_some() {
                 "reviewOnly"
             } else {
                 "similar"
@@ -92,24 +90,57 @@ pub(crate) fn organize_results(
             let rank_by_index = ranked
                 .iter()
                 .enumerate()
-                .map(|(rank, (candidate_index, score))| (*candidate_index, (rank, *score)))
+                .map(|(rank, (candidate_index, evaluation))| {
+                    (*candidate_index, (rank, evaluation.clone()))
+                })
                 .collect::<BTreeMap<_, _>>();
 
             for candidate_index in group.indices {
                 let candidate = &folder_items[candidate_index];
-                let (rank, score) = rank_by_index[&candidate_index];
-                let confidence = confidence(score, candidate);
-                let rating = rating_for(score);
-                let color_label = color_for(rank, recommended_count, confidence, group_kind);
-                let resolved_mode = resolve_mode(mode, candidate);
-                let reason_codes = reasons_for(
-                    candidate,
-                    resolved_mode,
-                    rank,
-                    recommended_count,
-                    group_size,
-                    confidence,
-                );
+                let (rank, evaluation) = &rank_by_index[&candidate_index];
+                let base_rating = rating_for_mode(&evaluation.resolved_mode, evaluation.score);
+                let key_person = apply_key_person_gate(&candidate.key_person_evidence, base_rating);
+                let requires_human_review = group_kind == "reviewOnly"
+                    || evaluation.requires_human_review
+                    || key_person.requires_human_review;
+                let rating = if requires_human_review {
+                    0
+                } else {
+                    key_person.rating
+                };
+                // AI color mapping is intentionally disabled until the product
+                // policy is frozen. Colors never carry hidden pool or review semantics.
+                let color_label = None;
+                let reason_codes = if requires_human_review {
+                    if group_kind == "reviewOnly" {
+                        vec![
+                            capture_review_reason
+                                .unwrap_or("capture_combination_review")
+                                .to_string(),
+                        ]
+                    } else {
+                        reasons_for(
+                            evaluation.reason_code,
+                            key_person.reason_code.as_deref(),
+                            *rank,
+                            recommended_count,
+                            group_size,
+                        )
+                    }
+                } else {
+                    reasons_for(
+                        evaluation.reason_code,
+                        key_person.reason_code.as_deref(),
+                        *rank,
+                        recommended_count,
+                        group_size,
+                    )
+                };
+                let confidence = if requires_human_review {
+                    evaluation.confidence.min(0.49)
+                } else {
+                    evaluation.confidence
+                };
                 results.push(ReviewResult {
                     result_id: candidate.result_id.clone(),
                     path: candidate.path.to_string_lossy().to_string(),
@@ -126,15 +157,13 @@ pub(crate) fn organize_results(
                     group_size,
                     recommended_count,
                     rating,
-                    color_label: Some(color_label.to_string()),
+                    color_label,
                     source: "ai".to_string(),
-                    mode: resolved_mode.to_string(),
+                    mode: evaluation.resolved_mode.clone(),
                     reason_codes,
                     confidence,
-                    ai_initially_adopted: group_kind == "reviewOnly" || rank < recommended_count,
-                    adopted: group_kind == "reviewOnly" || rank < recommended_count,
                     protected: false,
-                    requires_human_review: false,
+                    requires_human_review,
                     width: candidate.width,
                     height: candidate.height,
                     faces: candidate
@@ -198,57 +227,6 @@ fn sort_capture_sequence(items: &mut [AnalysisCandidate]) {
     });
 }
 
-fn resolve_mode<'a>(requested: &'a str, item: &AnalysisCandidate) -> &'a str {
-    if requested != "auto" {
-        return requested;
-    }
-    if item.faces.len() >= 3 {
-        "group"
-    } else if !item.faces.is_empty() {
-        "portrait"
-    } else {
-        "landscape"
-    }
-}
-
-fn mode_score(mode: &str, item: &AnalysisCandidate) -> f64 {
-    let sharpness = (normalize_focus(item.sharpness_metric) * 0.8
-        + item.quality_score.clamp(0.0, 1.0) * 0.2)
-        .clamp(0.0, 1.0);
-    let center = normalize_focus(item.center_focus_metric);
-    let exposure = item.exposure_metric.clamp(0.0, 1.0);
-    let open_eye = if item.faces.iter().any(FaceResult::has_closed_eye) {
-        0.25
-    } else if item.faces.is_empty() {
-        0.65
-    } else if item.faces.iter().any(|face| !face.eye_state_is_known()) {
-        0.60
-    } else {
-        1.0
-    };
-    let people = if item.faces.is_empty() { 0.4 } else { 1.0 };
-    // Identity candidates stay informational until the independent QRaw
-    // photography validation gate passes, so identity presence has no weight.
-    let (sharp_w, center_w, exposure_w, people_w) = match mode {
-        "portrait" | "group" => (0.30, 0.20, 0.20, 0.30),
-        "environment" => (0.30, 0.19, 0.24, 0.27),
-        "landscape" => (0.38, 0.29, 0.31, 0.02),
-        _ if item.faces.is_empty() => (0.39, 0.29, 0.30, 0.02),
-        _ => (0.32, 0.20, 0.21, 0.27),
-    };
-    let face_component = if item.faces.is_empty() {
-        people
-    } else {
-        (people + open_eye) / 2.0
-    };
-    (sharpness * sharp_w + center * center_w + exposure * exposure_w + face_component * people_w)
-        .clamp(0.0, 1.0)
-}
-
-fn normalize_focus(value: f64) -> f64 {
-    ((value + 1.0).log10() / 3.5).clamp(0.0, 1.0)
-}
-
 fn recommended_count(group_size: usize) -> usize {
     match group_size {
         0 => 0,
@@ -258,103 +236,37 @@ fn recommended_count(group_size: usize) -> usize {
     }
 }
 
-fn confidence(score: f64, item: &AnalysisCandidate) -> f32 {
-    let face_penalty = if item.faces.iter().any(|face| !face.eye_state_is_known()) {
-        0.08
-    } else {
-        0.0
-    };
-    (0.58 + (score - 0.5).abs() * 0.72 - face_penalty).clamp(0.5, 0.96) as f32
-}
-
-fn rating_for(score: f64) -> u8 {
-    if score >= 0.76 {
-        5
-    } else if score >= 0.62 {
-        4
-    } else if score >= 0.52 {
-        3
-    } else if score >= 0.38 {
-        2
-    } else {
-        1
-    }
-}
-
-fn color_for(
-    rank: usize,
-    recommended_count: usize,
-    confidence: f32,
-    group_kind: &str,
-) -> &'static str {
-    if group_kind == "reviewOnly" || confidence < 0.7 {
-        "yellow"
-    } else if rank < recommended_count {
-        "green"
-    } else {
-        // Similar-group policy values have not passed the independent
-        // real-photo release gate, so an unselected result is never a strong
-        // red rejection.
-        "yellow"
-    }
-}
-
 fn reasons_for(
-    item: &AnalysisCandidate,
-    mode: &str,
+    mode_reason: &str,
+    key_person_reason: Option<&str>,
     rank: usize,
     recommended_count: usize,
     group_size: usize,
-    _confidence: f32,
 ) -> Vec<String> {
     let mut reasons = Vec::with_capacity(2);
-    reasons.push(mode_reason(item, mode));
+    if let Some(reason) = key_person_reason {
+        reasons.push(reason.to_string());
+    }
+    if reasons.len() < 2 {
+        reasons.push(mode_reason.to_string());
+    }
 
     if group_size <= 1 {
-        reasons.extend(candidate_reason(item));
         return reasons;
     }
 
+    if reasons.len() >= 2 {
+        return reasons;
+    }
     if rank == 0 {
         reasons.push("group_best".to_string());
     } else if rank < recommended_count {
         reasons.push("group_keeper".to_string());
-    } else if candidate_reason(item).is_some() {
-        reasons.extend(candidate_reason(item));
     } else {
         reasons.push("needs_review".to_string());
     }
     reasons.truncate(2);
     reasons
-}
-
-fn mode_reason(item: &AnalysisCandidate, mode: &str) -> String {
-    let sharp = normalize_focus(item.sharpness_metric) >= 0.7;
-    let exposure_balanced = item.exposure_metric >= 0.72;
-    let has_closed_eyes = item.faces.iter().any(FaceResult::has_closed_eye);
-    let eye_state_reliable =
-        !item.faces.is_empty() && item.faces.iter().all(FaceResult::eye_state_is_known);
-
-    let reason = match mode {
-        "portrait" if has_closed_eyes => "portrait_closed_eyes",
-        "portrait" if eye_state_reliable => "portrait_eyes_open",
-        "portrait" if item.faces.is_empty() => "portrait_face_missing",
-        "portrait" => "portrait_eye_review",
-        "group" if has_closed_eyes => "group_closed_eyes",
-        "group" if eye_state_reliable => "group_eyes_open",
-        "group" => "group_eye_review",
-        "environment" if has_closed_eyes => "environment_closed_eyes",
-        "environment" if !item.faces.is_empty() && exposure_balanced => {
-            "environment_people_exposure"
-        }
-        "environment" => "environment_balance_review",
-        "landscape" if exposure_balanced => "landscape_exposure_balanced",
-        "landscape" if sharp => "landscape_detail_strong",
-        "landscape" => "landscape_detail_review",
-        _ if sharp => "sharp_subject",
-        _ => "soft_focus",
-    };
-    reason.to_string()
 }
 
 fn folder_label(root: &Path, path: &Path) -> String {
@@ -375,9 +287,13 @@ fn stable_folder_id(folder: &str) -> String {
     blake3::hash(folder.as_bytes()).to_hex()[..8].to_string()
 }
 
-fn capture_combination_suspected(items: &[AnalysisCandidate], indices: &[usize]) -> bool {
+fn capture_review_reason(
+    items: &[AnalysisCandidate],
+    indices: &[usize],
+    sequence_requires_review: bool,
+) -> Option<&'static str> {
     if indices.len() < 2 {
-        return false;
+        return None;
     }
     let (min_exposure, max_exposure) = indices
         .iter()
@@ -397,7 +313,15 @@ fn capture_combination_suspected(items: &[AnalysisCandidate], indices: &[usize])
         .iter()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max);
-    max_exposure - min_exposure >= 0.25 || max_focus - min_focus >= 0.35
+    if max_exposure - min_exposure >= 0.25 {
+        Some("exposure_bracket_review")
+    } else if max_focus - min_focus >= 0.35 {
+        Some("focus_stack_review")
+    } else if sequence_requires_review {
+        Some("panorama_or_action_review")
+    } else {
+        None
+    }
 }
 
 fn eye_dto(eye: &super::types::EyeResult) -> EyeEvidenceDto {
@@ -440,7 +364,7 @@ mod tests {
 
     fn face() -> FaceResult {
         FaceResult {
-            bbox: [0.0; 4],
+            bbox: [10.0, 10.0, 30.0, 30.0],
             landmarks: [(0.0, 0.0); 5],
             detection_score: 1.0,
             left_eye: super::super::types::EyeResult {
@@ -477,7 +401,6 @@ mod tests {
             capture_time_millis,
             capture_time_from_exif: false,
             sequence_number: Some(sequence_number),
-            quality_score: 0.8,
             sharpness_metric: 1.0,
             center_focus_metric: 1.0,
             exposure_metric: 0.8,
@@ -500,7 +423,7 @@ mod tests {
             priority: 1,
             face_index: Some(0),
             similarity: Some(0.9),
-            status: "matched".to_string(),
+            status: "suspected".to_string(),
             auto_score_eligible: false,
             performance_rank: None,
         }];
@@ -518,10 +441,62 @@ mod tests {
     }
 
     #[test]
-    fn unselected_results_remain_pending_until_grouping_release_gate_passes() {
-        assert_eq!(color_for(9, 3, 0.69, "similar"), "yellow");
-        assert_eq!(color_for(9, 3, 0.90, "similar"), "yellow");
-        assert_eq!(color_for(0, 3, 0.90, "reviewOnly"), "yellow");
+    fn ai_results_do_not_assign_unfrozen_color_semantics() {
+        let results = organize_results(
+            Path::new("."),
+            "landscape",
+            vec![candidate("frame.jpg", 1_000, 1)],
+        );
+        assert!(results.iter().all(|result| result.color_label.is_none()));
+    }
+
+    #[test]
+    fn capture_combinations_stay_zero_star_until_a_user_reviews_them() {
+        let mut first = candidate("bracket-1.jpg", 1_000, 1);
+        first.exposure_metric = 0.2;
+        let mut second = candidate("bracket-2.jpg", 1_100, 2);
+        second.exposure_metric = 0.8;
+
+        let results = organize_results(Path::new("."), "landscape", vec![first, second]);
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.group_kind == "reviewOnly")
+        );
+        assert!(results.iter().all(|result| result.rating == 0));
+        assert!(results.iter().all(|result| result.color_label.is_none()));
+        assert!(results.iter().all(|result| result.requires_human_review));
+        assert!(
+            results.iter().all(|result| {
+                result.reason_codes == vec!["exposure_bracket_review".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn visually_different_adjacent_exif_frames_are_never_auto_rated() {
+        let mut first = candidate("sequence-1.jpg", 1_000, 1);
+        first.capture_time_from_exif = true;
+        let mut second = candidate("sequence-2.jpg", 1_500, 2);
+        second.capture_time_from_exif = true;
+        let mut different_hash = [0_u8; 32];
+        different_hash[..8].fill(255);
+        second.hash = ImageHash::from_bytes(&different_hash).unwrap();
+
+        let results = organize_results(Path::new("."), "landscape", vec![first, second]);
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.group_kind == "reviewOnly")
+        );
+        assert!(results.iter().all(|result| result.rating == 0));
+        assert!(results.iter().all(|result| {
+            result.reason_codes == vec!["panorama_or_action_review".to_string()]
+        }));
     }
 
     #[test]
@@ -555,49 +530,51 @@ mod tests {
     fn shooting_modes_produce_mode_specific_primary_reasons() {
         let item = candidate("frame.jpg", 1_000, 1);
 
-        assert_eq!(mode_reason(&item, "portrait"), "portrait_face_missing");
-        assert_eq!(mode_reason(&item, "group"), "group_eye_review");
         assert_eq!(
-            mode_reason(&item, "environment"),
-            "environment_balance_review"
+            evaluate_mode("portrait", &item).reason_code,
+            "portrait_subject_unreliable"
         );
         assert_eq!(
-            mode_reason(&item, "landscape"),
+            evaluate_mode("group", &item).reason_code,
+            "group_subject_unreliable"
+        );
+        assert_eq!(
+            evaluate_mode("environment", &item).reason_code,
+            "environment_landscape_fallback"
+        );
+        assert_eq!(
+            evaluate_mode("landscape", &item).reason_code,
             "landscape_exposure_balanced"
         );
     }
 
     #[test]
     fn absolute_rating_does_not_depend_on_group_rank_or_selection_count() {
-        assert_eq!(rating_for(0.80), 5);
-        assert_eq!(rating_for(0.70), 4);
-        assert_eq!(rating_for(0.57), 3);
-        assert_eq!(rating_for(0.45), 2);
-        assert_eq!(rating_for(0.20), 1);
+        assert_eq!(rating_for_mode("landscape", 0.80), 5);
+        assert_eq!(rating_for_mode("landscape", 0.70), 4);
+        assert_eq!(rating_for_mode("landscape", 0.57), 3);
+        assert_eq!(rating_for_mode("landscape", 0.45), 2);
+        assert_eq!(rating_for_mode("landscape", 0.20), 1);
     }
 
     #[test]
     fn single_photos_do_not_claim_a_group_comparison() {
-        let item = candidate("frame.jpg", 1_000, 1);
-
         assert_eq!(
-            reasons_for(&item, "landscape", 0, 1, 1, 0.9),
+            reasons_for("landscape_exposure_balanced", None, 0, 1, 1),
             vec!["landscape_exposure_balanced"]
         );
     }
 
     #[test]
     fn compared_photos_keep_mode_and_group_specific_reasons() {
-        let item = candidate("frame.jpg", 1_000, 1);
-
         assert_eq!(
-            reasons_for(&item, "landscape", 0, 3, 5, 0.9),
+            reasons_for("landscape_exposure_balanced", None, 0, 3, 5),
             vec!["landscape_exposure_balanced", "group_best"]
         );
     }
 
     #[test]
-    fn key_person_evidence_only_survives_real_multi_person_groups() {
+    fn key_person_evidence_survives_single_and_multi_person_groups() {
         let single_person_results = organize_results(
             Path::new("."),
             "group",
@@ -609,7 +586,7 @@ mod tests {
         assert!(
             single_person_results
                 .iter()
-                .all(|result| result.key_person_evidence.is_empty())
+                .all(|result| !result.key_person_evidence.is_empty())
         );
 
         let multi_person_results = organize_results(

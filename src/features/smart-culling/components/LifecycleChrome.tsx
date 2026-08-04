@@ -1,4 +1,5 @@
 import { Check, X } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { useSmartCullingText } from '../i18n';
 import type { LifecycleScreen } from '../types';
 
@@ -32,11 +33,58 @@ export function LifecycleChrome({ screen, children }: { screen: LifecycleScreen;
 }
 
 export function Modal({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
+  const tx = useSmartCullingText();
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const firstControl = dialogRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    (firstControl ?? dialogRef.current)?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
   return (
-    <div className="sc-modal-backdrop" role="dialog" aria-modal="true" onMouseDown={onClose}>
-      <section className="sc-modal" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sc-modal-backdrop" onMouseDown={onClose}>
+      <section
+        ref={dialogRef}
+        className="sc-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tx('title')}
+        tabIndex={-1}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && onClose) {
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const controls = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          );
+          if (controls.length === 0) {
+            event.preventDefault();
+            event.currentTarget.focus();
+            return;
+          }
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
         {onClose ? (
-          <button className="sc-modal-close" onClick={onClose} aria-label="Close">
+          <button className="sc-modal-close" onClick={onClose} aria-label={tx('close')}>
             <X size={18} />
           </button>
         ) : null}

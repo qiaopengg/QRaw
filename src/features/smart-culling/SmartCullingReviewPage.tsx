@@ -1,5 +1,5 @@
 import { AlertTriangle, ArchiveX, CheckCircle2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { LibraryFeatureViewSlotProps } from '../contracts';
 import { AnalysisScreen, UnsupportedScreen } from './components/AnalysisScreens';
 import { Modal } from './components/LifecycleChrome';
@@ -23,7 +23,24 @@ export default function SmartCullingReviewPage({
   const tx = useSmartCullingText();
   const errorText = useSmartCullingCommandErrorText();
   const { snapshot, screen, abandonOpen, busy, error, setState } = useSmartCullingStore();
-  const images = allImageList ?? imageList;
+  const sourceImages = allImageList ?? imageList;
+  const ignoredVirtualCopies = sourceImages.filter((image) => image.is_virtual_copy).length;
+  const images = useMemo(() => {
+    const skippedPaths = new Set(
+      snapshot?.failures
+        .filter((failure) => ['ambiguous_pair', 'excluded_format'].includes(failure.code))
+        .flatMap((failure) => failure.memberPaths) ?? [],
+    );
+    const displayByAsset = new Map<string, (typeof sourceImages)[number]>();
+    sourceImages
+      .filter((image) => !image.is_virtual_copy && !skippedPaths.has(image.path))
+      .forEach((image) => {
+        const key = image.group_id || image.path;
+        const current = displayByAsset.get(key);
+        if (!current || (current.is_raw && !image.is_raw)) displayByAsset.set(key, image);
+      });
+    return [...displayByAsset.values()];
+  }, [snapshot?.failures, sourceImages]);
   useEffect(() => {
     if (!snapshot && currentFolderPath && !busy && !error) {
       void runSmartCullingCommand({ action: 'inspect', rootPath: currentFolderPath }).catch(() => undefined);
@@ -62,6 +79,7 @@ export default function SmartCullingReviewPage({
       <SetupScreen
         snapshot={snapshot}
         images={images}
+        ignoredVirtualCopies={ignoredVirtualCopies}
         onExit={() => setState({ abandonOpen: true })}
         onRequestThumbnails={onRequestThumbnails}
       />

@@ -181,7 +181,7 @@ pub(crate) fn valid_mode(mode: &str) -> bool {
 }
 
 pub(crate) fn mode_supports_key_people(mode: &str) -> bool {
-    matches!(mode, "portrait" | "environment" | "group")
+    matches!(mode, "portrait" | "environment")
 }
 
 pub(crate) fn state_name(state: TaskState) -> &'static str {
@@ -257,10 +257,10 @@ mod tests {
 
     #[test]
     fn key_people_are_limited_to_people_focused_modes() {
-        for mode in ["portrait", "environment", "group"] {
+        for mode in ["portrait", "environment"] {
             assert!(mode_supports_key_people(mode));
         }
-        for mode in ["auto", "landscape"] {
+        for mode in ["auto", "landscape", "group"] {
             assert!(!mode_supports_key_people(mode));
         }
     }

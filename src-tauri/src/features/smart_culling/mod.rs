@@ -1,17 +1,22 @@
 mod analysis;
 mod api;
 mod coordinator;
+mod coordinator_session;
 mod coordinator_support;
 pub(crate) mod domain;
 mod face_identity;
 mod face_models;
 mod grouping;
 pub(crate) mod infrastructure;
+mod key_person_policy;
 mod key_person_scoring;
+mod mode_scoring;
 mod models;
 mod preflight;
+mod review_policy;
 mod runner;
 mod scoring;
+mod task_recovery;
 mod types;
 
 use tauri::AppHandle;

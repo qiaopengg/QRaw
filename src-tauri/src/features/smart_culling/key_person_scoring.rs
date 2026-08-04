@@ -1,26 +1,6 @@
 use std::collections::BTreeSet;
 
 use super::scoring::AnalysisCandidate;
-use super::types::MIN_RELIABLE_FACE_DETECTION_SCORE;
-
-const MIN_RELIABLE_FACES_IN_GROUP_FRAME: usize = 2;
-
-pub(crate) fn is_multi_person_comparable_group(
-    items: &[AnalysisCandidate],
-    group_indices: &[usize],
-) -> bool {
-    let reliable_face_counts = group_indices
-        .iter()
-        .filter_map(|index| items.get(*index))
-        .map(|item| {
-            item.faces
-                .iter()
-                .filter(|face| face.detection_score >= MIN_RELIABLE_FACE_DETECTION_SCORE)
-                .count()
-        })
-        .collect::<Vec<_>>();
-    has_multi_person_comparable_group(group_indices.len(), &reliable_face_counts)
-}
 
 pub(crate) fn rank_key_person_performance(
     items: &mut [AnalysisCandidate],
@@ -62,20 +42,6 @@ pub(crate) fn rank_key_person_performance(
     }
 }
 
-pub(crate) fn candidate_reason(item: &AnalysisCandidate) -> Option<String> {
-    item.key_person_evidence
-        .iter()
-        .filter(|evidence| evidence.face_index.is_some())
-        .min_by_key(|evidence| evidence.priority)
-        .map(|evidence| {
-            if evidence.status == "ambiguous" {
-                format!("key_person_{}_ambiguous", evidence.priority)
-            } else {
-                format!("key_person_{}_candidate_review", evidence.priority)
-            }
-        })
-}
-
 fn face_performance(face: &super::types::FaceResult) -> f64 {
     let eye_score = [&face.left_eye, &face.right_eye]
         .iter()
@@ -89,16 +55,6 @@ fn face_performance(face: &super::types::FaceResult) -> f64 {
     let sharpness = ((face.sharpness_metric + 1.0).log10() / 3.5).clamp(0.0, 1.0);
     (eye_score * 0.40 + sharpness * 0.35 + face.exposure_metric.clamp(0.0, 1.0) * 0.25)
         .clamp(0.0, 1.0)
-}
-
-fn has_multi_person_frame(reliable_face_counts: &[usize]) -> bool {
-    reliable_face_counts
-        .iter()
-        .any(|count| *count >= MIN_RELIABLE_FACES_IN_GROUP_FRAME)
-}
-
-fn has_multi_person_comparable_group(group_size: usize, reliable_face_counts: &[usize]) -> bool {
-    group_size >= 2 && has_multi_person_frame(reliable_face_counts)
 }
 
 #[cfg(test)]
@@ -136,12 +92,5 @@ mod tests {
         let mut closed = open.clone();
         closed.left_eye = eye("closed");
         assert!(face_performance(&open) > face_performance(&closed));
-    }
-
-    #[test]
-    fn key_person_requires_a_multi_photo_group_with_a_multi_person_frame() {
-        assert!(!has_multi_person_comparable_group(1, &[2]));
-        assert!(!has_multi_person_comparable_group(3, &[1, 1, 1]));
-        assert!(has_multi_person_comparable_group(3, &[1, 2, 1]));
     }
 }

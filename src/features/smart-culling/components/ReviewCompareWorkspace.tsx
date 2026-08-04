@@ -14,7 +14,6 @@ interface ReviewCompareWorkspaceProps {
   results: ReviewResult[];
   focusedResultId: string;
   onFocus: (resultId: string) => void;
-  onToggle: (result: ReviewResult) => void;
   onRating: (result: ReviewResult, rating: number) => void;
   onLabel: (result: ReviewResult, colorLabel: ReviewResult['colorLabel']) => void;
   onOpenInspector: () => void;
@@ -23,18 +22,15 @@ interface ReviewCompareWorkspaceProps {
 
 function DecisionControls({
   result,
-  onToggle,
   onRating,
   onLabel,
   readOnly,
 }: {
   result: ReviewResult;
-  onToggle: (result: ReviewResult) => void;
   onRating: (result: ReviewResult, rating: number) => void;
   onLabel: (result: ReviewResult, colorLabel: ReviewResult['colorLabel']) => void;
   readOnly: boolean;
 }) {
-  const tx = useSmartCullingText();
   return (
     <div className="sc-review-decision-controls">
       <Stars value={result.rating} onChange={readOnly ? undefined : (rating) => onRating(result, rating)} compact />
@@ -43,14 +39,6 @@ function DecisionControls({
         disabled={readOnly}
         onChange={(colorLabel) => onLabel(result, colorLabel)}
       />
-      <button
-        className={`sc-review-keep ${result.adopted ? 'is-checked' : ''}`}
-        disabled={readOnly}
-        onClick={() => onToggle(result)}
-        aria-pressed={result.adopted}
-      >
-        {result.adopted ? tx('adopted') : tx('notAdopted')}
-      </button>
     </div>
   );
 }
@@ -59,7 +47,6 @@ export function ReviewCompareWorkspace({
   results,
   focusedResultId,
   onFocus,
-  onToggle,
   onRating,
   onLabel,
   onOpenInspector,
@@ -197,13 +184,7 @@ export function ReviewCompareWorkspace({
                 <strong title={fileName(result.path)}>{fileName(result.path)}</strong>
                 <span>{result.source === 'ai' ? reason(result.reasonCodes) : tx('manualReason')}</span>
               </div>
-              <DecisionControls
-                result={result}
-                onToggle={onToggle}
-                onRating={onRating}
-                onLabel={onLabel}
-                readOnly={readOnly}
-              />
+              <DecisionControls result={result} onRating={onRating} onLabel={onLabel} readOnly={readOnly} />
             </footer>
           </article>
         ))}
@@ -213,7 +194,6 @@ export function ReviewCompareWorkspace({
         focusedResultId={focused.resultId}
         secondaryResultId={secondary.resultId}
         onSelect={selectFilmstripResult}
-        onToggle={onToggle}
         onRating={onRating}
         readOnly={readOnly}
       />

@@ -2,6 +2,30 @@
   min-width: 0;
 }
 
+.sc-partial-review-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgb(245 158 11 / 30%);
+  color: #f5c46b;
+  background: rgb(120 53 15 / 20%);
+  font-size: 12px;
+}
+
+.sc-manual-sync-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgb(96 165 250 / 30%);
+  color: #b8d8ff;
+  background: rgb(30 58 138 / 20%);
+  font-size: 12px;
+}
+
 .sc-review-page .sc-review-layout {
   position: relative;
   grid-template-columns: 218px minmax(0, 1fr);
@@ -24,12 +48,19 @@
   bottom: 0;
   width: min(310px, 72cqw);
   transform: translateX(105%);
+  visibility: hidden;
+  pointer-events: none;
   box-shadow: 0 14px 45px rgba(0, 0, 0, 0.55);
-  transition: transform 160ms ease;
+  transition:
+    transform 160ms ease,
+    visibility 0s linear 160ms;
 }
 
 .sc-review-page .sc-inspector.is-open {
   transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
 }
 
 .sc-review-page .sc-inspector .sc-review-drawer-close {
@@ -283,26 +314,6 @@
   padding: 0 5px;
 }
 
-.sc-review-keep {
-  min-height: 25px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 7px;
-  border: 1px solid #444 !important;
-  border-radius: 3px;
-  color: #858585 !important;
-  font-size: 7px !important;
-  white-space: nowrap;
-}
-
-.sc-review-keep.is-checked {
-  border-color: #609c54 !important;
-  color: #8dca7d !important;
-  background: #20331f !important;
-}
-
 .sc-review-filmstrip {
   min-width: 0;
   min-height: 132px;
@@ -424,12 +435,6 @@
 .sc-review-filmstrip-meta > .sc-color-dot {
   width: 6px;
   height: 6px;
-}
-
-.sc-review-filmstrip-meta .sc-review-keep {
-  min-height: 20px;
-  padding: 0 5px;
-  font-size: 6px !important;
 }
 
 .sc-review-empty {

@@ -16,6 +16,7 @@ import { type SmartCullingTextKey, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { LifecycleChrome, Modal, fileName, formatEta } from './LifecycleChrome';
+import { SmartCullingImage } from './SmartCullingImage';
 
 const PROGRESS_STAGE_KEYS: Record<string, SmartCullingTextKey> = {
   indexing: 'indexingStageDetail',
@@ -32,7 +33,11 @@ function PhotoGrid({ images }: { images: ImageFile[] }) {
       {images.slice(0, 18).map((image) => (
         <article key={image.path}>
           {thumbnails[image.path] ? (
-            <img src={thumbnails[image.path]} alt={fileName(image.path)} />
+            <SmartCullingImage
+              primaryUrl={thumbnails[image.path]}
+              alt={fileName(image.path)}
+              fallback={<div>{fileName(image.path)}</div>}
+            />
           ) : (
             <div>{fileName(image.path)}</div>
           )}

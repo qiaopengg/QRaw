@@ -56,8 +56,20 @@ pub(crate) fn run_analysis(
             .collect::<Vec<_>>();
         match render_current_state(&path, &state, app_handle) {
             Ok(image) => {
-                match analyze_image_quality(&image, true, include_identity, Some(models)) {
+                if cancellation.load(Ordering::Acquire) {
+                    break;
+                }
+                match analyze_image_quality(
+                    &image,
+                    true,
+                    include_identity,
+                    Some(models),
+                    Some(cancellation),
+                ) {
                     Ok(quality) => {
+                        if cancellation.load(Ordering::Acquire) {
+                            break;
+                        }
                         let hash = hasher.hash_image(&image.thumbnail(720, 720));
                         let result_id = Uuid::new_v4().to_string();
                         analyzed.push(AnalysisCandidate {
@@ -68,7 +80,6 @@ pub(crate) fn run_analysis(
                             capture_time_millis: asset.capture_time_millis,
                             capture_time_from_exif: asset.capture_time_from_exif,
                             sequence_number: asset.sequence_number,
-                            quality_score: quality.quality_score,
                             sharpness_metric: quality.sharpness_metric,
                             center_focus_metric: quality.center_focus_metric,
                             exposure_metric: quality.exposure_metric,
@@ -79,6 +90,7 @@ pub(crate) fn run_analysis(
                         });
                         asset_map.insert(result_id, asset);
                     }
+                    Err(_) if cancellation.load(Ordering::Acquire) => break,
                     Err(error) => failures.push(FailureItem {
                         path,
                         member_paths,
@@ -102,16 +114,20 @@ pub(crate) fn run_analysis(
         on_progress(completed, total, "analyzing");
     }
 
-    if include_identity {
+    if include_identity && !cancellation.load(Ordering::Acquire) {
         let (references, unavailable_priorities) = build_key_references(
             &state,
             app_handle,
             key_people,
             &analyzed,
             models,
+            cancellation,
             &mut failures,
         );
         for candidate in &mut analyzed {
+            if cancellation.load(Ordering::Acquire) {
+                break;
+            }
             candidate.key_person_evidence = match_key_people(&references, &mut candidate.faces);
             candidate
                 .key_person_evidence
@@ -122,7 +138,7 @@ pub(crate) fn run_analysis(
                             priority: *priority,
                             face_index: None,
                             similarity: None,
-                            status: "reference_unavailable".to_string(),
+                            status: "unknown".to_string(),
                             auto_score_eligible: false,
                             performance_rank: None,
                         }),
@@ -133,7 +149,9 @@ pub(crate) fn run_analysis(
         }
     }
 
-    on_progress(completed, total, "organizing");
+    if !cancellation.load(Ordering::Acquire) {
+        on_progress(completed, total, "organizing");
+    }
     let results = organize_results(root_path, mode, analyzed);
     RunOutcome {
         results,
@@ -141,7 +159,7 @@ pub(crate) fn run_analysis(
         failures,
         completed,
         total,
-        partial: completed < total,
+        partial: completed < total || cancellation.load(Ordering::Acquire),
     }
 }
 
@@ -154,7 +172,7 @@ pub(crate) fn detect_people(
     let image =
         render_current_state(path, &state, app_handle).map_err(|error| error.to_string())?;
     let (width, height) = image.dimensions();
-    let analyzed = analyze_image_quality(&image, true, false, Some(models))
+    let analyzed = analyze_image_quality(&image, true, false, Some(models), None)
         .map_err(|error| error.to_string())?;
     Ok(analyzed
         .faces
@@ -195,6 +213,7 @@ fn build_key_references(
     selections: &[KeyPersonSelection],
     analyzed: &[AnalysisCandidate],
     models: &SmartCullingFaceModels,
+    cancellation: &AtomicBool,
     failures: &mut Vec<FailureItem>,
 ) -> (Vec<KeyPersonReference>, Vec<usize>) {
     let mut references = Vec::new();
@@ -202,6 +221,9 @@ fn build_key_references(
     let mut rendered_cache = HashMap::new();
 
     for selection in selections {
+        if cancellation.load(Ordering::Acquire) {
+            break;
+        }
         let cached_face = analyzed
             .iter()
             .find(|candidate| candidate.path.to_string_lossy() == selection.sample_path)
@@ -221,8 +243,14 @@ fn build_key_references(
                     render_current_state(&selection.sample_path, state, app_handle)
                         .map_err(|error| error.to_string())
                         .and_then(|image| {
-                            analyze_image_quality(&image, true, true, Some(models))
-                                .map_err(|error| error.to_string())
+                            analyze_image_quality(
+                                &image,
+                                true,
+                                true,
+                                Some(models),
+                                Some(cancellation),
+                            )
+                            .map_err(|error| error.to_string())
                         });
                 rendered_cache.insert(selection.sample_path.clone(), analyzed_reference);
             }

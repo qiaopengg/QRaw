@@ -23,6 +23,13 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.sc-review-drawer-backdrop {
+  position: absolute;
+  z-index: 31;
+  inset: 0;
+  background: rgb(0 0 0 / 48%);
+}
+
 .sc-review-page .sc-review-sidebar {
   position: absolute;
   z-index: 32;
@@ -32,12 +39,19 @@
   width: min(310px, 75cqw);
   overflow: auto;
   transform: translateX(-105%);
+  visibility: hidden;
+  pointer-events: none;
   box-shadow: 14px 0 46px rgba(0, 0, 0, 0.48);
-  transition: transform 160ms ease;
+  transition:
+    transform 160ms ease,
+    visibility 0s linear 160ms;
 }
 
 .sc-review-page .sc-review-sidebar.is-open {
   transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
 }
 
 .sc-review-page .sc-review-panel-button,

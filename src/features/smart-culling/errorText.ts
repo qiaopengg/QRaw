@@ -5,7 +5,7 @@ import type { FailureItem, SmartCullingCommandError } from './types';
 const zhFailures: Record<string, string> = {
   manual_protected: '已有人工处理结果，已保护并跳过',
   excluded_format: '不支持 GIF、TIFF/TIF，已跳过',
-  ambiguous_pair: '同名 RAW/JPEG 组合不明确，未自动配对',
+  ambiguous_pair: 'RAW/JPEG 拍摄时间无法确认一致或存在多个同名成员；请保留一组原始同拍文件，或重命名后重试',
   scan_failed: '读取图片或 .rrdata 失败',
   render_failed: '生成当前编辑状态预览失败',
   analysis_failed: '本地模型分析失败，已跳过',
@@ -19,7 +19,8 @@ const zhFailures: Record<string, string> = {
 const enFailures: Record<string, string> = {
   manual_protected: 'Protected manual result; skipped',
   excluded_format: 'GIF and TIFF/TIF are unsupported; skipped',
-  ambiguous_pair: 'Matching RAW/JPEG members are ambiguous; pairing was skipped',
+  ambiguous_pair:
+    'RAW/JPEG capture identity could not be confirmed or multiple same-name members exist; keep one original pair or rename the files and retry',
   scan_failed: 'Could not read the photo or its .rrdata',
   render_failed: 'Could not render the current edited state',
   analysis_failed: 'Local model analysis failed; skipped',
@@ -27,7 +28,7 @@ const enFailures: Record<string, string> = {
   baseline_conflict: 'The .rrdata changed during this task; review it before retrying',
   invalid_result: 'The culling result failed validation and was not written',
   io_error: 'Could not read or write the .rrdata',
-  nothing_to_write: 'There are no adopted results to write',
+  nothing_to_write: 'There are no reviewed results to write',
 };
 
 const zhCommands: Record<string, string> = {

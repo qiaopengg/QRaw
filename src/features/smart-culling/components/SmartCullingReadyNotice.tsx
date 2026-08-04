@@ -2,6 +2,7 @@ import { CheckCircle2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
+import { fileName } from './LifecycleChrome';
 
 export function SmartCullingReadyNotice({
   snapshot,
@@ -37,6 +38,7 @@ export function SmartCullingReadyNotice({
       <div>
         <h2>{snapshot.progress.partial ? tx('partialReadyForReview') : tx('readyForReview')}</h2>
         <p>
+          {snapshot.rootPath ? `${fileName(snapshot.rootPath)} · ` : ''}
           {tx('completed')} {completed} / {total} · {tx('awaitingReview')}
         </p>
         <small>{tx('unconfirmedNotWritten')}</small>

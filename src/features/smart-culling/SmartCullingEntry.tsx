@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import { toast } from 'react-toastify';
+import { useLibraryStore } from '../../store/useLibraryStore';
 import { useUIStore } from '../../store/useUIStore';
 import type { LibraryHeaderActionSlotProps } from '../contracts';
 import { SMART_CULLING_VIEW } from './constants';
@@ -21,6 +22,7 @@ export default function SmartCullingEntry({
   const tx = useSmartCullingText();
   const { snapshot, setState: setSmartCullingState } = useSmartCullingStore();
   const setUI = useUIStore((state) => state.setUI);
+  const imageRatings = useLibraryStore((state) => state.imageRatings);
   const reconciled = useRef('');
   const running =
     snapshot && ['indexing', 'rendering', 'analyzing', 'organizing', 'cancelling'].includes(snapshot.state);
@@ -31,22 +33,48 @@ export default function SmartCullingEntry({
   }, []);
   useEffect(() => {
     const stale = (allImageList ?? imageList)
-      .filter((image) => !image.is_virtual_copy && needsManualOwnershipReconciliation(image))
+      .filter(
+        (image) =>
+          !image.is_virtual_copy && needsManualOwnershipReconciliation(image, imageRatings[image.path] ?? image.rating),
+      )
       .map((image) => image.path);
     const key = stale.join('\n');
     if (!key) {
       reconciled.current = '';
+      if (useSmartCullingStore.getState().manualSyncPending) {
+        setSmartCullingState({ manualSyncPending: false });
+      }
       return;
     }
     if (key === reconciled.current) return;
-    reconciled.current = key;
-    void runSmartCullingCommand({ action: 'reconcileManual', paths: stale }, true)
-      .then(() => onLibraryRefresh?.())
-      .catch(() => {
+    setSmartCullingState({ manualSyncPending: true });
+    let cancelled = false;
+    const reconcile = async () => {
+      for (const delay of [0, 100, 300]) {
+        if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+        if (cancelled) return;
+        try {
+          await runSmartCullingCommand({ action: 'reconcileManual', paths: stale }, true);
+          if (cancelled) return;
+          reconciled.current = key;
+          setSmartCullingState({ manualSyncPending: false });
+          await onLibraryRefresh?.();
+          return;
+        } catch {
+          // The host rating write and provenance reconciliation are separate
+          // commands. Retry only while waiting for the visible rating to land.
+        }
+      }
+      if (!cancelled) {
         toast.error(tx('manualSyncFailed'));
-        return onLibraryRefresh?.();
-      });
-  }, [allImageList, imageList, onLibraryRefresh, tx]);
+        await onLibraryRefresh?.();
+      }
+    };
+    void reconcile();
+    return () => {
+      cancelled = true;
+    };
+  }, [allImageList, imageList, imageRatings, onLibraryRefresh, setSmartCullingState, tx]);
 
   const open = async () => {
     if (pending) {

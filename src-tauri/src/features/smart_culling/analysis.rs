@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
@@ -5,10 +7,6 @@ use super::face_identity::run_sface_embedding;
 use super::face_models::{crop_eye_region, run_ocec_classification, run_yunet_detection};
 use super::models::SmartCullingFaceModels;
 use super::types::{EyeResult, FaceResult};
-
-const WEIGHT_SHARPNESS: f64 = 0.40;
-const WEIGHT_CENTER_FOCUS: f64 = 0.35;
-const WEIGHT_EXPOSURE: f64 = 0.25;
 
 /// Dimension used for sharpness/exposure analysis. Kept close to the
 /// original full-resolution image (instead of the old 720px downscale) so
@@ -79,7 +77,6 @@ pub struct AnalyzedImage {
     pub sharpness_metric: f64,
     pub center_focus_metric: f64,
     pub exposure_metric: f64,
-    pub quality_score: f64,
     pub width: u32,
     pub height: u32,
     pub faces: Vec<FaceResult>,
@@ -90,7 +87,9 @@ pub fn analyze_image_quality(
     detect_faces: bool,
     include_identity: bool,
     face_models: Option<&SmartCullingFaceModels>,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<AnalyzedImage> {
+    ensure_not_cancelled(cancellation)?;
     let (width, height) = img.dimensions();
     let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
     let gray_thumbnail = thumbnail.to_luma8();
@@ -109,18 +108,13 @@ pub fn analyze_image_quality(
     .to_image();
     let center_focus_metric = calculate_laplacian_variance(&center_crop);
 
-    let normalized_sharpness = ((sharpness_metric + 1.0).log10() / 3.5).min(1.0);
-    let normalized_center_focus = ((center_focus_metric + 1.0).log10() / 3.5).min(1.0);
-
-    let quality_score = (normalized_sharpness * WEIGHT_SHARPNESS)
-        + (normalized_center_focus * WEIGHT_CENTER_FOCUS)
-        + (exposure_metric * WEIGHT_EXPOSURE);
-
+    ensure_not_cancelled(cancellation)?;
     let faces = if detect_faces {
         detect_faces_in_image(
             img,
             include_identity,
             face_models.ok_or_else(|| anyhow!("face models are required for this analysis"))?,
+            cancellation,
         )?
     } else {
         Vec::new()
@@ -130,7 +124,6 @@ pub fn analyze_image_quality(
         sharpness_metric,
         center_focus_metric,
         exposure_metric,
-        quality_score,
         width,
         height,
         faces,
@@ -141,18 +134,23 @@ fn detect_faces_in_image(
     img: &DynamicImage,
     include_identity: bool,
     models: &SmartCullingFaceModels,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<Vec<FaceResult>> {
+    ensure_not_cancelled(cancellation)?;
     let detections = run_yunet_detection(img, &models.yunet)?;
+    ensure_not_cancelled(cancellation)?;
 
     detections
         .into_iter()
         .map(|face| -> Result<FaceResult> {
+            ensure_not_cancelled(cancellation)?;
             let right_eye = face.landmarks[0];
             let left_eye = face.landmarks[1];
             let inter_ocular_distance =
                 ((left_eye.0 - right_eye.0).powi(2) + (left_eye.1 - right_eye.1).powi(2)).sqrt();
 
             let right_eye_result = analyze_eye(img, right_eye, inter_ocular_distance, models)?;
+            ensure_not_cancelled(cancellation)?;
             let left_eye_result = analyze_eye(img, left_eye, inter_ocular_distance, models)?;
             let face_crop = crop_pixel_bbox(img, face.bbox);
             let (sharpness_metric, exposure_metric, local_confidence) = face_crop
@@ -167,9 +165,14 @@ fn detect_faces_in_image(
                     )
                 })
                 .unwrap_or((0.0, 0.0, 0.0));
-            let identity_embedding = include_identity
-                .then(|| run_sface_embedding(img, &face.landmarks, &models.sface).ok())
-                .flatten();
+            ensure_not_cancelled(cancellation)?;
+            let identity_embedding = if include_identity {
+                let embedding = run_sface_embedding(img, &face.landmarks, &models.sface).ok();
+                ensure_not_cancelled(cancellation)?;
+                embedding
+            } else {
+                None
+            };
 
             Ok(FaceResult {
                 bbox: face.bbox,
@@ -188,6 +191,14 @@ fn detect_faces_in_image(
             })
         })
         .collect()
+}
+
+fn ensure_not_cancelled(cancellation: Option<&AtomicBool>) -> Result<()> {
+    if cancellation.is_some_and(|signal| signal.load(Ordering::Acquire)) {
+        Err(anyhow!("smart-culling analysis was cancelled"))
+    } else {
+        Ok(())
+    }
 }
 
 fn analyze_eye(
@@ -266,5 +277,15 @@ mod tests {
         });
 
         assert!(calculate_laplacian_variance(&image) > 100_000.0);
+    }
+
+    #[test]
+    fn analysis_stops_before_work_when_cancelled() {
+        let image = DynamicImage::new_rgb8(8, 8);
+        let cancelled = AtomicBool::new(true);
+
+        let result = analyze_image_quality(&image, false, false, None, Some(&cancelled));
+
+        assert!(result.is_err());
     }
 }

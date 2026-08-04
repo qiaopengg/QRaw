@@ -12,6 +12,7 @@ import './smart-culling-gallery.css';
 import './styles/setup-decision-queue.css';
 import './styles/analysis-decision-queue.css';
 import './styles/review-decision-queue.css';
+import './styles/accessibility.css';
 
 export function useSmartCullingFeature(): AppFeatureRegistration {
   return {

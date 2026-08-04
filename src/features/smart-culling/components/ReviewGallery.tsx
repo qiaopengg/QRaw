@@ -9,9 +9,7 @@ interface GalleryRowProps {
   rows: GalleryRow[];
   focusedResultId: string | null;
   onSelect: (result: ReviewResult) => void;
-  onToggle: (result: ReviewResult) => void;
   onOpenGroup: (result: ReviewResult) => void;
-  readOnly: boolean;
 }
 
 function GalleryRowView({
@@ -20,9 +18,7 @@ function GalleryRowView({
   rows,
   focusedResultId,
   onSelect,
-  onToggle,
   onOpenGroup,
-  readOnly,
 }: GalleryRowProps & { index: number; style: CSSProperties }) {
   const row = rows[index];
   return (
@@ -35,9 +31,7 @@ function GalleryRowView({
           imageHeight={row.imageHeight}
           selected={focusedResultId === result.resultId}
           onSelect={() => onSelect(result)}
-          onToggle={() => onToggle(result)}
           onOpenGroup={result.groupKind === 'single' ? undefined : () => onOpenGroup(result)}
-          readOnly={readOnly}
         />
       ))}
     </div>
@@ -48,18 +42,14 @@ export function ReviewGallery({
   results,
   focusedResultId,
   onSelect,
-  onToggle,
   onOpenGroup,
   onRequestThumbnails,
-  readOnly,
 }: {
   results: ReviewResult[];
   focusedResultId: string | null;
   onSelect: (result: ReviewResult) => void;
-  onToggle: (result: ReviewResult) => void;
   onOpenGroup: (result: ReviewResult) => void;
   onRequestThumbnails?: (paths: string[]) => void;
-  readOnly: boolean;
 }) {
   const [width, setWidth] = useState(1000);
   const rows = useMemo(() => buildReviewGalleryRows(results, width - 28), [results, width]);
@@ -71,7 +61,7 @@ export function ReviewGallery({
       rowCount={rows.length}
       rowHeight={rowHeight}
       rowComponent={GalleryRowView}
-      rowProps={{ rows, focusedResultId, onSelect, onToggle, onOpenGroup, readOnly }}
+      rowProps={{ rows, focusedResultId, onSelect, onOpenGroup }}
       overscanCount={2}
       onResize={({ width: nextWidth }) => setWidth(nextWidth)}
       onRowsRendered={(_, overscan) => {

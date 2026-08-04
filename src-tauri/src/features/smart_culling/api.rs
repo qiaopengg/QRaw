@@ -82,14 +82,8 @@ pub struct KeyPersonSelection {
 #[serde(rename_all = "camelCase")]
 pub struct ReviewChange {
     pub result_id: String,
-    pub adopted: bool,
     pub rating: u8,
     pub color_label: Option<String>,
-    pub mode: String,
-    #[serde(default)]
-    pub metadata_edited: bool,
-    #[serde(default)]
-    pub mode_changed: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -107,6 +101,7 @@ pub struct SmartCullingSnapshot {
     pub detected_image_path: Option<String>,
     pub detected_faces: Vec<DetectedFaceDto>,
     pub write_summary: Option<WriteSummary>,
+    pub lock_change_summary: Option<LockChangeSummary>,
 }
 
 impl Default for SmartCullingSnapshot {
@@ -124,8 +119,19 @@ impl Default for SmartCullingSnapshot {
             detected_image_path: None,
             detected_faces: Vec::new(),
             write_summary: None,
+            lock_change_summary: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockChangeSummary {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub unchanged: usize,
+    pub failed: usize,
+    pub failures: Vec<FailureItem>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -180,8 +186,6 @@ pub struct ReviewResult {
     pub mode: String,
     pub reason_codes: Vec<String>,
     pub confidence: f32,
-    pub ai_initially_adopted: bool,
-    pub adopted: bool,
     pub protected: bool,
     pub requires_human_review: bool,
     pub width: u32,

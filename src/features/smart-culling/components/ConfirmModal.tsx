@@ -1,15 +1,18 @@
 import { AlertCircle, Check, FileCheck2, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { useSmartCullingText } from '../i18n';
+import { reviewResultIsWritable, reviewResultNeedsAttention } from '../reviewPolicy';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { Modal } from './LifecycleChrome';
 
 export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
   const tx = useSmartCullingText();
-  const { busy, setState } = useSmartCullingStore();
-  const adopted = snapshot.results.filter((result) => result.adopted);
-  const manual = adopted.filter((result) => result.source === 'manual').length;
+  const { busy, manualSyncPending, setState } = useSmartCullingStore();
+  const writable = snapshot.results.filter(reviewResultIsWritable);
+  const manual = writable.filter((result) => result.source === 'manual').length;
+  const needsAttention = snapshot.results.filter(reviewResultNeedsAttention).length;
   const confirm = async () => {
+    if (manualSyncPending) return;
     try {
       const next = await runSmartCullingCommand({ action: 'confirm' });
       setState({ confirmOpen: false, screen: next.state === 'idle' ? 'setup' : 'write' });
@@ -30,7 +33,7 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
       </div>
       <div className="sc-confirm-metrics">
         <article>
-          <strong>{adopted.length}</strong>
+          <strong>{writable.length}</strong>
           <span>{tx('applyCount')}</span>
         </article>
         <article>
@@ -38,14 +41,12 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
           <span>{tx('manualCount')}</span>
         </article>
         <article>
-          <strong>{snapshot.inventory.protectedAssets}</strong>
-          <span>{tx('existingProtected')}</span>
+          <strong>{needsAttention}</strong>
+          <span>{tx('humanReviewNotWritten')}</span>
         </article>
         <article>
-          <strong>
-            {snapshot.failures.filter((failure) => ['render', 'analysis'].includes(failure.stage)).length}
-          </strong>
-          <span>{tx('analysisFailures')}</span>
+          <strong>{snapshot.inventory.protectedAssets}</strong>
+          <span>{tx('existingProtected')}</span>
         </article>
       </div>
       <div className="sc-confirm-recheck">
@@ -86,8 +87,12 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
         <button className="sc-secondary" onClick={() => setState({ confirmOpen: false })}>
           {tx('back')}
         </button>
-        <button className="sc-primary" disabled={busy} onClick={() => void confirm()}>
-          {tx('confirmAndWrite')} {adopted.length}
+        <button
+          className="sc-primary"
+          disabled={busy || manualSyncPending || writable.length === 0}
+          onClick={() => void confirm()}
+        >
+          {tx('confirmAndWrite')} {writable.length}
         </button>
       </footer>
     </Modal>

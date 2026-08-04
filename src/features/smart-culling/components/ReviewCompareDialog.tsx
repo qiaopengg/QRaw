@@ -9,7 +9,6 @@ export function ReviewCompareDialog({
   second,
   onClose,
   onFocus,
-  onToggle,
   onRating,
   onLabel,
   onOpenInspector,
@@ -19,7 +18,6 @@ export function ReviewCompareDialog({
   second: ReviewResult;
   onClose: () => void;
   onFocus: (resultId: string) => void;
-  onToggle: (result: ReviewResult) => void;
   onRating: (result: ReviewResult, rating: number) => void;
   onLabel: (result: ReviewResult, colorLabel: ReviewResult['colorLabel']) => void;
   onOpenInspector: () => void;
@@ -37,7 +35,6 @@ export function ReviewCompareDialog({
           setPrimaryResultId(resultId);
           onFocus(resultId);
         }}
-        onToggle={onToggle}
         onRating={onRating}
         onLabel={onLabel}
         onOpenInspector={onOpenInspector}

@@ -1,4 +1,4 @@
-import { Loader2, Scan, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, Loader2, RotateCcw, Scan, ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSmartCullingText } from '../i18n';
 import type { DetectedFace } from '../types';
@@ -21,6 +21,7 @@ interface PhotoEvidenceViewportProps {
   alt: string;
   faces?: DetectedFace[];
   selectedFaceKeys?: ReadonlySet<string>;
+  faceLabels?: ReadonlyMap<string, string>;
   onFaceClick?: (face: DetectedFace) => void;
   onPrevious?: () => void;
   onNext?: () => void;
@@ -39,6 +40,7 @@ export function PhotoEvidenceViewport({
   alt,
   faces = [],
   selectedFaceKeys,
+  faceLabels,
   onFaceClick,
   onPrevious,
   onNext,
@@ -47,7 +49,8 @@ export function PhotoEvidenceViewport({
   compact = false,
 }: PhotoEvidenceViewportProps) {
   const tx = useSmartCullingText();
-  const { loadedUrl, loading } = useRenderedPreview(path, fallbackUrl);
+  const { loadedUrl, loading, error, retry } = useRenderedPreview(path, fallbackUrl);
+  const [failedSources, setFailedSources] = useState<ReadonlySet<string>>(() => new Set());
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [internalView, setInternalView] = useState<EvidenceViewState>(FIT_VIEW);
@@ -79,10 +82,6 @@ export function PhotoEvidenceViewport({
   );
 
   useEffect(() => {
-    setNaturalSize({ width: 0, height: 0 });
-  }, [path]);
-
-  useEffect(() => {
     if (!isControlled) setInternalView(FIT_VIEW);
   }, [isControlled, path]);
 
@@ -109,7 +108,11 @@ export function PhotoEvidenceViewport({
     x: (containerSize.width - renderedSize.width) / 2 + view.pan.x * renderedSize.width,
     y: (containerSize.height - renderedSize.height) / 2 + view.pan.y * renderedSize.height,
   };
-  const sourceUrl = loadedUrl ?? fallbackUrl;
+  const sourceUrl = [loadedUrl, fallbackUrl].find((source) => source && !failedSources.has(source));
+
+  useEffect(() => {
+    setNaturalSize({ width: 0, height: 0 });
+  }, [path, sourceUrl]);
 
   const zoomAt = useCallback(
     (nextZoom: number, point = { x: containerSize.width / 2, y: containerSize.height / 2 }) => {
@@ -234,13 +237,19 @@ export function PhotoEvidenceViewport({
               height: event.currentTarget.naturalHeight,
             })
           }
+          onError={() => {
+            const failedUrl = sourceUrl;
+            if (failedUrl) setFailedSources((current) => new Set(current).add(failedUrl));
+            setNaturalSize({ width: 0, height: 0 });
+          }}
         />
       ) : (
         <div className="sc-evidence-empty">{alt}</div>
       )}
-      {loadedUrl && naturalSize.width
+      {sourceUrl && naturalSize.width
         ? faces.map((face, index) => {
             const key = faceSelectionKey(path, face.bbox);
+            const faceLabel = faceLabels?.get(key) ?? String(index + 1);
             const faceStyle = {
               left: origin.x + face.bbox[0] * renderedSize.width,
               top: origin.y + face.bbox[1] * renderedSize.height,
@@ -255,7 +264,7 @@ export function PhotoEvidenceViewport({
                   style={faceStyle}
                   aria-hidden="true"
                 >
-                  <span>{index + 1}</span>
+                  <span>{faceLabel}</span>
                 </div>
               );
             }
@@ -266,9 +275,9 @@ export function PhotoEvidenceViewport({
                 style={faceStyle}
                 onDoubleClick={(event) => event.stopPropagation()}
                 onClick={() => onFaceClick(face)}
-                aria-label={`${index + 1}`}
+                aria-label={faceLabels?.has(key) ? `${tx('selectPerson')} ${faceLabel}` : `${index + 1}`}
               >
-                <span>{index + 1}</span>
+                <span>{faceLabel}</span>
               </button>
             );
           })
@@ -277,6 +286,23 @@ export function PhotoEvidenceViewport({
         <span className="sc-evidence-loading">
           <Loader2 size={15} className="animate-spin" />
         </span>
+      ) : null}
+      {error || failedSources.size > 0 ? (
+        <div className="sc-evidence-error" role="alert">
+          <AlertTriangle size={15} />
+          <span>
+            {fallbackUrl && sourceUrl === fallbackUrl ? tx('previewUsingThumbnail') : tx('previewUnavailable')}
+          </span>
+          <button
+            onClick={() => {
+              setFailedSources(new Set());
+              retry();
+            }}
+          >
+            <RotateCcw size={13} />
+            {tx('retryPreview')}
+          </button>
+        </div>
       ) : null}
       <div className="sc-evidence-toolbar">
         <button title={tx('zoomOut')} aria-label={tx('zoomOut')} onClick={() => zoomAt(viewRef.current.zoom / 1.25)}>

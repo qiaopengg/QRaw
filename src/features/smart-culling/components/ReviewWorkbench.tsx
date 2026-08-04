@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronLeft,
   FileWarning,
@@ -12,8 +11,10 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'react-toastify';
 import { useSmartCullingFailureText } from '../errorText';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
+import { reviewResultIsWritable, reviewResultNeedsAttention } from '../reviewPolicy';
 import type { ReviewChange, ReviewResult, SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { ConfirmModal } from './ConfirmModal';
@@ -23,8 +24,9 @@ import { ReviewGallery } from './ReviewGallery';
 import { ReviewInspector } from './ReviewInspector';
 import { ReviewQueueNavigation } from './ReviewQueueNavigation';
 import { SimilarGroupReview } from './SimilarGroupReview';
+import { useDrawerFocus } from './useDrawerFocus';
 
-type ReviewFilter = 'all' | 'pending' | 'adopted' | 'manual';
+type ReviewFilter = 'all' | 'pending' | 'manual';
 type CompareSlots = { groupId: string | null; a: string | null; b: string | null };
 type PendingMetadataEdit = {
   result: ReviewResult;
@@ -42,21 +44,22 @@ export function ReviewWorkbench({
   const failureText = useSmartCullingFailureText();
   const modeCopy = useSmartCullingModes();
   const readOnly = snapshot.state === 'completed';
-  const { focusedResultId, confirmOpen, setState } = useSmartCullingStore();
+  const { focusedResultId, confirmOpen, manualSyncPending, setState } = useSmartCullingStore();
   const [folder, setFolder] = useState('all');
   const [filter, setFilter] = useState<ReviewFilter>(() =>
-    snapshot.results.some((result) => result.colorLabel === 'yellow') ? 'pending' : 'all',
+    snapshot.results.some(reviewResultNeedsAttention) ? 'pending' : 'all',
   );
   const [query, setQuery] = useState('');
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [showFailures, setShowFailures] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  const [pendingGroupMode, setPendingGroupMode] = useState<ReviewResult['mode'] | null>(null);
   const [compareSlots, setCompareSlots] = useState<CompareSlots>({ groupId: null, a: null, b: null });
   const [compareOpen, setCompareOpen] = useState(false);
   const [pendingMetadataEdit, setPendingMetadataEdit] = useState<PendingMetadataEdit | null>(null);
   const [manualEditAcknowledged, setManualEditAcknowledged] = useState(false);
+  const navigationRef = useDrawerFocus(navigationOpen, () => setNavigationOpen(false));
+  const inspectorRef = useDrawerFocus(inspectorOpen, () => setInspectorOpen(false));
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const folders = useMemo(
     () => Array.from(new Set(snapshot.results.map((result) => result.folder))),
@@ -72,9 +75,8 @@ export function ReviewWorkbench({
           result.path.toLocaleLowerCase().includes(normalizedQuery);
         const matchesFilter =
           filter === 'all' ||
-          (filter === 'adopted' && result.adopted) ||
           (filter === 'manual' && result.source === 'manual') ||
-          (filter === 'pending' && result.colorLabel === 'yellow');
+          (filter === 'pending' && reviewResultNeedsAttention(result));
         return matchesFolder && matchesQuery && matchesFilter;
       }),
     [filter, folder, normalizedQuery, snapshot.results],
@@ -91,32 +93,33 @@ export function ReviewWorkbench({
   const activeGroup = activeGroupId ? snapshot.results.filter((result) => result.groupId === activeGroupId) : [];
   const compareA = snapshot.results.find((result) => result.resultId === compareSlots.a) ?? null;
   const compareB = snapshot.results.find((result) => result.resultId === compareSlots.b) ?? null;
-  const adopted = snapshot.results.filter((result) => result.adopted).length;
-  const pendingQueue = snapshot.results.filter((result) => result.colorLabel === 'yellow');
+  const writable = snapshot.results.filter(reviewResultIsWritable).length;
+  const pendingQueue = snapshot.results.filter(reviewResultNeedsAttention);
   const pending = pendingQueue.length;
   const pendingPosition = focused
     ? Math.max(0, pendingQueue.findIndex((result) => result.resultId === focused.resultId) + 1)
     : 0;
   const hasFailures = snapshot.failures.length > 0;
 
-  const update = (changes: ReviewChange[]) =>
-    readOnly
-      ? Promise.resolve(snapshot)
-      : runSmartCullingCommand({ action: 'updateReview', changes }, true).catch(() => snapshot);
+  const update = async (changes: ReviewChange[]) => {
+    if (readOnly) return snapshot;
+    try {
+      return await runSmartCullingCommand({ action: 'updateReview', changes }, true);
+    } catch {
+      toast.error(tx('reviewUpdateFailed'));
+      return snapshot;
+    }
+  };
   const changeFor = (
     result: ReviewResult,
-    patch: Partial<ReviewResult>,
-    flags: Pick<ReviewChange, 'metadataEdited' | 'modeChanged'>,
+    patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>,
   ): ReviewChange => ({
     resultId: result.resultId,
-    adopted: patch.adopted ?? result.adopted,
     rating: patch.rating ?? result.rating,
     colorLabel: patch.colorLabel === undefined ? result.colorLabel : patch.colorLabel,
-    mode: patch.mode ?? result.mode,
-    ...flags,
   });
   const commitMetadataEdit = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) =>
-    void update([changeFor(result, patch, { metadataEdited: true, modeChanged: false })]);
+    void update([changeFor(result, patch)]);
   const editMetadata = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => {
     if (result.source === 'ai' && !manualEditAcknowledged) {
       setPendingMetadataEdit({ result, patch });
@@ -124,18 +127,6 @@ export function ReviewWorkbench({
     }
     commitMetadataEdit(result, patch);
   };
-  const changeMode = (result: ReviewResult, mode: ReviewResult['mode']) =>
-    void update([changeFor(result, { mode }, { metadataEdited: false, modeChanged: true })]);
-  const toggle = (result: ReviewResult) =>
-    void update([changeFor(result, { adopted: !result.adopted }, { metadataEdited: false, modeChanged: false })]);
-  const setGroupAdopted = (results: ReviewResult[], adopted: boolean) =>
-    void update(results.map((result) => changeFor(result, { adopted }, { metadataEdited: false, modeChanged: false })));
-  const restoreGroup = (results: ReviewResult[]) =>
-    void update(
-      results.map((result) =>
-        changeFor(result, { adopted: result.aiInitiallyAdopted }, { metadataEdited: false, modeChanged: false }),
-      ),
-    );
   const setComparison = (slot: 'a' | 'b', result: ReviewResult) => {
     const sameGroup = compareSlots.groupId === result.groupId;
     const next = {
@@ -148,8 +139,7 @@ export function ReviewWorkbench({
     const other = slot === 'a' ? next.b : next.a;
     if (other && other !== result.resultId) setCompareOpen(true);
   };
-  const filterText = (item: ReviewFilter) =>
-    item === 'adopted' ? tx('adoptedFilter') : item === 'manual' ? tx('manualFilter') : tx(item);
+  const filterText = (item: ReviewFilter) => (item === 'manual' ? tx('manualFilter') : tx(item));
   const goToNextPending = () => {
     if (pendingQueue.length === 0) return;
     const currentIndex = pendingQueue.findIndex((result) => result.resultId === focused?.resultId);
@@ -187,9 +177,6 @@ export function ReviewWorkbench({
       } else if (focused && !readOnly && /^[1-5]$/.test(event.key)) {
         event.preventDefault();
         editMetadata(focused, { rating: Number(event.key) });
-      } else if (focused && !readOnly && event.key === ' ') {
-        event.preventDefault();
-        toggle(focused);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -204,7 +191,7 @@ export function ReviewWorkbench({
             {tx('pendingCount')} {pending}
           </span>
           <span>
-            {tx('adopted')} {adopted}
+            {tx('writeableCount')} {writable}
           </span>
         </div>
         <button
@@ -212,17 +199,50 @@ export function ReviewWorkbench({
           onClick={() =>
             readOnly
               ? setState({ screen: 'write' })
-              : snapshot.results.some((result) => result.adopted)
+              : writable > 0 && !manualSyncPending
                 ? setState({ confirmOpen: true })
-                : setState({ abandonOpen: true })
+                : undefined
           }
+          disabled={!readOnly && (writable === 0 || manualSyncPending)}
         >
-          {readOnly ? tx('back') : tx('confirmApply')}{' '}
-          {readOnly ? null : snapshot.results.filter((result) => result.adopted).length}
+          {readOnly ? tx('back') : tx('confirmApply')} {readOnly ? null : writable}
         </button>
       </LifecycleChrome>
+      {manualSyncPending ? (
+        <div className="sc-manual-sync-notice" role="status">
+          <LockKeyhole size={16} />
+          <span>{tx('manualSyncPending')}</span>
+        </div>
+      ) : null}
+      {snapshot.progress.partial ? (
+        <div className="sc-partial-review-notice" role="status">
+          <FileWarning size={16} />
+          <span>
+            {tx('partialReviewPrefix')} {snapshot.progress.completed.toLocaleString()} /{' '}
+            {snapshot.progress.total.toLocaleString()} · {tx('partialReviewSuffix')}
+          </span>
+        </div>
+      ) : null}
       <main className="sc-review-layout">
-        <aside className={`sc-review-sidebar ${navigationOpen ? 'is-open' : ''}`}>
+        {navigationOpen || inspectorOpen ? (
+          <div
+            className="sc-review-drawer-backdrop"
+            aria-hidden="true"
+            onMouseDown={() => {
+              setNavigationOpen(false);
+              setInspectorOpen(false);
+            }}
+          />
+        ) : null}
+        <aside
+          ref={navigationRef}
+          className={`sc-review-sidebar ${navigationOpen ? 'is-open' : ''}`}
+          role="dialog"
+          aria-modal={navigationOpen || undefined}
+          aria-label={tx('folders')}
+          aria-hidden={!navigationOpen}
+          tabIndex={-1}
+        >
           <header>
             <button onClick={() => setState({ abandonOpen: true })} aria-label={tx('back')}>
               <ChevronLeft size={15} />
@@ -275,21 +295,18 @@ export function ReviewWorkbench({
           />
           <footer>
             <span>
-              {tx('selectedCount')} {snapshot.results.filter((result) => result.adopted).length}
+              {tx('writeableCount')} {writable}
             </span>
-            <button disabled={readOnly} onClick={() => setGroupAdopted(snapshot.results, true)}>
-              {tx('selectAll')}
-            </button>
-            <button disabled={readOnly} onClick={() => setGroupAdopted(snapshot.results, false)}>
-              {tx('clearAll')}
-            </button>
           </footer>
         </aside>
         <section className="sc-review-canvas">
           <header>
             <button
               className="sc-review-panel-button"
-              onClick={() => setNavigationOpen(true)}
+              onClick={() => {
+                setInspectorOpen(false);
+                setNavigationOpen(true);
+              }}
               aria-label={tx('folders')}
             >
               <PanelLeftOpen size={16} />
@@ -308,7 +325,7 @@ export function ReviewWorkbench({
               </button>
             </div>
             <nav>
-              {(['all', 'pending', 'adopted', 'manual'] as ReviewFilter[]).map((item) => (
+              {(['all', 'pending', 'manual'] as ReviewFilter[]).map((item) => (
                 <button key={item} className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)}>
                   {filterText(item)}
                 </button>
@@ -324,7 +341,10 @@ export function ReviewWorkbench({
             </button>
             <button
               className="sc-review-panel-button"
-              onClick={() => setInspectorOpen(true)}
+              onClick={() => {
+                setNavigationOpen(false);
+                setInspectorOpen(true);
+              }}
               aria-label={tx('reviewEvidence')}
             >
               <PanelRightOpen size={16} />
@@ -337,15 +357,14 @@ export function ReviewWorkbench({
                 focusedResultId={focused?.resultId ?? null}
                 onSelect={(result) => {
                   setState({ focusedResultId: result.resultId });
+                  setNavigationOpen(false);
                   setInspectorOpen(true);
                 }}
-                onToggle={toggle}
                 onOpenGroup={(result) => {
                   setActiveGroupId(result.groupId);
                   setState({ focusedResultId: result.resultId });
                 }}
                 onRequestThumbnails={onRequestThumbnails}
-                readOnly={readOnly}
               />
             ) : (
               <section className="sc-review-empty" role="status">
@@ -372,14 +391,11 @@ export function ReviewWorkbench({
                   onBack={() => setActiveGroupId(null)}
                   onSelect={(result) => {
                     setState({ focusedResultId: result.resultId });
+                    setNavigationOpen(false);
                     setInspectorOpen(true);
                   }}
-                  onToggle={toggle}
-                  onRestoreInitial={() => restoreGroup(activeGroup)}
-                  onSetAll={(adopted) => setGroupAdopted(activeGroup, adopted)}
                   onSetComparison={setComparison}
                   onRequestThumbnails={onRequestThumbnails}
-                  readOnly={readOnly}
                 />
               </div>
             ) : null}
@@ -411,11 +427,9 @@ export function ReviewWorkbench({
         </section>
         {focused ? (
           <ReviewInspector
+            ref={inspectorRef}
             result={focused}
             onEdit={(patch) => editMetadata(focused, patch)}
-            onModeChange={(mode) => changeMode(focused, mode)}
-            onEditGroupMode={setPendingGroupMode}
-            onToggle={() => toggle(focused)}
             onOpenGroup={() => setActiveGroupId(focused.groupId)}
             onSetComparison={(slot) => setComparison(slot, focused)}
             readOnly={readOnly}
@@ -424,42 +438,12 @@ export function ReviewWorkbench({
           />
         ) : null}
       </main>
-      {pendingGroupMode && focused ? (
-        <Modal onClose={() => setPendingGroupMode(null)}>
-          <span className="sc-dialog-icon warning">
-            <AlertTriangle size={22} />
-          </span>
-          <h2>{tx('applyModeTitle')}</h2>
-          <p>{tx('applyModeBody')}</p>
-          <footer>
-            <button className="sc-secondary" onClick={() => setPendingGroupMode(null)}>
-              {tx('cancel')}
-            </button>
-            <button
-              className="sc-primary"
-              onClick={() => {
-                void update(
-                  snapshot.results
-                    .filter((result) => result.groupId === focused.groupId)
-                    .map((result) =>
-                      changeFor(result, { mode: pendingGroupMode }, { metadataEdited: false, modeChanged: true }),
-                    ),
-                );
-                setPendingGroupMode(null);
-              }}
-            >
-              {tx('applyModeConfirm')}
-            </button>
-          </footer>
-        </Modal>
-      ) : null}
       {compareOpen && compareA && compareB && compareA.resultId !== compareB.resultId ? (
         <ReviewCompareDialog
           first={compareA}
           second={compareB}
           onClose={() => setCompareOpen(false)}
           onFocus={(resultId) => setState({ focusedResultId: resultId })}
-          onToggle={toggle}
           onRating={(result, rating) => editMetadata(result, { rating })}
           onLabel={(result, colorLabel) => editMetadata(result, { colorLabel })}
           onOpenInspector={() => {

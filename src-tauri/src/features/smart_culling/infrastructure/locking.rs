@@ -1,5 +1,5 @@
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
@@ -11,65 +11,144 @@ use super::super::domain::{
 };
 use super::baseline::capture_sidecar_baseline;
 use super::catalog::{read_sidecar_strict, resolve_asset_member_groups};
-use super::persistence::{
-    ApplyFailure, ApplyFailureReason, ApplyReport, atomic_write_sidecar, ensure_baseline_matches,
-};
+use super::persistence::{ApplyFailure, ApplyFailureReason, ApplyReport, ensure_baseline_matches};
+use super::sidecar_transaction::write_sidecar_transaction_guarded;
 
 const COLOR_TAG_PREFIX: &str = "color:";
 const SCHEMA_VERSION: u32 = 1;
 
-pub(crate) fn change_asset_lock_state(paths: Vec<PathBuf>, locked: bool) -> Result<(), String> {
+pub(crate) fn change_asset_lock_state(
+    paths: Vec<PathBuf>,
+    locked: bool,
+) -> Result<ApplyReport, String> {
     if paths.is_empty() {
         return Err("Select at least one photo before changing its lock".to_string());
     }
-    let member_groups = resolve_asset_member_groups(&paths)?;
+    let requested = paths.into_iter().collect::<BTreeSet<_>>();
     let mut report = ApplyReport::default();
+    let member_groups =
+        match resolve_asset_member_groups(&requested.iter().cloned().collect::<Vec<_>>()) {
+            Ok(groups) => groups,
+            Err(_) => resolve_groups_individually(&requested, &mut report),
+        };
     for member_paths in member_groups {
         let group_report = set_asset_lock_state(member_paths, locked);
         report.succeeded.extend(group_report.succeeded);
         report.failed.extend(group_report.failed);
+        report.unchanged.extend(group_report.unchanged);
     }
-    if let Some(failure) = report.failed.first() {
-        Err(format!(
-            "Failed to change asset lock at {}: {}",
-            failure.sidecar_path.display(),
-            failure.detail
-        ))
-    } else {
-        Ok(())
-    }
+    Ok(report)
 }
 
 pub(crate) fn set_asset_lock_state(paths: Vec<PathBuf>, locked: bool) -> ApplyReport {
     let mut report = ApplyReport::default();
     let unique_paths = paths.into_iter().collect::<BTreeSet<_>>();
+    let primary_sidecar = unique_paths
+        .first()
+        .map(|path| get_primary_sidecar_path(path))
+        .unwrap_or_default();
     if let Err((reason, detail)) = ensure_members_consistent(&unique_paths) {
-        let sidecar_path = unique_paths
-            .first()
-            .map(|path| get_primary_sidecar_path(path))
-            .unwrap_or_default();
         report.failed.push(ApplyFailure {
-            sidecar_path,
+            sidecar_path: primary_sidecar,
             reason,
             detail,
         });
         return report;
     }
 
-    for image_path in unique_paths {
+    let mut baselines = Vec::with_capacity(unique_paths.len());
+    let mut updates = Vec::with_capacity(unique_paths.len());
+    for image_path in &unique_paths {
         let sidecar_path = get_primary_sidecar_path(&image_path);
-        match update_one(&sidecar_path, locked) {
-            Ok(true) => report.succeeded.push(sidecar_path),
+        let baseline = match capture_sidecar_baseline(&sidecar_path) {
+            Ok(baseline) => baseline,
+            Err(detail) => {
+                report.failed.push(ApplyFailure {
+                    sidecar_path: primary_sidecar,
+                    reason: ApplyFailureReason::Io,
+                    detail,
+                });
+                return report;
+            }
+        };
+        let mut metadata = match read_sidecar_strict(&sidecar_path) {
+            Ok(metadata) => metadata,
+            Err(detail) => {
+                report.failed.push(ApplyFailure {
+                    sidecar_path: primary_sidecar,
+                    reason: ApplyFailureReason::Io,
+                    detail,
+                });
+                return report;
+            }
+        };
+        match update_lock_record(&mut metadata, locked) {
+            Ok(true) => updates.push((sidecar_path.clone(), metadata)),
             Ok(false) => {}
-            Err((reason, detail)) => report.failed.push(ApplyFailure {
-                sidecar_path,
+            Err((reason, detail)) => {
+                report.failed.push(ApplyFailure {
+                    sidecar_path: primary_sidecar,
+                    reason,
+                    detail,
+                });
+                return report;
+            }
+        }
+        baselines.push((sidecar_path, baseline));
+    }
+
+    if updates.is_empty() {
+        report.unchanged.push(primary_sidecar);
+        return report;
+    }
+    for (sidecar_path, baseline) in &baselines {
+        if let Err((reason, detail)) = ensure_baseline_matches(sidecar_path, baseline) {
+            report.failed.push(ApplyFailure {
+                sidecar_path: primary_sidecar,
                 reason,
+                detail,
+            });
+            return report;
+        }
+    }
+    match write_sidecar_transaction_guarded(&updates, || {
+        for (sidecar_path, baseline) in &baselines {
+            ensure_baseline_matches(sidecar_path, baseline).map_err(|(_, detail)| detail)?;
+        }
+        Ok(())
+    }) {
+        Ok(()) => report.succeeded.push(primary_sidecar),
+        Err(detail) => report.failed.push(ApplyFailure {
+            sidecar_path: primary_sidecar,
+            reason: ApplyFailureReason::Io,
+            detail,
+        }),
+    }
+    report
+}
+
+fn resolve_groups_individually(
+    requested: &BTreeSet<PathBuf>,
+    report: &mut ApplyReport,
+) -> Vec<Vec<PathBuf>> {
+    let mut groups = BTreeMap::<PathBuf, Vec<PathBuf>>::new();
+    for path in requested {
+        match resolve_asset_member_groups(std::slice::from_ref(path)) {
+            Ok(resolved) => {
+                for members in resolved {
+                    if let Some(key) = members.first() {
+                        groups.entry(key.clone()).or_insert(members);
+                    }
+                }
+            }
+            Err(detail) => report.failed.push(ApplyFailure {
+                sidecar_path: get_primary_sidecar_path(path),
+                reason: ApplyFailureReason::InvalidResult,
                 detail,
             }),
         }
     }
-
-    report
+    groups.into_values().collect()
 }
 
 fn ensure_members_consistent(
@@ -101,21 +180,6 @@ fn ensure_members_consistent(
     }
 }
 
-fn update_one(sidecar_path: &Path, locked: bool) -> Result<bool, (ApplyFailureReason, String)> {
-    let baseline =
-        capture_sidecar_baseline(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error))?;
-    let mut metadata =
-        read_sidecar_strict(sidecar_path).map_err(|error| (ApplyFailureReason::Io, error))?;
-    if !update_lock_record(&mut metadata, locked)? {
-        return Ok(false);
-    }
-
-    ensure_baseline_matches(sidecar_path, &baseline)?;
-    atomic_write_sidecar(sidecar_path, &metadata)
-        .map_err(|error| (ApplyFailureReason::Io, error))?;
-    Ok(true)
-}
-
 fn update_lock_record(
     metadata: &mut ImageMetadata,
     locked: bool,
@@ -142,8 +206,9 @@ fn update_lock_record(
         .as_ref()
         .and_then(|value| value.get("smartCullingV2"))
         .cloned();
+    let had_existing_record = existing_record.is_some();
     let has_visible_result = metadata.rating > 0 || color_label.is_some();
-    if existing_record.is_none() && !has_visible_result {
+    if existing_record.is_none() && !has_visible_result && !locked {
         return Ok(false);
     }
 
@@ -188,7 +253,7 @@ fn update_lock_record(
         .get("locked")
         .and_then(Value::as_bool)
         .unwrap_or(source == Some("manual"));
-    if current_locked == locked && record_matches {
+    if had_existing_record && current_locked == locked && record_matches {
         return Ok(false);
     }
 
@@ -235,6 +300,7 @@ fn manual_record(rating: u8, color_label: Option<&str>) -> Value {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
+    use std::path::Path;
 
     use serde_json::json;
     use tempfile::tempdir;
@@ -321,6 +387,41 @@ mod tests {
         assert!(report.succeeded.is_empty());
         assert!(report.failed.is_empty());
         assert!(!sidecar_path.exists());
+    }
+
+    #[test]
+    fn locking_an_untracked_blank_photo_creates_a_zero_star_manual_lock() {
+        let directory = tempdir().unwrap();
+        let image_path = directory.path().join("photo.jpg");
+        File::create(&image_path).unwrap();
+        let sidecar_path = get_primary_sidecar_path(&image_path);
+
+        let report = set_asset_lock_state(vec![image_path], true);
+
+        assert_eq!(report.succeeded, vec![sidecar_path.clone()]);
+        let metadata = read_sidecar_strict(&sidecar_path).unwrap();
+        assert_eq!(metadata.rating, 0);
+        let record = &metadata.feature_data.unwrap()["smartCullingV2"];
+        assert_eq!(record["source"], "manual");
+        assert_eq!(record["locked"], true);
+        assert_eq!(record["rating"], 0);
+    }
+
+    #[test]
+    fn batch_lock_keeps_valid_assets_and_reports_unresolved_assets() {
+        let directory = tempdir().unwrap();
+        let valid = directory.path().join("valid.jpg");
+        let missing = directory.path().join("missing.jpg");
+        File::create(&valid).unwrap();
+
+        let report = change_asset_lock_state(vec![valid.clone(), missing.clone()], true).unwrap();
+
+        assert_eq!(report.succeeded, vec![get_primary_sidecar_path(&valid)]);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(
+            report.failed[0].sidecar_path,
+            get_primary_sidecar_path(&missing)
+        );
     }
 
     #[test]

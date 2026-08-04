@@ -12,8 +12,8 @@ const MAX_UNUSED_PREVIEWS = 4;
 const previewCache = new Map<string, CachedPreview>();
 const pendingPreviews = new Map<string, Promise<CachedPreview>>();
 
-function previewKey(path: string, thumbKey: string) {
-  return `${path}\u0000${thumbKey}`;
+function previewKey(path: string, thumbKey: string, retryVersion = 0) {
+  return `${path}\u0000${thumbKey}\u0000${retryVersion}`;
 }
 
 function pruneUnusedPreviews() {
@@ -42,8 +42,8 @@ function releasePreview(key: string) {
   pruneUnusedPreviews();
 }
 
-function requestRenderedPreview(path: string, thumbKey: string) {
-  const pendingKey = previewKey(path, thumbKey);
+function requestRenderedPreview(path: string, thumbKey: string, retryVersion: number) {
+  const pendingKey = previewKey(path, thumbKey, retryVersion);
   const cached = previewCache.get(pendingKey);
   if (cached) return Promise.resolve(cached);
 
@@ -73,23 +73,27 @@ function requestRenderedPreview(path: string, thumbKey: string) {
 export function useRenderedPreview(path: string, fallbackUrl?: string) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
+  const [error, setError] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
 
   useEffect(() => {
     if (!path) {
       setLoadedUrl(null);
       setLoading(false);
+      setError(null);
       return;
     }
     const thumbKey = fallbackUrl ?? '';
-    const key = previewKey(path, thumbKey);
+    const key = previewKey(path, thumbKey, retryVersion);
 
     let active = true;
     let retained = false;
     setLoadedUrl(null);
     setLoading(true);
+    setError(null);
     const load = async () => {
       try {
-        const preview = await requestRenderedPreview(path, thumbKey);
+        const preview = await requestRenderedPreview(path, thumbKey, retryVersion);
         if (!active) {
           pruneUnusedPreviews();
           return;
@@ -100,6 +104,7 @@ export function useRenderedPreview(path: string, fallbackUrl?: string) {
         setLoadedUrl(preview.url);
       } catch (error) {
         console.error('Could not load the current-render smart-culling preview:', error);
+        if (active) setError(String(error));
       } finally {
         if (active) setLoading(false);
       }
@@ -109,7 +114,12 @@ export function useRenderedPreview(path: string, fallbackUrl?: string) {
       active = false;
       if (retained) releasePreview(key);
     };
-  }, [fallbackUrl, path]);
+  }, [fallbackUrl, path, retryVersion]);
 
-  return { loadedUrl, loading };
+  return {
+    loadedUrl,
+    loading,
+    error,
+    retry: () => setRetryVersion((current) => current + 1),
+  };
 }

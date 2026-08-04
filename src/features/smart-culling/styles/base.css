@@ -184,3 +184,15 @@
   font-size: 10px;
   line-height: 1.55;
 }
+
+.sc-task-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--sc-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

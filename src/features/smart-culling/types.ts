@@ -48,7 +48,7 @@ export interface KeyPersonEvidence {
   priority: number;
   faceIndex: number | null;
   similarity: number | null;
-  status: 'candidate' | 'ambiguous' | 'not_found' | 'reference_unavailable';
+  status: 'confirmed' | 'missing' | 'suspected' | 'ambiguous' | 'unknown';
   autoScoreEligible: boolean;
   performanceRank: number | null;
 }
@@ -97,8 +97,6 @@ export interface ReviewResult {
   mode: SmartCullingMode;
   reasonCodes: string[];
   confidence: number;
-  aiInitiallyAdopted: boolean;
-  adopted: boolean;
   protected: boolean;
   requiresHumanReview: boolean;
   width: number;
@@ -129,6 +127,14 @@ export interface WriteSummary {
   succeededPaths: string[];
 }
 
+export interface LockChangeSummary {
+  attempted: number;
+  succeeded: number;
+  unchanged: number;
+  failed: number;
+  failures: FailureItem[];
+}
+
 export interface SmartCullingSnapshot {
   taskId: string | null;
   state: SmartCullingState;
@@ -142,16 +148,13 @@ export interface SmartCullingSnapshot {
   detectedImagePath: string | null;
   detectedFaces: DetectedFace[];
   writeSummary: WriteSummary | null;
+  lockChangeSummary: LockChangeSummary | null;
 }
 
 export interface ReviewChange {
   resultId: string;
-  adopted: boolean;
   rating: number;
   colorLabel: ReviewResult['colorLabel'];
-  mode: SmartCullingMode;
-  metadataEdited: boolean;
-  modeChanged: boolean;
 }
 
 export type SmartCullingRequest =

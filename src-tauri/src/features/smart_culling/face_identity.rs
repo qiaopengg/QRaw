@@ -10,7 +10,8 @@ use ort::{session::Session, value::Tensor};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 const SFACE_SIZE: u32 = 112;
-const SFACE_CANDIDATE_THRESHOLD: f32 = 0.363;
+const SFACE_SUSPECTED_THRESHOLD: f32 = 0.363;
+const SFACE_CLEAR_MISSING_THRESHOLD: f32 = 0.25;
 const AMBIGUITY_MARGIN: f32 = 0.05;
 const SFACE_TEMPLATE: [(f64, f64); 5] = [
     (38.2946, 51.6963),
@@ -172,27 +173,42 @@ pub fn match_key_people(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let assignments = maximum_weight_assignment(&scores, SFACE_CANDIDATE_THRESHOLD);
+    let assignments = maximum_weight_assignment(&scores, SFACE_SUSPECTED_THRESHOLD);
 
     references
         .iter()
         .enumerate()
         .map(|(reference_index, reference)| {
             let assigned = assignments[reference_index];
-            let similarity = assigned.map(|face_index| scores[reference_index][face_index]);
+            let has_embedding = faces.iter().any(|face| face.identity_embedding.is_some());
+            let best_similarity = scores[reference_index]
+                .iter()
+                .copied()
+                .filter(|value| *value >= -1.0)
+                .max_by(f32::total_cmp);
+            let similarity = assigned
+                .map(|face_index| scores[reference_index][face_index])
+                .or(best_similarity);
             let mut sorted = scores[reference_index]
                 .iter()
                 .copied()
-                .filter(|value| *value >= SFACE_CANDIDATE_THRESHOLD)
+                .filter(|value| *value >= SFACE_SUSPECTED_THRESHOLD)
                 .collect::<Vec<_>>();
             sorted.sort_by(|left, right| right.total_cmp(left));
             let ambiguous = sorted.len() > 1 && sorted[0] - sorted[1] < AMBIGUITY_MARGIN;
-            let status = if assigned.is_none() {
-                "not_found"
+            let status = if !has_embedding {
+                "unknown"
             } else if ambiguous {
                 "ambiguous"
+            } else if assigned.is_some() {
+                // The bundled threshold has not passed the independent
+                // real-photo identity release gate, so high-scoring matches
+                // remain suspected instead of being auto-confirmed.
+                "suspected"
+            } else if best_similarity.is_some_and(|value| value < SFACE_CLEAR_MISSING_THRESHOLD) {
+                "missing"
             } else {
-                "candidate"
+                "unknown"
             };
             KeyPersonEvidence {
                 priority: reference.priority,
@@ -296,7 +312,7 @@ mod tests {
     fn assignment_is_one_face_per_person_and_prefers_global_weight() {
         let scores = vec![vec![0.91, 0.90], vec![0.89, 0.40]];
         assert_eq!(
-            maximum_weight_assignment(&scores, SFACE_CANDIDATE_THRESHOLD),
+            maximum_weight_assignment(&scores, SFACE_SUSPECTED_THRESHOLD),
             vec![Some(1), Some(0)]
         );
     }
@@ -305,7 +321,7 @@ mod tests {
     fn assignment_uses_unknown_when_every_face_is_below_threshold() {
         let scores = vec![vec![0.20, 0.30], vec![0.10, 0.20]];
         assert_eq!(
-            maximum_weight_assignment(&scores, SFACE_CANDIDATE_THRESHOLD),
+            maximum_weight_assignment(&scores, SFACE_SUSPECTED_THRESHOLD),
             vec![None, None]
         );
     }

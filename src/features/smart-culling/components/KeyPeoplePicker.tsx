@@ -2,11 +2,12 @@ import { ChevronLeft, ChevronRight, ScanFace, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
 import { useProcessStore } from '../../../store/useProcessStore';
-import { useSmartCullingText } from '../i18n';
+import { keyPersonIdentityLabel, useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { fileName } from './LifecycleChrome';
 import { faceSelectionKey, PhotoEvidenceViewport } from './PhotoEvidenceViewport';
+import { SmartCullingImage } from './SmartCullingImage';
 
 const PHOTO_PAGE_SIZE = 8;
 
@@ -44,6 +45,16 @@ export function KeyPeoplePicker({
   }, [onRequestThumbnails, pageImages]);
   const selectedKeys = useMemo(
     () => new Set(keyPeople.map((person) => faceSelectionKey(person.samplePath, person.bbox))),
+    [keyPeople],
+  );
+  const selectedLabels = useMemo(
+    () =>
+      new Map(
+        keyPeople.map((person) => [
+          faceSelectionKey(person.samplePath, person.bbox),
+          keyPersonIdentityLabel(person.priority),
+        ]),
+      ),
     [keyPeople],
   );
   const currentImageIndex = images.findIndex((image) => image.path === samplePath);
@@ -87,6 +98,7 @@ export function KeyPeoplePicker({
               alt={fileName(samplePath)}
               faces={faces}
               selectedFaceKeys={selectedKeys}
+              faceLabels={selectedLabels}
               onFaceClick={(face) => toggleFace(face.bbox)}
               onPrevious={() => selectImageAt(currentImageIndex - 1)}
               onNext={() => selectImageAt(currentImageIndex + 1)}
@@ -116,7 +128,11 @@ export function KeyPeoplePicker({
                   onClick={() => setSamplePath(image.path)}
                 >
                   {thumbnails[image.path] ? (
-                    <img src={thumbnails[image.path]} alt={fileName(image.path)} />
+                    <SmartCullingImage
+                      primaryUrl={thumbnails[image.path]}
+                      alt={fileName(image.path)}
+                      fallback={<span>{fileName(image.path)}</span>}
+                    />
                   ) : (
                     <span>{fileName(image.path)}</span>
                   )}

@@ -44,9 +44,9 @@ export function getSmartCullingImageMetadata(image: ImageFile): SmartCullingImag
   return record;
 }
 
-export function needsManualOwnershipReconciliation(image: ImageFile) {
+export function needsManualOwnershipReconciliation(image: ImageFile, effectiveRating = image.rating) {
   const value = image.featureData?.smartCullingV2;
-  if (!value || typeof value !== 'object') return image.rating > 0 || imageColor(image) !== null;
+  if (!value || typeof value !== 'object') return effectiveRating > 0 || imageColor(image) !== null;
   const record = value as SmartCullingImageMetadata;
-  return record.rating !== image.rating || record.colorLabel !== imageColor(image);
+  return record.rating !== effectiveRating || record.colorLabel !== imageColor(image);
 }

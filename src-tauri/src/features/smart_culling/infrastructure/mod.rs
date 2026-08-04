@@ -4,6 +4,7 @@ mod locking;
 mod manual_reconciliation;
 mod persistence;
 mod render_input;
+mod sidecar_transaction;
 
 pub(crate) use baseline::capture_sidecar_baseline;
 pub(crate) use catalog::{

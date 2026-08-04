@@ -5,6 +5,7 @@ import { useSmartCullingText } from '../i18n';
 import type { SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { LifecycleChrome, fileName } from './LifecycleChrome';
+import { SmartCullingImage } from './SmartCullingImage';
 
 export function WriteScreen({
   snapshot,
@@ -85,7 +86,11 @@ export function WriteScreen({
             {summary?.succeededPaths.slice(0, 12).map((path) => (
               <article key={path}>
                 {thumbnails[path] ? (
-                  <img src={thumbnails[path]} alt={fileName(path)} />
+                  <SmartCullingImage
+                    primaryUrl={thumbnails[path]}
+                    alt={fileName(path)}
+                    fallback={<span className="sc-file-placeholder" />}
+                  />
                 ) : (
                   <span className="sc-file-placeholder" />
                 )}

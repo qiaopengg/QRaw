@@ -117,6 +117,34 @@
   background: rgba(20, 20, 20, 0.82);
 }
 
+.sc-evidence-error {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 150px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid rgb(248 113 113 / 45%);
+  border-radius: 6px;
+  color: #ffd0d0;
+  background: rgb(69 20 20 / 90%);
+  font-size: 12px;
+}
+
+.sc-evidence-error button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: #fff !important;
+  background: rgb(255 255 255 / 10%) !important;
+}
+
 .sc-evidence-toolbar {
   position: absolute;
   right: 10px;

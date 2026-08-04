@@ -1,13 +1,19 @@
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
 import { fileName } from './LifecycleChrome';
 import { Stars } from './ReviewControls';
+import { SmartCullingImage } from './SmartCullingImage';
 
 function FilmstripPreview({ result, fallbackUrl }: { result: ReviewResult; fallbackUrl?: string }) {
-  return fallbackUrl ? <img src={fallbackUrl} alt={fileName(result.path)} /> : <span>{fileName(result.path)}</span>;
+  const placeholder = <span>{fileName(result.path)}</span>;
+  return fallbackUrl ? (
+    <SmartCullingImage primaryUrl={fallbackUrl} alt={fileName(result.path)} fallback={placeholder} />
+  ) : (
+    placeholder
+  );
 }
 
 export function ReviewFilmstrip({
@@ -15,7 +21,6 @@ export function ReviewFilmstrip({
   focusedResultId,
   secondaryResultId,
   onSelect,
-  onToggle,
   onRating,
   readOnly,
 }: {
@@ -23,7 +28,6 @@ export function ReviewFilmstrip({
   focusedResultId: string;
   secondaryResultId: string | null;
   onSelect: (resultId: string) => void;
-  onToggle: (result: ReviewResult) => void;
   onRating: (result: ReviewResult, rating: number) => void;
   readOnly: boolean;
 }) {
@@ -96,15 +100,6 @@ export function ReviewFilmstrip({
                   onChange={readOnly ? undefined : (rating) => onRating(result, rating)}
                   compact
                 />
-                <button
-                  className={`sc-review-keep ${result.adopted ? 'is-checked' : ''}`}
-                  disabled={readOnly}
-                  onClick={() => onToggle(result)}
-                  aria-label={result.adopted ? tx('doNotAdopt') : tx('adopt')}
-                >
-                  {result.adopted ? <Check size={11} /> : null}
-                  {result.adopted ? tx('adopted') : tx('notAdopted')}
-                </button>
                 <span title={fileName(result.path)}>{fileName(result.path)}</span>
                 <i className={`sc-color-dot is-${result.colorLabel ?? 'none'}`} />
               </div>

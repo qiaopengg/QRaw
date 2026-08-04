@@ -47,6 +47,69 @@
   background: var(--color-surface) !important;
   box-shadow: none !important;
 }
+
+.sc-lock-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.sc-lock-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.sc-lock-copy strong,
+.sc-lock-copy small {
+  display: block;
+}
+
+.sc-lock-copy strong {
+  font-size: 12px;
+}
+
+.sc-lock-copy small {
+  max-width: 190px;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-lock-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.sc-lock-action {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center;
+  color: var(--color-text-primary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.sc-lock-failure-toast {
+  display: grid;
+  gap: 4px;
+}
+
+.sc-lock-failure-toast span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
 .sc-entry-dot {
   position: absolute;
   right: 7px;

@@ -48,13 +48,13 @@ function ReviewQueueRow({
         >
           <ImageIcon size={13} />
           <span>{fileName(entry.result.path)}</span>
-          <em>{entry.result.adopted ? tx('adopted') : ''}</em>
+          <em>{entry.result.requiresHumanReview ? tx('pending') : ''}</em>
         </button>
       </div>
     );
   }
 
-  const primary = entry.results.find((result) => result.adopted) ?? entry.results[0];
+  const primary = entry.results.reduce((best, result) => (result.groupRank < best.groupRank ? result : best));
   const label = primary.groupKind === 'reviewOnly' ? tx('reviewOnly') : `${tx('similarGroup')} ${primary.groupIndex}`;
   return (
     <div className="sc-review-queue-row" style={style}>

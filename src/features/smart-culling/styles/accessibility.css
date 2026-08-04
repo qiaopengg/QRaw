@@ -1,0 +1,34 @@
+/* Keep the extension readable inside the host application's resizable center pane. */
+.sc-page :where(button, input, select, textarea, label, p, span, small, em, strong, i),
+.sc-modal :where(button, input, select, textarea, label, p, span, small, em, strong, i) {
+  font-size: max(11px, 1em) !important;
+}
+
+.sc-page button:not(.sc-evidence-face),
+.sc-modal button {
+  min-height: 30px;
+}
+
+.sc-page :where(input, select, textarea) {
+  min-height: 32px;
+}
+
+.sc-library-badge,
+.sc-library-badge :where(span, small),
+.sc-command-error {
+  font-size: max(11px, 1em) !important;
+}
+
+.sc-library-badge {
+  min-height: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-page *,
+  .sc-modal * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

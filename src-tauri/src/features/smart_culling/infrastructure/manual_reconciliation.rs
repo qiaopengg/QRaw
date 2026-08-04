@@ -11,9 +11,8 @@ use super::super::domain::{
 };
 use super::baseline::{SidecarBaseline, capture_sidecar_baseline};
 use super::catalog::{read_sidecar_strict, resolve_asset_member_groups};
-use super::persistence::{
-    ApplyFailure, ApplyFailureReason, ApplyReport, atomic_write_sidecar, ensure_baseline_matches,
-};
+use super::persistence::{ApplyFailure, ApplyFailureReason, ApplyReport, ensure_baseline_matches};
+use super::sidecar_transaction::write_sidecar_transaction_guarded;
 
 const COLOR_TAG_PREFIX: &str = "color:";
 const SCHEMA_VERSION: u32 = 1;
@@ -49,6 +48,7 @@ pub(crate) fn reconcile_manual_ownership(paths: Vec<PathBuf>) -> ApplyReport {
                         reason: ApplyFailureReason::Io,
                         detail,
                     }],
+                    unchanged: Vec::new(),
                 };
             }
         };
@@ -135,10 +135,21 @@ fn reconcile_asset(
     for member in &members {
         ensure_baseline_matches(&member.sidecar_path, &member.baseline)?;
     }
-    for member in members {
-        atomic_write_sidecar(&member.sidecar_path, &member.metadata)
-            .map_err(|error| (ApplyFailureReason::Io, error))?;
-    }
+    let baselines = members
+        .iter()
+        .map(|member| (member.sidecar_path.clone(), member.baseline.clone()))
+        .collect::<Vec<_>>();
+    let updates = members
+        .into_iter()
+        .map(|member| (member.sidecar_path, member.metadata))
+        .collect::<Vec<_>>();
+    write_sidecar_transaction_guarded(&updates, || {
+        for (sidecar_path, baseline) in &baselines {
+            ensure_baseline_matches(sidecar_path, baseline).map_err(|(_, detail)| detail)?;
+        }
+        Ok(())
+    })
+    .map_err(|error| (ApplyFailureReason::Io, error))?;
     Ok(true)
 }
 
@@ -242,6 +253,7 @@ fn member_conflict() -> (ApplyFailureReason, String) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs::File;
     use std::path::Path;
 
@@ -257,6 +269,10 @@ mod tests {
     fn ai_metadata(rating: u8) -> ImageMetadata {
         ImageMetadata {
             rating,
+            exif: Some(HashMap::from([(
+                "DateTimeOriginal".to_string(),
+                "2026-08-04 12:00:00".to_string(),
+            )])),
             feature_data: Some(json!({
                 "smartCullingV2": {
                     "source": "ai",
@@ -324,6 +340,7 @@ mod tests {
             &get_primary_sidecar_path(&raw),
             &ImageMetadata {
                 rating: 5,
+                exif: ai_metadata(0).exif,
                 ..ImageMetadata::default()
             },
         );
@@ -331,6 +348,7 @@ mod tests {
             &get_primary_sidecar_path(&jpeg),
             &ImageMetadata {
                 rating: 4,
+                exif: ai_metadata(0).exif,
                 ..ImageMetadata::default()
             },
         );

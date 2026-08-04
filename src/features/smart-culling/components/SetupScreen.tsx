@@ -1,4 +1,13 @@
-import { Check, ChevronDown, ChevronUp, ShieldCheck, UserRoundCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CopySlash,
+  FolderOpen,
+  ShieldCheck,
+  UserRoundCheck,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
 import { SMART_CULLING_MODES, smartCullingModeSupportsKeyPeople } from '../constants';
@@ -11,11 +20,13 @@ import { KeyPeoplePicker } from './KeyPeoplePicker';
 export function SetupScreen({
   snapshot,
   images,
+  ignoredVirtualCopies = 0,
   onExit,
   onRequestThumbnails,
 }: {
   snapshot: SmartCullingSnapshot;
   images: ImageFile[];
+  ignoredVirtualCopies?: number;
   onExit: () => void;
   onRequestThumbnails?: (paths: string[]) => void;
 }) {
@@ -23,6 +34,7 @@ export function SetupScreen({
   const modeCopy = useSmartCullingModes();
   const { mode, keyPeople, busy, setState } = useSmartCullingStore();
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const interruptedTask = snapshot.failures.find((failure) => failure.code === 'previous_task_interrupted');
   const supportsKeyPeople = smartCullingModeSupportsKeyPeople(mode);
   const selectMode = (nextMode: typeof mode) => {
     const nextSupportsKeyPeople = smartCullingModeSupportsKeyPeople(nextMode);
@@ -54,7 +66,31 @@ export function SetupScreen({
             <span>{tx('title')}</span>
             <h1>{tx('setupTitle')}</h1>
             <p>{tx('setupDescription')}</p>
+            {snapshot.rootPath ? (
+              <small className="sc-task-root" title={snapshot.rootPath}>
+                <FolderOpen size={14} />
+                {tx('taskFolder')}: {snapshot.rootPath}
+              </small>
+            ) : null}
           </header>
+          {interruptedTask ? (
+            <div className="sc-recovery-notice" role="status">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>{tx('previousTaskInterrupted')}</strong>
+                <p>{tx('previousTaskInterruptedHint')}</p>
+                <small>{interruptedTask.path}</small>
+              </div>
+            </div>
+          ) : null}
+          {ignoredVirtualCopies > 0 ? (
+            <div className="sc-virtual-copy-notice" role="status">
+              <CopySlash size={17} />
+              <span>
+                {ignoredVirtualCopies} {tx('virtualCopiesExcluded')}
+              </span>
+            </div>
+          ) : null}
           <div className="sc-setup-grid">
             <section className="sc-setup-card">
               <div className="sc-section-title">

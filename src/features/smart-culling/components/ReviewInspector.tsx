@@ -1,49 +1,53 @@
 import { Images, LockKeyhole, ShieldCheck, UserRoundSearch, X } from 'lucide-react';
+import { forwardRef } from 'react';
 import { useProcessStore } from '../../../store/useProcessStore';
-import { SMART_CULLING_MODES, type SmartCullingMode } from '../constants';
-import { useSmartCullingModes, useSmartCullingReasonText, useSmartCullingText } from '../i18n';
+import { keyPersonIdentityLabel, useSmartCullingModes, useSmartCullingReasonText, useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
 import { fileName } from './LifecycleChrome';
+import { PhotoEvidenceViewport } from './PhotoEvidenceViewport';
 import { LabelControls, Stars } from './ReviewControls';
-import { useRenderedPreview } from './useRenderedPreview';
 
-export function ReviewInspector({
-  result,
-  onEdit,
-  onModeChange,
-  onEditGroupMode,
-  onToggle,
-  onOpenGroup,
-  onSetComparison,
-  readOnly = false,
-  open = false,
-  onClose,
-}: {
-  result: ReviewResult;
-  onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => void;
-  onModeChange: (mode: SmartCullingMode) => void;
-  onEditGroupMode: (mode: SmartCullingMode) => void;
-  onToggle: () => void;
-  onOpenGroup?: () => void;
-  onSetComparison?: (slot: 'a' | 'b') => void;
-  readOnly?: boolean;
-  open?: boolean;
-  onClose?: () => void;
-}) {
+export const ReviewInspector = forwardRef<
+  HTMLElement,
+  {
+    result: ReviewResult;
+    onEdit: (patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => void;
+    onOpenGroup?: () => void;
+    onSetComparison?: (slot: 'a' | 'b') => void;
+    readOnly?: boolean;
+    open?: boolean;
+    onClose?: () => void;
+  }
+>(function ReviewInspector(
+  { result, onEdit, onOpenGroup, onSetComparison, readOnly = false, open = false, onClose },
+  ref,
+) {
   const tx = useSmartCullingText();
   const reason = useSmartCullingReasonText();
   const modeCopy = useSmartCullingModes();
   const thumbnail = useProcessStore((state) => state.thumbnails[result.path]);
-  const { loadedUrl } = useRenderedPreview(result.path, thumbnail);
-  const previewUrl = loadedUrl ?? thumbnail;
   const groupSummary =
     result.groupSize > 1
       ? `${result.rating}/5 ${tx('starRating')} · ${result.groupSize} ${tx('groupSuffix')}`
       : `${result.rating}/5 ${tx('starRating')} · ${tx('singlePhoto')}`;
   const sourceLabel = `${tx('source')}:`;
-  const keyPersonEvidence = result.keyPersonEvidence.filter((evidence) => evidence.faceIndex !== null);
+  const keyPersonStatusText = (status: ReviewResult['keyPersonEvidence'][number]['status']) => {
+    if (status === 'confirmed') return tx('keyPersonConfirmed');
+    if (status === 'missing') return tx('keyPersonMissing');
+    if (status === 'suspected') return tx('suspectedKeyPerson');
+    if (status === 'ambiguous') return tx('keyPersonAmbiguous');
+    return tx('keyPersonUnknown');
+  };
   return (
-    <aside className={`sc-inspector ${open ? 'is-open' : ''}`}>
+    <aside
+      ref={ref}
+      className={`sc-inspector ${open ? 'is-open' : ''}`}
+      role="dialog"
+      aria-modal={open || undefined}
+      aria-label={tx('reviewEvidence')}
+      aria-hidden={!open}
+      tabIndex={-1}
+    >
       <header>
         <div>
           <strong>{fileName(result.path)}</strong>
@@ -54,8 +58,14 @@ export function ReviewInspector({
         </button>
       </header>
       <div className="sc-inspector-photo">
-        {previewUrl ? <img src={previewUrl} alt={fileName(result.path)} /> : <div>{fileName(result.path)}</div>}
-        <span>
+        <PhotoEvidenceViewport
+          path={result.path}
+          fallbackUrl={thumbnail}
+          alt={fileName(result.path)}
+          faces={result.faces}
+          compact
+        />
+        <span className="sc-inspector-dimensions">
           {result.width} × {result.height}
         </span>
       </div>
@@ -72,19 +82,24 @@ export function ReviewInspector({
           <>
             <p>{reason(result.reasonCodes)}</p>
             <p className="sc-review-evidence-hint">{tx('reviewEvidenceHint')}</p>
-            {result.colorLabel === 'yellow' ? <p className="sc-review-human-check">{tx('needsHumanReview')}</p> : null}
+            {result.requiresHumanReview ? <p className="sc-review-human-check">{tx('needsHumanReview')}</p> : null}
             {result.faces.length > 0 ? <p className="sc-expression-pending">{tx('expressionPending')}</p> : null}
-            {keyPersonEvidence.length > 0 ? (
+            {result.keyPersonEvidence.length > 0 ? (
               <div className="sc-key-person-evidence">
                 <UserRoundSearch size={14} />
                 <div>
-                  {keyPersonEvidence.map((evidence) => (
+                  {result.keyPersonEvidence.map((evidence) => (
                     <span key={evidence.priority}>
-                      {tx('priority')} {evidence.priority} · {tx('keyPersonCandidate')}
+                      {tx('person')} {keyPersonIdentityLabel(evidence.priority)} ·{' '}
+                      {keyPersonStatusText(evidence.status)}
                       {evidence.performanceRank ? ` · ${tx('performanceRank')} ${evidence.performanceRank}` : ''}
                     </span>
                   ))}
-                  <span>{tx('identityPending')}</span>
+                  {result.keyPersonEvidence.some((evidence) =>
+                    ['suspected', 'ambiguous', 'unknown'].includes(evidence.status),
+                  ) ? (
+                    <span>{tx('identityPending')}</span>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -99,25 +114,10 @@ export function ReviewInspector({
           disabled={readOnly}
           onChange={(colorLabel) => onEdit({ colorLabel })}
         />
-        <label className="sc-mode-select">
-          {tx('shootingMode')}
-          <select
-            disabled={readOnly}
-            value={result.mode}
-            onChange={(event) => onModeChange(event.target.value as SmartCullingMode)}
-          >
-            {SMART_CULLING_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {modeCopy[mode][0]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {result.groupSize > 1 ? (
-          <button className="sc-group-mode-button" disabled={readOnly} onClick={() => onEditGroupMode(result.mode)}>
-            {tx('applyModeToGroup')}
-          </button>
-        ) : null}
+        <div className="sc-mode-select">
+          <span>{tx('shootingMode')}</span>
+          <strong>{modeCopy[result.mode][0]}</strong>
+        </div>
         {result.groupKind !== 'single' ? (
           <div className="sc-inspector-group-actions">
             <button onClick={onOpenGroup}>
@@ -142,8 +142,8 @@ export function ReviewInspector({
       <section className="sc-protection-note">
         <ShieldCheck size={18} />
         <div>
-          <strong>{tx('protectedAfterEdit')}</strong>
-          <p>{tx('protectedHint')}</p>
+          <strong>{result.protected ? tx('lockedResult') : tx('protectedAfterEdit')}</strong>
+          <p>{result.protected ? tx('lockedResultHint') : tx('protectedHint')}</p>
         </div>
       </section>
       <footer>
@@ -151,10 +151,7 @@ export function ReviewInspector({
           <i className={`sc-color-dot is-${result.colorLabel ?? 'none'}`} />
           {result.colorLabel ? tx(result.colorLabel) : '—'}
         </span>
-        <button disabled={readOnly} onClick={onToggle}>
-          {result.adopted ? tx('doNotAdopt') : tx('adopt')}
-        </button>
       </footer>
     </aside>
   );
-}
+});
