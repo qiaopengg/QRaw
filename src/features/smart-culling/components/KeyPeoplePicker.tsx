@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, ScanFace, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScanFace, UserRoundPlus, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ImageFile } from '../../../components/ui/AppProperties';
 import { useProcessStore } from '../../../store/useProcessStore';
@@ -10,6 +10,8 @@ import { faceSelectionKey, PhotoEvidenceViewport } from './PhotoEvidenceViewport
 import { SmartCullingImage } from './SmartCullingImage';
 
 const PHOTO_PAGE_SIZE = 8;
+/** Mirrors MAX_REFERENCES_PER_KEY_PERSON in the Rust coordinator support module. */
+const MAX_REFERENCES_PER_PERSON = 5;
 
 export function KeyPeoplePicker({
   snapshot,
@@ -27,6 +29,8 @@ export function KeyPeoplePicker({
   const { keyPeople, busy, setState } = useSmartCullingStore();
   const [samplePath, setSamplePath] = useState(images[0]?.path ?? '');
   const [photoPage, setPhotoPage] = useState(0);
+  /** Identity that the next picked face is added to as another reference photo. */
+  const [targetPriority, setTargetPriority] = useState<number | null>(null);
   useEffect(() => {
     if (!samplePath && images[0]) {
       setSamplePath(images[0].path);
@@ -57,6 +61,11 @@ export function KeyPeoplePicker({
       ),
     [keyPeople],
   );
+  const identities = useMemo(() => {
+    const counts = new Map<number, number>();
+    keyPeople.forEach((person) => counts.set(person.priority, (counts.get(person.priority) ?? 0) + 1));
+    return [...counts.entries()].sort((left, right) => left[0] - right[0]);
+  }, [keyPeople]);
   const currentImageIndex = images.findIndex((image) => image.path === samplePath);
   const detect = async () => {
     if (!samplePath) return;
@@ -64,15 +73,30 @@ export function KeyPeoplePicker({
   };
   const toggleFace = (bbox: [number, number, number, number]) => {
     const key = faceSelectionKey(samplePath, bbox);
-    if (!selectedKeys.has(key)) {
-      setState({ keyPeople: [...keyPeople, { samplePath, bbox, priority: keyPeople.length + 1 }] });
+    if (selectedKeys.has(key)) {
+      const remaining = keyPeople.filter((person) => faceSelectionKey(person.samplePath, person.bbox) !== key);
+      // Identities must stay contiguous from 1 for the backend, so renumber and
+      // remap the active target through the same mapping. Without the remap the
+      // target would silently point at a different person once an identity is
+      // fully removed.
+      const order = [...new Set(remaining.map((person) => person.priority))].sort((left, right) => left - right);
+      setState({
+        keyPeople: remaining.map((person) => ({ ...person, priority: order.indexOf(person.priority) + 1 })),
+      });
+      setTargetPriority((current) => {
+        if (current === null) return null;
+        const remapped = order.indexOf(current);
+        return remapped >= 0 ? remapped + 1 : null;
+      });
       return;
     }
-    setState({
-      keyPeople: keyPeople
-        .filter((person) => faceSelectionKey(person.samplePath, person.bbox) !== key)
-        .map((person, priority) => ({ ...person, priority: priority + 1 })),
-    });
+    // Attach to the identity the user is currently building, so one person can
+    // gather several reference photos; otherwise start a new identity.
+    const nextPriority = targetPriority ?? identities.length + 1;
+    const referenceCount = keyPeople.filter((person) => person.priority === nextPriority).length;
+    if (referenceCount >= MAX_REFERENCES_PER_PERSON) return;
+    setState({ keyPeople: [...keyPeople, { samplePath, bbox, priority: nextPriority }] });
+    setTargetPriority(nextPriority);
   };
   const selectImageAt = (index: number) => {
     if (index < 0 || index >= images.length) return;
@@ -111,6 +135,37 @@ export function KeyPeoplePicker({
             </button>
             <p>{tx('keyPeoplePickerHint')}</p>
           </div>
+          <div className="sc-identity-targets" role="group" aria-label={tx('referenceTargetLabel')}>
+            <span className="sc-identity-targets-label">{tx('addReferenceTo')}</span>
+            {identities.map(([priority, count]) => (
+              <button
+                key={priority}
+                className={targetPriority === priority ? 'is-active' : ''}
+                aria-pressed={targetPriority === priority}
+                disabled={count >= MAX_REFERENCES_PER_PERSON}
+                title={
+                  count >= MAX_REFERENCES_PER_PERSON
+                    ? `${tx('referenceLimitReached')} (${MAX_REFERENCES_PER_PERSON})`
+                    : undefined
+                }
+                onClick={() => setTargetPriority(priority)}
+              >
+                {tx('person')} {keyPersonIdentityLabel(priority)}
+                <em>
+                  {count}/{MAX_REFERENCES_PER_PERSON}
+                </em>
+              </button>
+            ))}
+            <button
+              className={`sc-identity-new ${targetPriority === null ? 'is-active' : ''}`}
+              aria-pressed={targetPriority === null}
+              onClick={() => setTargetPriority(null)}
+            >
+              <UserRoundPlus size={13} />
+              {tx('newPerson')}
+            </button>
+          </div>
+          <p className="sc-identity-hint">{tx('multiReferenceHint')}</p>
           <div className="sc-filmstrip-row">
             <button
               className="sc-filmstrip-nav"

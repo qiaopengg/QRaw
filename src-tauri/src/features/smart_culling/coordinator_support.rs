@@ -86,13 +86,39 @@ pub(crate) fn catalog_failures(catalog: &Catalog) -> Vec<FailureItem> {
     failures
 }
 
-pub(crate) fn valid_key_people(selections: &[KeyPersonSelection], catalog: &Catalog) -> bool {
-    let mut priorities = selections
+/// Upper bound on reference photos per key person. Several references make the
+/// identity template robust to head angle and lighting, but the useful number is
+/// small and each one costs an extra embedding pass. This bound is a conservative
+/// engineering guard, not a frozen product limit; the final value belongs to the
+/// real-photo calibration set (`DATA-01`).
+pub(crate) const MAX_REFERENCES_PER_KEY_PERSON: usize = 5;
+
+/// Checks the identity numbering and per-identity reference budget.
+///
+/// Identities are numbered 1..=N with no gaps, and each may carry several
+/// reference photos, so this validates the set of distinct identities rather
+/// than the raw selection count.
+fn valid_identity_structure(selections: &[KeyPersonSelection]) -> bool {
+    let mut identities = selections
         .iter()
         .map(|selection| selection.priority)
         .collect::<Vec<_>>();
-    priorities.sort_unstable();
-    if priorities != (1..=selections.len()).collect::<Vec<_>>() {
+    identities.sort_unstable();
+    identities.dedup();
+    if identities != (1..=identities.len()).collect::<Vec<_>>() {
+        return false;
+    }
+    identities.iter().all(|identity| {
+        let references = selections
+            .iter()
+            .filter(|selection| selection.priority == *identity)
+            .count();
+        (1..=MAX_REFERENCES_PER_KEY_PERSON).contains(&references)
+    })
+}
+
+pub(crate) fn valid_key_people(selections: &[KeyPersonSelection], catalog: &Catalog) -> bool {
+    if !valid_identity_structure(selections) {
         return false;
     }
 
@@ -229,7 +255,58 @@ pub(crate) fn apply_failure_code(reason: ApplyFailureReason) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{mode_supports_key_people, valid_mode, valid_normalized_bbox};
+    use super::{
+        KeyPersonSelection, MAX_REFERENCES_PER_KEY_PERSON, mode_supports_key_people,
+        valid_identity_structure, valid_mode, valid_normalized_bbox,
+    };
+
+    fn selection(priority: usize, sample: &str) -> KeyPersonSelection {
+        KeyPersonSelection {
+            sample_path: sample.to_string(),
+            bbox: [0.1, 0.1, 0.2, 0.2],
+            priority,
+        }
+    }
+
+    #[test]
+    fn one_identity_may_carry_several_reference_photos() {
+        let selections = vec![
+            selection(1, "a.jpg"),
+            selection(1, "b.jpg"),
+            selection(1, "c.jpg"),
+            selection(2, "a.jpg"),
+        ];
+
+        assert!(valid_identity_structure(&selections));
+    }
+
+    #[test]
+    fn identity_numbering_must_stay_contiguous_from_one() {
+        assert!(valid_identity_structure(&[selection(1, "a.jpg")]));
+        // Gap at 2 and a set that does not start at 1 are both rejected.
+        assert!(!valid_identity_structure(&[
+            selection(1, "a.jpg"),
+            selection(3, "b.jpg")
+        ]));
+        assert!(!valid_identity_structure(&[selection(2, "a.jpg")]));
+    }
+
+    #[test]
+    fn reference_photos_per_identity_stay_within_the_budget() {
+        let within = (0..MAX_REFERENCES_PER_KEY_PERSON)
+            .map(|index| selection(1, &format!("{index}.jpg")))
+            .collect::<Vec<_>>();
+        assert!(valid_identity_structure(&within));
+
+        let mut over_budget = within.clone();
+        over_budget.push(selection(1, "extra.jpg"));
+        assert!(!valid_identity_structure(&over_budget));
+    }
+
+    #[test]
+    fn an_empty_selection_is_structurally_valid() {
+        assert!(valid_identity_structure(&[]));
+    }
 
     #[test]
     fn key_person_boxes_must_be_finite_and_inside_the_photo() {

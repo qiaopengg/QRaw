@@ -142,6 +142,44 @@ fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>> {
     Ok(embedding)
 }
 
+/// Combines several reference embeddings of the *same* person into one template.
+///
+/// A single reference photo pins the identity to one head angle and one lighting
+/// setup, which is a major source of unstable cosine scores. Averaging several
+/// L2-normalised embeddings and renormalising the result is the standard template
+/// (centroid) approach: it keeps the parts of the embedding that are consistent
+/// across the references and suppresses the per-shot variation.
+///
+/// Returns `None` when there is nothing usable to aggregate, so callers can
+/// report the person as unavailable instead of matching against a degenerate
+/// vector.
+pub fn aggregate_reference_embeddings(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
+    let usable = embeddings
+        .iter()
+        .filter(|embedding| {
+            embedding.len() == 128 && embedding.iter().all(|value| value.is_finite())
+        })
+        .collect::<Vec<_>>();
+    let [first, rest @ ..] = usable.as_slice() else {
+        return None;
+    };
+    if rest.is_empty() {
+        return Some((*first).clone());
+    }
+
+    let mut mean = vec![0.0f32; 128];
+    for embedding in &usable {
+        for (slot, value) in mean.iter_mut().zip(embedding.iter()) {
+            *slot += value;
+        }
+    }
+    let count = usable.len() as f32;
+    mean.iter_mut().for_each(|value| *value /= count);
+    // Opposing references can cancel out; renormalising a near-zero mean would
+    // amplify noise into a meaningless direction, so refuse it instead.
+    normalize_embedding(mean).ok()
+}
+
 pub fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f32> {
     (left.len() == 128 && right.len() == 128).then(|| {
         left.iter()
@@ -324,6 +362,63 @@ mod tests {
             maximum_weight_assignment(&scores, SFACE_SUSPECTED_THRESHOLD),
             vec![None, None]
         );
+    }
+
+    #[test]
+    fn a_single_reference_is_used_unchanged() {
+        let only = normalize_embedding(vec![1.0; 128]).unwrap();
+
+        let aggregated = aggregate_reference_embeddings(&[only.clone()]).unwrap();
+
+        assert_eq!(aggregated, only);
+    }
+
+    #[test]
+    fn multiple_references_average_towards_their_shared_direction() {
+        // Two references agreeing on dimension 0 but disagreeing on dimension 1:
+        // the shared component must survive and dominate the template.
+        let mut first = vec![0.0f32; 128];
+        first[0] = 1.0;
+        first[1] = 1.0;
+        let mut second = vec![0.0f32; 128];
+        second[0] = 1.0;
+        second[1] = -1.0;
+
+        let template = aggregate_reference_embeddings(&[
+            normalize_embedding(first).unwrap(),
+            normalize_embedding(second).unwrap(),
+        ])
+        .unwrap();
+
+        assert!(
+            (template[0] - 1.0).abs() < 1e-5,
+            "shared axis must dominate"
+        );
+        assert!(template[1].abs() < 1e-5, "conflicting axis must cancel");
+        let norm = template.iter().map(|value| value * value).sum::<f32>();
+        assert!((norm - 1.0).abs() < 1e-5, "template must stay normalised");
+    }
+
+    #[test]
+    fn aggregation_skips_malformed_references_and_reports_nothing_usable() {
+        let good = normalize_embedding(vec![1.0; 128]).unwrap();
+
+        // Wrong length and non-finite references are ignored, not averaged in.
+        let mixed = aggregate_reference_embeddings(&[vec![1.0; 127], good.clone()]).unwrap();
+        assert_eq!(mixed, good);
+
+        assert!(aggregate_reference_embeddings(&[]).is_none());
+        assert!(aggregate_reference_embeddings(&[vec![f32::NAN; 128]]).is_none());
+    }
+
+    #[test]
+    fn opposing_references_are_refused_instead_of_amplifying_noise() {
+        let mut forward = vec![0.0f32; 128];
+        forward[0] = 1.0;
+        let mut backward = vec![0.0f32; 128];
+        backward[0] = -1.0;
+
+        assert!(aggregate_reference_embeddings(&[forward, backward]).is_none());
     }
 
     #[test]

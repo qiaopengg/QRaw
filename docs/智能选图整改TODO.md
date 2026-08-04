@@ -84,7 +84,7 @@
 - [x] `PERSON-06` 人工审核显示“疑是关键人物”，用户手动打星后立即锁定。
 - [x] `PERSON-07` A/B/C 只表示身份，不显示为优先级，也不影响权重。
 - [x] `PERSON-08` 人脸框和辅助技术使用“人物 A/B/C、已选择/未选择”等可理解标签。
-- [!] `PERSON-09` 支持每位关键人物使用多张高质量参考照片，并冻结交互上限。需要先用 `DATA-01` 验证模板聚合方式并冻结每人参考图上限，当前不得擅自确定产品限制。
+- [!] `PERSON-09` 支持每位关键人物使用多张高质量参考照片，并冻结交互上限。已实现机制：后端 `aggregate_reference_embeddings` 对同一身份的多个 L2 归一化 embedding 取均值后重新归一化（标准模板/质心法），保留跨参考一致的成分、抑制单张的角度与光照偏差；方向相反导致均值趋零时拒绝而非放大噪声；单张失败不再废掉整个身份，只要另有可用参考即成立。校验从「priority 必须唯一」改为「身份编号 1..=N 连续 + 每身份参考数在预算内」。前端在关键人物面板新增身份归属 chip（人物 A/B/C + 新增人物，显示 n/5），先选身份再点人脸即可追加参考；移除最后一张参考时同步重排编号并重映射当前归属，避免错位到其他人。证据：`face_identity` 4 项 + `coordinator_support` 4 项新增回归，Rust 专项 130 项通过。仍为 `[!]`：每人参考图上限当前取保守值 5，属工程护栏而非冻结的产品限制，最终值需 `DATA-01` 校准。
 - [!] `PERSON-10` SFace 建立高/灰/低三区间，并以真实样片校准阈值和歧义间隔。代码已区分明确缺失、灰区和疑似，高区仍不自动确认为本人；阈值冻结等待 `DATA-01`/`DATA-02`。
 - [!] `PERSON-11` YuNet 增加多尺度/分块检测与跨尺度去重，提高小脸召回。已实现：整图 letterbox 等比缩放（消除原 `resize_exact` 的比例形变）+ 大图 2x2 重叠分块，统一走全局 NMS 去重；证据：`face_models.rs` 4 项新增回归、Rust 专项 118 项通过。仍为 `[!]`：额外推理耗时需 `RELEASE-01` 冻结，召回收益需 `DATA-01` 真实群像量化。
 - [x] `PERSON-14` 修正 YuNet 输入的比例形变。原实现用 `resize_exact` 把任意比例帧拉伸成 640×640，既偏离模型训练几何，又使 5 点关键点失准，进而污染 SFace 对齐与身份 embedding。证据：等比 letterbox + padding 区域检测丢弃，专项回归覆盖比例保持与填充不参与检测。
@@ -125,7 +125,7 @@
 - [!] `MODEL-02` 审批并隔离验证 DINOv2 特征，用于相似组和后续自有排序头。
 - [!] `MODEL-03` 审批并隔离验证 ARNIQA 无参考画质证据。
 - [!] `MODEL-04` 审批并隔离验证 RTMPose face，用于姿态、遮挡和嘴型等技术可用性证据。
-- [!] `MODEL-05` 仅在确有必要时审批 EmotiEffLib ONNX；不得评价情绪或吸引力。
+- [!] `MODEL-05` 表情模型已改选并接入 **FER+**（`emotion_ferplus_8.onnx`，ONNX Model Zoo，MIT）。原候选 EmotiEffLib 已否决：其权重基于 AffectNet 训练，属研究/非商业授权，不可随安装包分发；LibreFace 亦自述 non-commercial（USC 版权），同样否决。已完成：SHA256 固定校验、`Input3 [1,1,64,64]` / `Plus692_Output_0 [1,8]` 契约校验、Core ML MLProgram / DirectML 强制 GPU 且禁用 CPU 回退、加载期 smoke test、`THIRD_PARTY_NOTICES.md` 授权声明。**用法边界**：只消费输出分布的峰度（top-1 概率 + 归一化熵）判断「是否稳定可用瞬间」，从不解释、不展示、不用任何情绪类别影响星级，符合「表情只判断技术可用瞬间」规则；侧脸（`MODE-17` 姿态门控）时同样标记为不可用。FER+ 为 opset-8 CNTK 导出，故会话为**可选**：若某设备的严格 GPU 路径不接受该图，表情证据降级为不可用并打印告警，其余功能不受影响，绝不静默回落 CPU。证据：`expression.rs` 5 项新增回归（峰化=stable、平坦=transitional、中间带=unknown、畸形输出=unavailable、任何类别胜出都不泄露情绪标签），Rust 专项 135 项通过。**macOS Core ML 已确认接受**：新增 `models::tests::expression_model_is_accepted_by_the_validated_gpu_path`（`#[ignore]`，需 dylib 与模型文件）在 `disable_cpu_ep_fallback=1` + `error_on_failure()` 下成功建会话、通过契约校验并完成推理，返回 8 个有限 logits（实测 `state=stable`），证明 opset-8 图无需 CPU 回落即被 Core ML 接受。注意该 harness 进程在断言通过**之后**会因 ONNX Runtime 全局环境与 Core ML 的退出期清理竞态而 abort；生产 app 由 `FACE_MODELS`（`OnceCell`）持有会话至进程结束，不经过该路径，故以断言结果为准而非进程退出码。仍为 `[!]`：Windows DirectML 一致性与真实样片准确率尚未验证，未通过前不参与自动写星。
 - [!] `MODEL-06` 每个候选分别完成代码、权重、训练数据和再分发许可审查。
 - [!] `MODEL-07` 每个候选完成 ONNX 参考输出、Core ML、DirectML、数值一致性和禁止静默 CPU 回退验证。
 - [!] `DATA-01` 建立按完整拍摄任务和相似组切分的真实照片数据集，冻结标注规范和最终测试集。

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::analysis::analyze_image_quality;
 use super::api::{DetectedFaceDto, FailureItem, KeyPersonSelection, ReviewResult};
-use super::face_identity::{KeyPersonReference, match_key_people};
+use super::face_identity::{KeyPersonReference, aggregate_reference_embeddings, match_key_people};
 use super::infrastructure::{CatalogAsset, render_current_state};
 use super::models::SmartCullingFaceModels;
 use super::scoring::{AnalysisCandidate, organize_results};
@@ -219,6 +219,9 @@ fn build_key_references(
     let mut references = Vec::new();
     let mut unavailable = Vec::new();
     let mut rendered_cache = HashMap::new();
+    // One identity may contribute several reference photos, so embeddings are
+    // collected per identity and aggregated into a single template afterwards.
+    let mut embeddings_by_identity: HashMap<usize, Vec<Vec<f32>>> = HashMap::new();
 
     for selection in selections {
         if cancellation.load(Ordering::Acquire) {
@@ -269,12 +272,13 @@ fn build_key_references(
         };
 
         if let Some(embedding) = embedding {
-            references.push(KeyPersonReference {
-                priority: selection.priority,
-                embedding,
-            });
+            embeddings_by_identity
+                .entry(selection.priority)
+                .or_default()
+                .push(embedding);
         } else {
-            unavailable.push(selection.priority);
+            // A single unusable reference is reported but does not disqualify the
+            // identity; it stays usable as long as another reference succeeded.
             failures.push(FailureItem {
                 path: selection.sample_path.clone(),
                 member_paths: vec![selection.sample_path.clone()],
@@ -287,6 +291,26 @@ fn build_key_references(
             });
         }
     }
+
+    let mut identities = selections
+        .iter()
+        .map(|selection| selection.priority)
+        .collect::<Vec<_>>();
+    identities.sort_unstable();
+    identities.dedup();
+    for identity in identities {
+        let template = embeddings_by_identity
+            .get(&identity)
+            .and_then(|embeddings| aggregate_reference_embeddings(embeddings));
+        match template {
+            Some(embedding) => references.push(KeyPersonReference {
+                priority: identity,
+                embedding,
+            }),
+            None => unavailable.push(identity),
+        }
+    }
+
     references.sort_by_key(|reference| reference.priority);
     unavailable.sort_unstable();
     (references, unavailable)

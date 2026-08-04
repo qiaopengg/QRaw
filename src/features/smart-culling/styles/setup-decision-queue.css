@@ -307,3 +307,61 @@
 .sc-section-title em {
   font-size: var(--sc-text-fine);
 }
+
+/* Identity target chips: which key person the next picked face is added to. */
+.sc-identity-targets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #2c342c;
+}
+
+.sc-identity-targets-label {
+  color: #939e91;
+  font-size: var(--sc-text-fine);
+}
+
+.sc-identity-targets button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid #414a3f !important;
+  border-radius: 999px;
+  color: #bcc7b9 !important;
+  background: #1c221b !important;
+  font-size: var(--sc-text-fine) !important;
+}
+
+.sc-identity-targets button:hover:not(:disabled) {
+  border-color: #6f8168 !important;
+  color: #eef2ec !important;
+}
+
+.sc-identity-targets button.is-active {
+  border-color: #8fd07c !important;
+  color: #d7f0cd !important;
+  background: #24331f !important;
+}
+
+.sc-identity-targets button em {
+  color: #8b968a;
+  font-size: var(--sc-text-fine);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-identity-targets button.is-active em {
+  color: #a7c79b;
+}
+
+.sc-identity-hint {
+  margin-top: 8px;
+  color: #7f8a7d;
+  font-size: var(--sc-text-fine);
+  line-height: 1.5;
+}

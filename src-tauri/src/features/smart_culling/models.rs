@@ -17,22 +17,32 @@ use ort::value::ValueType;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
 
+use super::expression::EXPRESSION_CLASS_COUNT;
 use super::face_identity::run_sface_embedding;
-use super::face_models::{run_ocec_classification, run_yunet_detection};
+use super::face_models::{run_ferplus_expression, run_ocec_classification, run_yunet_detection};
 
 const YUNET_MODEL_FILENAME: &str = "face_detection_yunet_2023mar.onnx";
 const OCEC_MODEL_FILENAME: &str = "ocec_l.onnx";
 const SFACE_MODEL_FILENAME: &str = "face_recognition_sface_2021dec_coreml.onnx";
+const FERPLUS_MODEL_FILENAME: &str = "emotion_ferplus_8.onnx";
 const OCEC_BATCH_DIMENSION: (&str, i64) = ("batch", 1);
 const OCEC_INPUT_SHAPE: [i64; 4] = [1, 3, 24, 40];
+const FERPLUS_INPUT_SHAPE: [i64; 4] = [1, 1, 64, 64];
 const YUNET_SHA256: &str = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 const OCEC_SHA256: &str = "de9b8031f8b521a862d8cff55ba88c2fccab6ac96484ba53154dd12c53c7c7f9";
 const SFACE_SHA256: &str = "3e4a66d8a95745ce8b972e78d1330918db04bdb8ef4a81d02088c50aa8d55a15";
+const FERPLUS_SHA256: &str = "a2a2ba6a335a3b29c21acb6272f962bd3d47f84952aaffa03b60986e04efa61c";
 
 pub struct SmartCullingFaceModels {
     pub yunet: Mutex<Session>,
     pub ocec: Mutex<Session>,
     pub sface: Mutex<Session>,
+    /// Optional on purpose. FER+ is an opset-8 CNTK export, so a strict
+    /// no-CPU-fallback Core ML / DirectML session is not guaranteed to accept
+    /// the whole graph on every device. When it does not, expression evidence
+    /// stays unavailable and the rest of smart culling keeps working, rather
+    /// than the whole feature failing to load or silently running on CPU.
+    pub expression: Option<Mutex<Session>>,
 }
 
 // Core ML session teardown is asynchronous. Keeping the compiled models
@@ -92,13 +102,41 @@ fn load_face_models_uncached(app_handle: &tauri::AppHandle) -> Result<Arc<SmartC
     let sface = gpu_session(&sface_path, None)?;
     validate_session_contract(&sface, "data", &[1, 3, 112, 112], &["fc1"])?;
 
+    let expression = load_expression_session(&resource_dir.join(FERPLUS_MODEL_FILENAME));
+
     let models = Arc::new(SmartCullingFaceModels {
         yunet: Mutex::new(yunet),
         ocec: Mutex::new(ocec),
         sface: Mutex::new(sface),
+        expression,
     });
     smoke_test(&models)?;
     Ok(models)
+}
+
+/// Loads FER+ if and only if it passes integrity, contract and validated-GPU
+/// checks. Any failure is reported and downgraded to "no expression evidence".
+fn load_expression_session(path: &PathBuf) -> Option<Mutex<Session>> {
+    let prepared = verify_model(path, FERPLUS_SHA256)
+        .and_then(|()| gpu_session(path, None))
+        .and_then(|session| {
+            validate_session_contract(
+                &session,
+                "Input3",
+                &FERPLUS_INPUT_SHAPE,
+                &["Plus692_Output_0"],
+            )?;
+            Ok(session)
+        });
+    match prepared {
+        Ok(session) => Some(Mutex::new(session)),
+        Err(error) => {
+            eprintln!(
+                "Smart culling expression evidence is disabled; FER+ did not pass the validated GPU path: {error}"
+            );
+            None
+        }
+    }
 }
 
 fn smoke_test(models: &SmartCullingFaceModels) -> Result<()> {
@@ -117,6 +155,16 @@ fn smoke_test(models: &SmartCullingFaceModels) -> Result<()> {
     let sface_image = DynamicImage::new_rgb8(112, 112);
     run_sface_embedding(&sface_image, &landmarks, &models.sface)
         .map_err(|error| anyhow!("SFace Core ML/DirectML smoke test failed: {error}"))?;
+    if let Some(expression) = &models.expression {
+        let logits = run_ferplus_expression(&DynamicImage::new_rgb8(64, 64), expression)
+            .map_err(|error| anyhow!("FER+ GPU smoke test failed: {error}"))?;
+        if logits.len() != EXPRESSION_CLASS_COUNT {
+            return Err(anyhow!(
+                "FER+ returned {} values instead of {EXPRESSION_CLASS_COUNT}",
+                logits.len()
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -210,7 +258,62 @@ fn shape_matches(actual: &[i64], expected: &[i64]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{OCEC_BATCH_DIMENSION, OCEC_INPUT_SHAPE, shape_matches};
+    use super::{
+        FERPLUS_INPUT_SHAPE, FERPLUS_MODEL_FILENAME, FERPLUS_SHA256, OCEC_BATCH_DIMENSION,
+        OCEC_INPUT_SHAPE, shape_matches,
+    };
+
+    /// MODEL-07 harness for the expression model.
+    ///
+    /// Ignored by default because it needs the bundled ONNX Runtime dylib and the
+    /// real model file, neither of which belong to a pure unit-test run. Execute
+    /// it on each target platform to confirm the validated GPU path accepts the
+    /// opset-8 FER+ graph without any CPU fallback:
+    ///
+    /// ```text
+    /// ORT_DYLIB_PATH=resources/libonnxruntime.dylib \
+    ///   cargo test --lib expression_model_is_accepted -- --ignored --nocapture
+    /// ```
+    ///
+    /// Reading the result: judge it by the reported assertions, not the process
+    /// exit code. On macOS the harness process aborts *after* the test passes,
+    /// while ONNX Runtime tears its global environment down against Core ML. The
+    /// shipped app never hits that path because `FACE_MODELS` keeps the sessions
+    /// alive for the whole process lifetime.
+    #[test]
+    #[ignore = "requires the bundled ONNX Runtime dylib and model file"]
+    fn expression_model_is_accepted_by_the_validated_gpu_path() {
+        use super::{gpu_session, validate_session_contract, verify_model};
+        use crate::features::smart_culling::expression::{
+            EXPRESSION_CLASS_COUNT, evaluate_expression,
+        };
+        use crate::features::smart_culling::face_models::run_ferplus_expression;
+        use image::DynamicImage;
+        use std::path::PathBuf;
+        use std::sync::Mutex;
+
+        let path = PathBuf::from("resources/smart_culling_models").join(FERPLUS_MODEL_FILENAME);
+        verify_model(&path, FERPLUS_SHA256).expect("bundled FER+ integrity must match");
+
+        let session = gpu_session(&path, None)
+            .expect("Core ML / DirectML must accept the FER+ graph with no CPU fallback");
+        validate_session_contract(
+            &session,
+            "Input3",
+            &FERPLUS_INPUT_SHAPE,
+            &["Plus692_Output_0"],
+        )
+        .expect("FER+ session contract must match");
+
+        let session = Mutex::new(session);
+        let logits = run_ferplus_expression(&DynamicImage::new_rgb8(64, 64), &session)
+            .expect("FER+ inference must succeed on the validated path");
+        assert_eq!(logits.len(), EXPRESSION_CLASS_COUNT);
+        assert!(logits.iter().all(|value| value.is_finite()));
+        println!("FER+ logits: {logits:?}");
+        println!("evidence: {:?}", evaluate_expression(&logits));
+        drop(session);
+    }
 
     #[test]
     fn contract_shape_allows_only_declared_dynamic_dimensions() {

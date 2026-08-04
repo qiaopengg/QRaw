@@ -21,6 +21,8 @@ const TILE_FRACTION: f32 = 0.6;
 
 const OCEC_INPUT_HEIGHT: u32 = 24;
 const OCEC_INPUT_WIDTH: u32 = 40;
+
+pub const FERPLUS_INPUT_SIZE: u32 = 64;
 #[cfg(test)]
 const OCEC_STRONG_CLOSED_THRESHOLD: f32 = 0.30;
 #[cfg(test)]
@@ -265,6 +267,46 @@ fn box_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     } else {
         inter_area / union
     }
+}
+
+/// Runs the FER+ expression classifier on a cropped face and returns the raw
+/// eight logits.
+///
+/// The caller converts these into usability evidence via
+/// `expression::evaluate_expression`; the individual emotion classes are never
+/// interpreted here or downstream.
+pub fn run_ferplus_expression(
+    face_crop: &DynamicImage,
+    session: &Mutex<Session>,
+) -> Result<Vec<f32>> {
+    let input = prepare_ferplus_input(face_crop);
+    let tensor = Tensor::from_array(input.into_dyn().as_standard_layout().into_owned())?;
+    let mut session_guard = session
+        .lock()
+        .map_err(|_| anyhow!("FER+ inference session lock is poisoned"))?;
+    let outputs = session_guard.run(ort::inputs!["Input3" => tensor])?;
+    Ok(outputs[0]
+        .try_extract_array::<f32>()?
+        .iter()
+        .copied()
+        .collect())
+}
+
+/// FER+ takes a single-channel 64x64 crop. The reference pipeline feeds raw
+/// 0-255 grayscale values with no mean subtraction or rescaling, so the same
+/// contract is kept here.
+fn prepare_ferplus_input(face_crop: &DynamicImage) -> Array4<f32> {
+    let resized =
+        face_crop.resize_exact(FERPLUS_INPUT_SIZE, FERPLUS_INPUT_SIZE, FilterType::Triangle);
+    let gray = resized.to_luma8();
+    let size = FERPLUS_INPUT_SIZE as usize;
+    let mut input = Array4::<f32>::zeros((1, 1, size, size));
+    for y in 0..size {
+        for x in 0..size {
+            input[[0, 0, y, x]] = gray.get_pixel(x as u32, y as u32)[0] as f32;
+        }
+    }
+    input
 }
 
 /// Classifies whether the eyes in a cropped face region are open or closed

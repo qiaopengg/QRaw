@@ -3,9 +3,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
+use super::expression::{ExpressionEvidence, evaluate_expression};
 use super::face_geometry::estimate_pose;
 use super::face_identity::run_sface_embedding;
-use super::face_models::{crop_eye_region, run_ocec_classification, run_yunet_detection};
+use super::face_models::{
+    crop_eye_region, run_ferplus_expression, run_ocec_classification, run_yunet_detection,
+};
 use super::models::SmartCullingFaceModels;
 use super::types::{EyeResult, FaceResult};
 
@@ -185,15 +188,33 @@ fn detect_faces_in_image(
                 None
             };
 
+            // Expression usability, not emotion: only the certainty of the FER+
+            // distribution is consumed. A turned head also invalidates this, for
+            // the same reason it invalidates the eye state.
+            let expression = match (&models.expression, pose_hides_eyes) {
+                (_, true) => ExpressionEvidence::unavailable("expression_pose_unreliable"),
+                (None, _) => ExpressionEvidence::unavailable("expression_model_unavailable"),
+                (Some(session), false) => face_crop
+                    .as_ref()
+                    .map(|crop| match run_ferplus_expression(crop, session) {
+                        Ok(logits) => evaluate_expression(&logits),
+                        Err(_) => ExpressionEvidence::unavailable("expression_inference_failed"),
+                    })
+                    .unwrap_or_else(|| {
+                        ExpressionEvidence::unavailable("expression_face_crop_unavailable")
+                    }),
+            };
+            ensure_not_cancelled(cancellation)?;
+
             Ok(FaceResult {
                 bbox: face.bbox,
                 landmarks: face.landmarks,
                 detection_score: face.score,
                 left_eye: left_eye_result,
                 right_eye: right_eye_result,
-                expression_state: "unknown".to_string(),
-                expression_confidence: 0.0,
-                expression_reason: "model_unavailable".to_string(),
+                expression_state: expression.state.to_string(),
+                expression_confidence: expression.confidence,
+                expression_reason: expression.reason.to_string(),
                 sharpness_metric,
                 sharpness_confidence: local_confidence,
                 exposure_metric,
