@@ -1,22 +1,5 @@
 import { create } from 'zustand';
-import {
-  ImageFile,
-  LibraryViewMode,
-  Panel,
-  UiVisibility,
-  PanelRegion,
-} from '../components/ui/AppProperties';
-
-const RIGHT_PANEL_ORDER = [
-  Panel.Metadata,
-  Panel.Adjustments,
-  Panel.Crop,
-  Panel.Masks,
-  Panel.Ai,
-  Panel.Presets,
-  Panel.Export,
-  Panel.FolderTree,
-];
+import { ImageFile, Panel, UiVisibility, PanelRegion } from '../components/ui/AppProperties';
 
 export type SwitcherPlacement = 'bottom' | 'right' | 'left' | 'top';
 
@@ -104,8 +87,8 @@ interface UIState {
   panelSwitcherPlacement: Record<PanelRegion, SwitcherPlacement>;
   setPanelSwitcherPlacement: (region: PanelRegion, placement: SwitcherPlacement) => void;
 
-  activeRightPanel: Panel | null;
-  renderedRightPanel: Panel | null;
+  activePanel: Panel | null;
+  renderedPanel: Panel | null;
   slideDirection: number;
   collapsibleSectionsState: CollapsibleSectionsState;
 
@@ -132,7 +115,7 @@ interface UIState {
   collageModalState: CollageModalState;
 
   setUI: (updater: Partial<UIState> | ((state: UIState) => Partial<UIState>)) => void;
-  setRightPanel: (panel: Panel | null) => void;
+  setPanel: (panel: Panel | null) => void;
   customEscapeHandler: (() => void) | null;
   setCustomEscapeHandler: (handler: (() => void) | null) => void;
   searchFocusRequest: number;
@@ -145,12 +128,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   isWindowFullScreen: false,
   isInstantTransition: false,
   isLayoutReady: false,
-  uiVisibility: { folderTree: true, filmstrip: true },
+  uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true },
   isLibraryExportPanelVisible: false,
   isSettingsOpen: false,
 
-  leftPanelWidth: 320,
-  rightPanelWidth: 320,
+  leftPanelWidth: 350,
+  rightPanelWidth: 350,
   bottomPanelHeight: 144,
   leftTopHeight: 450,
   rightTopHeight: 450,
@@ -181,8 +164,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       panelSwitcherPlacement: { ...state.panelSwitcherPlacement, [region]: placement },
     })),
 
-  activeRightPanel: Panel.Adjustments,
-  renderedRightPanel: Panel.Adjustments,
+  activePanel: Panel.Adjustments,
+  renderedPanel: Panel.Adjustments,
   slideDirection: 1,
   collapsibleSectionsState: { basic: true, color: false, curves: true, details: false, effects: false },
 
@@ -263,8 +246,8 @@ export const useUIStore = create<UIState>((set, get) => ({
         panelLayout: layout,
         activePanels: active,
         activeLayoutDragItem: null,
-        activeRightPanel: panel,
-        renderedRightPanel: panel,
+        activePanel: panel,
+        renderedPanel: panel,
       };
     }),
 
@@ -298,8 +281,8 @@ export const useUIStore = create<UIState>((set, get) => ({
         panelLayout: layout,
         activePanels: active,
         activeLayoutDragItem: null,
-        activeRightPanel: panel,
-        renderedRightPanel: panel,
+        activePanel: panel,
+        renderedPanel: panel,
       };
     }),
 
@@ -308,13 +291,13 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (!panel) return state;
       const updates: Partial<UIState> = {
         activePanels: { ...state.activePanels, [region]: panel },
-        activeRightPanel: panel,
-        renderedRightPanel: panel,
+        activePanel: panel,
+        renderedPanel: panel,
       };
       return updates;
     }),
 
-  setRightPanel: (panelId) => {
+  setPanel: (panelId) => {
     const state = get();
     if (!panelId) return;
 

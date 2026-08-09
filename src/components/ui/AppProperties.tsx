@@ -67,6 +67,7 @@ export enum Invokes {
   GetSupportedFileTypes = 'get_supported_file_types',
   HandleExportPresetsToFile = 'handle_export_presets_to_file',
   HandleImportPresetsFromFile = 'handle_import_presets_from_file',
+  HandleImportPresetsFromFiles = 'handle_import_presets_from_files',
   HandleImportLegacyPresetsFromFile = 'handle_import_legacy_presets_from_file',
   ImportFiles = 'import_files',
   InvokeGenerativeReplace = 'invoke_generative_replace',
@@ -363,8 +364,9 @@ export interface TransformState {
 }
 
 export interface UiVisibility {
-  folderTree: boolean;
   filmstrip: boolean;
+  leftPanel: boolean;
+  rightPanel: boolean;
 }
 
 export interface WaveformData {
