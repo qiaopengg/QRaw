@@ -13,11 +13,13 @@ mod android_integration;
 mod app_settings;
 mod app_state;
 mod cache_utils;
+mod camera_tethering;
 mod denoising;
 mod exif_processing;
 mod export_processing;
 mod features;
 mod file_management;
+mod focus_stacking;
 mod formats;
 mod gpu_processing;
 mod hdr_deghosting;
@@ -691,7 +693,7 @@ async fn apply_adjustments(
 
     {
         let tx_guard = state.preview_worker_tx.lock().unwrap();
-        if let Some(worker_tx) = &*tx_guard {
+        if let Some(worker_tx) = tx_guard.as_ref() {
             let job = PreviewJob {
                 adjustments: js_adjustments,
                 is_interactive,
@@ -1948,6 +1950,24 @@ pub fn run() {
                     }
         })
         .setup(move |app| {
+            #[cfg(feature = "tethering")]
+            {
+                std::thread::spawn(|| {
+                    match gphoto2::Context::new() {
+                        Ok(context) => {
+                            log::info!("gphoto2 context initialized successfully.");
+                            match gphoto2::Camera::autodetect(&context) {
+                                Ok(cameras) => {
+                                    log::info!("Found {} attached camera(s)", cameras.len());
+                                }
+                                Err(e) => log::warn!("Failed to autodetect cameras: {}", e),
+                            }
+                        }
+                        Err(e) => log::error!("Failed to initialize gphoto2 context: {}", e),
+                    }
+                });
+            }
+
             let state = app.state::<AppState>();
 
             #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
@@ -2257,6 +2277,7 @@ pub fn run() {
             export_task_token: Arc::new(Mutex::new(None)),
             hdr_result: Arc::new(Mutex::new(None)),
             panorama_result: Arc::new(Mutex::new(None)),
+            focus_stack_result: Arc::new(Mutex::new(None)),
             denoise_result: Arc::new(Mutex::new(None)),
             indexing_task_handle: Mutex::new(None),
             lut_cache: Mutex::new(HashMap::new()),
@@ -2279,6 +2300,7 @@ pub fn run() {
             metadata_manager: MetadataManager::new(),
             disks_cache: Mutex::new(None),
             disks_cache_refreshing: AtomicBool::new(false),
+            camera_session: Mutex::new(camera_tethering::CameraSession::new()),
         })
         .invoke_handler(tauri::generate_handler![
             apply_adjustments,
@@ -2311,6 +2333,7 @@ pub fn run() {
             cache_utils::clear_image_caches,
             app_settings::load_settings,
             app_settings::save_settings,
+            app_settings::is_tethering_supported,
             ai_commands::generate_ai_subject_mask,
             ai_commands::precompute_ai_subject_mask,
             ai_commands::generate_ai_foreground_mask,
@@ -2324,6 +2347,8 @@ pub fn run() {
             denoising::apply_denoising,
             denoising::batch_denoise_images,
             denoising::save_denoised_image,
+            focus_stacking::stitch_focus_stack,
+            focus_stacking::save_focus_stack,
             image_loader::load_image,
             image_loader::is_image_cached,
             panorama_stitching::stitch_panorama,
@@ -2386,6 +2411,13 @@ pub fn run() {
             lens_correction::get_lens_distortion_params,
             negative_conversion::preview_negative_conversion,
             negative_conversion::convert_negatives,
+            camera_tethering::tether_list_cameras,
+            camera_tethering::tether_connect,
+            camera_tethering::tether_get_settings,
+            camera_tethering::tether_set_setting,
+            camera_tethering::tether_capture,
+            camera_tethering::tether_get_preview,
+            camera_tethering::tether_autofocus,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

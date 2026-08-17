@@ -229,6 +229,10 @@
       "addCopiedToAlbum_other": "Ajouter {{count}} images copiées à l'album",
       "refreshView": "Actualiser l'affichage"
     },
+    "merge": {
+      "focusStack": "Empilement de mise au point",
+      "title": "Fusionner"
+    },
     "tagging": {
       "addTagTooltip": "Ajouter une étiquette",
       "noTags": "Aucune étiquette ajoutée",
@@ -738,7 +742,8 @@
         "info": "Info",
         "inpaint": "Inpainting",
         "masks": "Masques",
-        "presets": "Paramètres prédéfinis"
+        "presets": "Paramètres prédéfinis",
+        "tethering": "Prise de vue connectée"
       }
     },
     "toolbar": {
@@ -1257,6 +1262,23 @@
       "strengthLabel": "Intensité",
       "titleBatch": "Débruiter les images",
       "titleSingle": "Débruiter l'image"
+    },
+    "focusStack": {
+      "cancel": "Annuler",
+      "close": "Fermer",
+      "depthMap": "Carte de profondeur",
+      "description": "Combinez plusieurs images avec des distances de mise au point variables en une seule image parfaitement nette.",
+      "descriptionWithCount_one": "Combinez {{count}} image avec des distances de mise au point variables en une seule image parfaitement nette.",
+      "descriptionWithCount_other": "Combinez {{count}} images avec des distances de mise au point variables en une seule image parfaitement nette.",
+      "failed": "L'empilement de mise au point a échoué",
+      "initializing": "Initialisation...",
+      "openInEditor": "Ouvrir dans l'éditeur",
+      "result": "Résultat",
+      "save": "Enregistrer",
+      "savedSuccess": "Empilement de mise au point enregistré avec succès !",
+      "stacking": "Empilement de la mise au point",
+      "start": "Démarrer",
+      "title": "Empilement de mise au point"
     },
     "hdr": {
       "cancel": "Annuler",
@@ -1794,6 +1816,59 @@
     "tooltips": {
       "goHome": "Aller à l'accueil"
     }
+  },
+  "tethering": {
+    "aperture": "Ouverture",
+    "aperturePlaceholder": "ex. 2.8",
+    "autoApplyPreset": "Appliquer preset auto.",
+    "autoOpenCaptured": "Ouvrir automatiquement l'image capturée",
+    "cameraConnected": "Appareil connecté",
+    "capturing": "Capture en cours...",
+    "changePreset": "Changer",
+    "clearPreset": "Effacer le preset",
+    "connectCamera": "Connecter l'appareil",
+    "expComp": "Comp. Exp.",
+    "expCompPlaceholder": "ex. 0.0",
+    "expMode": "Mode Exp.",
+    "exposureSettings": "Paramètres d'exposition",
+    "flipHorizontal": "Retourner horizontalement",
+    "generalSettings": "Paramètres généraux",
+    "ghostOverlayAlt": "Incrustation fantôme",
+    "iso": "ISO",
+    "isoPlaceholder": "ex. 400",
+    "liveViewAlt": "Visée directe",
+    "metering": "Mode de mesure",
+    "noCameraDetected": "Aucun appareil détecté",
+    "noCamerasFound": "Aucun appareil trouvé. Assurez-vous qu'il est connecté et en mode PC Remote.",
+    "overlayLastShot": "Superposer la dernière photo",
+    "overlayOff": "Désactivé",
+    "rotate90": "Faire pivoter de 90°",
+    "scanTooltip": "Rechercher des appareils",
+    "selectCamera": "Sélectionner un appareil",
+    "selectCameraPlaceholder": "Sélectionner un appareil",
+    "shutter": "Obturateur",
+    "shutterPlaceholder": "ex. 1/200",
+    "startLiveView": "Démarrer la visée directe",
+    "status": "État",
+    "stopLiveView": "Arrêter la visée directe",
+    "title": "Prise de vue connectée",
+    "toasts": {
+      "afFailed": "Échec du déclenchement de l'autofocus",
+      "cameraDisconnected": "Appareil déconnecté",
+      "captureFailed": "Échec de la capture : {{err}}",
+      "communicationFailed": "Échec de la communication avec l'appareil",
+      "connectionFailed": "Échec de la connexion : {{err}}",
+      "detectionFailed": "Échec de la détection : {{err}}",
+      "noCamerasFound": "Aucun appareil trouvé. Assurez-vous qu'il est en mode PC Remote.",
+      "presetApplyFailed": "Échec de l'application du preset à la photo",
+      "selectFolderFirst": "Veuillez d'abord sélectionner un dossier standard dans votre bibliothèque.",
+      "setFailed": "Échec de la définition de {{key}} : {{err}}"
+    },
+    "triggerAutofocus": "Déclencher l'autofocus",
+    "triggerCapture": "Déclencher la capture",
+    "wbTemp": "Témperature WB (K)",
+    "wbTempPlaceholder": "ex. 5600",
+    "whiteBalance": "Balance des blancs"
   },
   "ui": {
     "bottomBar": {

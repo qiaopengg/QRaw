@@ -225,6 +225,10 @@
       "addCopiedToAlbum_other": "Afegir {{count}} imatges copiades a l'àlbum",
       "refreshView": "Actualitzar vista"
     },
+    "merge": {
+      "focusStack": "Apilament d'enfocament",
+      "title": "Fusionar"
+    },
     "tagging": {
       "addTagTooltip": "Afegir etiqueta",
       "noTags": "No s'han afegit etiquetes",
@@ -717,7 +721,8 @@
         "info": "Informació",
         "inpaint": "Inpainting",
         "masks": "Màscares",
-        "presets": "Ajustos preestablerts"
+        "presets": "Ajustos preestablerts",
+        "tethering": "Captura connectada"
       }
     },
     "toolbar": {
@@ -1231,6 +1236,23 @@
       "strengthLabel": "Força",
       "titleBatch": "Reduir soroll de les imatges",
       "titleSingle": "Reduir soroll de la imatge"
+    },
+    "focusStack": {
+      "cancel": "Cancel·la",
+      "close": "Tanca",
+      "depthMap": "Mapa de profunditat",
+      "description": "Combina diverses imatges amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
+      "descriptionWithCount_one": "Combina {{count}} imatge amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
+      "descriptionWithCount_other": "Combina {{count}} imatges amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
+      "failed": "S'ha produït un error en l'apilament d'enfocament",
+      "initializing": "Inicialitzant...",
+      "openInEditor": "Obre a l'editor",
+      "result": "Resultat",
+      "save": "Desa",
+      "savedSuccess": "L'apilament d'enfocament s'ha desat correctament!",
+      "stacking": "Apilant enfocament",
+      "start": "Inicia",
+      "title": "Apilament d'enfocament"
     },
     "hdr": {
       "cancel": "Cancel·lar",
@@ -1761,6 +1783,59 @@
     "tooltips": {
       "goHome": "Anar a l'inici"
     }
+  },
+  "tethering": {
+    "aperture": "Obertura",
+    "aperturePlaceholder": "p. ex. 2.8",
+    "autoApplyPreset": "Aplica preajust automàticament",
+    "autoOpenCaptured": "Obre automàticament la imatge capturada",
+    "cameraConnected": "Càmera connectada",
+    "capturing": "Capturant...",
+    "changePreset": "Canvia",
+    "clearPreset": "Neteja el preajust",
+    "connectCamera": "Connecta la càmera",
+    "expComp": "Comp. Exp.",
+    "expCompPlaceholder": "p. ex. 0.0",
+    "expMode": "Mode Exp.",
+    "exposureSettings": "Ajustaments d'exposició",
+    "flipHorizontal": "Inverteix horitzontalment",
+    "generalSettings": "Ajustaments generals",
+    "ghostOverlayAlt": "Superposició fantasma",
+    "iso": "ISO",
+    "isoPlaceholder": "p. ex. 400",
+    "liveViewAlt": "Vista en directe",
+    "metering": "Mode de mesura",
+    "noCameraDetected": "Cap càmera detectada",
+    "noCamerasFound": "No s'han trobat càmeres. Assegura't que està connectada i en mode PC Remote.",
+    "overlayLastShot": "Superposa l'última captura",
+    "overlayOff": "Desactivat",
+    "rotate90": "Gira 90°",
+    "scanTooltip": "Cerca càmeres",
+    "selectCamera": "Selecciona càmera",
+    "selectCameraPlaceholder": "Selecciona una càmera",
+    "shutter": "Obturador",
+    "shutterPlaceholder": "p. ex. 1/200",
+    "startLiveView": "Inicia vista en directe",
+    "status": "Estat",
+    "stopLiveView": "Atura vista en directe",
+    "title": "Captura connectada",
+    "toasts": {
+      "afFailed": "Error en disparar l'enfocament automàtic",
+      "cameraDisconnected": "Càmera desconnectada",
+      "captureFailed": "Error en la captura: {{err}}",
+      "communicationFailed": "Error en comunicar-se amb la càmera",
+      "connectionFailed": "Connexió fallida: {{err}}",
+      "detectionFailed": "Error en la detecció: {{err}}",
+      "noCamerasFound": "No s'han trobat càmeres. Assegura't que està en mode PC Remote.",
+      "presetApplyFailed": "Error en aplicar el preajust a la captura",
+      "selectFolderFirst": "Selecciona primer una carpeta estàndard a la biblioteca.",
+      "setFailed": "Error en configurar {{key}}: {{err}}"
+    },
+    "triggerAutofocus": "Dispara l'enfocament automàtic",
+    "triggerCapture": "Dispara captura",
+    "wbTemp": "Temp. WB (K)",
+    "wbTempPlaceholder": "p. ex. 5600",
+    "whiteBalance": "Balanç de blancs"
   },
   "ui": {
     "bottomBar": {

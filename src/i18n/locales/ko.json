@@ -224,6 +224,10 @@
       "addCopiedToAlbum_other": "복사한 이미지 {{count}}개를 앨범에 추가",
       "refreshView": "보기 새로고침"
     },
+    "merge": {
+      "focusStack": "포커스 스태킹",
+      "title": "병합"
+    },
     "tagging": {
       "addTagTooltip": "태그 추가",
       "noTags": "추가된 태그 없음",
@@ -712,7 +716,8 @@
         "info": "정보",
         "inpaint": "인페인팅",
         "masks": "마스크",
-        "presets": "프리셋"
+        "presets": "프리셋",
+        "tethering": "테더링"
       }
     },
     "toolbar": {
@@ -1194,6 +1199,23 @@
       "strengthLabel": "강도",
       "titleBatch": "이미지 노이즈 제거",
       "titleSingle": "이미지 노이즈 제거"
+    },
+    "focusStack": {
+      "cancel": "취소",
+      "close": "닫기",
+      "depthMap": "심도 맵",
+      "description": "초점 거리가 다른 여러 이미지를 결합하여 완벽하게 선명한 단일 이미지를 만듭니다.",
+      "descriptionWithCount_one": "초점 거리가 다른 {{count}}개의 이미지를 결합하여 완벽하게 선명한 단일 이미지를 만듭니다.",
+      "descriptionWithCount_other": "초점 거리가 다른 {{count}}개의 이미지를 결합하여 완벽하게 선명한 단일 이미지를 만듭니다.",
+      "failed": "포커스 스태킹 실패",
+      "initializing": "초기화 중...",
+      "openInEditor": "편집기에서 열기",
+      "result": "결과",
+      "save": "저장",
+      "savedSuccess": "포커스 스택이 성공적으로 저장되었습니다!",
+      "stacking": "포커스 스태킹 중",
+      "start": "시작",
+      "title": "포커스 스태킹"
     },
     "hdr": {
       "cancel": "취소",
@@ -1724,6 +1746,59 @@
     "tooltips": {
       "goHome": "홈으로 이동"
     }
+  },
+  "tethering": {
+    "aperture": "조리개",
+    "aperturePlaceholder": "예: 2.8",
+    "autoApplyPreset": "프리셋 자동 적용",
+    "autoOpenCaptured": "촬영된 이미지 자동으로 열기",
+    "cameraConnected": "카메라 연결됨",
+    "capturing": "촬영 중...",
+    "changePreset": "변경",
+    "clearPreset": "프리셋 제거",
+    "connectCamera": "카메라 연결",
+    "expComp": "노출 보정",
+    "expCompPlaceholder": "예: 0.0",
+    "expMode": "노출 모드",
+    "exposureSettings": "노출 설정",
+    "flipHorizontal": "좌우 대칭",
+    "generalSettings": "일반 설정",
+    "ghostOverlayAlt": "고스트 오버레이",
+    "iso": "ISO",
+    "isoPlaceholder": "예: 400",
+    "liveViewAlt": "라이브 뷰",
+    "metering": "측광 모드",
+    "noCameraDetected": "감지된 카메라 없음",
+    "noCamerasFound": "카메라를 찾을 수 없습니다. 연결 상태와 PC 원격 모드를 확인하세요.",
+    "overlayLastShot": "이전 촬영 오버레이",
+    "overlayOff": "끄기",
+    "rotate90": "90° 회전",
+    "scanTooltip": "카메라 검색",
+    "selectCamera": "카메라 선택",
+    "selectCameraPlaceholder": "카메라를 선택하세요",
+    "shutter": "셔터",
+    "shutterPlaceholder": "예: 1/200",
+    "startLiveView": "라이브 뷰 시작",
+    "status": "상태",
+    "stopLiveView": "라이브 뷰 중지",
+    "title": "테더링",
+    "toasts": {
+      "afFailed": "자동 초점 실행에 실패했습니다",
+      "cameraDisconnected": "카메라 연결이 끊어졌습니다",
+      "captureFailed": "촬영 실패: {{err}}",
+      "communicationFailed": "카메라와 통신하지 못했습니다",
+      "connectionFailed": "연결 실패: {{err}}",
+      "detectionFailed": "감지 실패: {{err}}",
+      "noCamerasFound": "카메라를 찾을 수 없습니다. PC 원격 모드인지 확인하세요.",
+      "presetApplyFailed": "촬영된 이미지에 프리셋 적용 실패",
+      "selectFolderFirst": "라이브러리에서 먼저 일반 폴더를 선택하세요.",
+      "setFailed": "{{key}} 설정 실패: {{err}}"
+    },
+    "triggerAutofocus": "자동 초점 실행",
+    "triggerCapture": "촬영 실행",
+    "wbTemp": "색온도 (K)",
+    "wbTempPlaceholder": "예: 5600",
+    "whiteBalance": "화이트 밸런스"
   },
   "ui": {
     "bottomBar": {

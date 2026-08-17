@@ -28,6 +28,7 @@ import {
   PinOff,
   Users,
   Gauge,
+  Layers,
   Grip,
   Film,
   Home,
@@ -229,8 +230,6 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
                 }
               },
             },
-            { disabled: true, icon: SquaresUnite, label: t('contextMenus.editor.stitchPanorama') },
-            { disabled: true, icon: Images, label: t('contextMenus.editor.mergeHdr') },
             {
               icon: LayoutTemplate,
               label: t('contextMenus.editor.frameImage'),
@@ -238,6 +237,15 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
                 setUI({ collageModalState: { isOpen: true, sourceImages: [selectedImage] } });
               },
             },
+          ],
+        },
+        {
+          label: t('contextMenus.merge.title'),
+          icon: Layers,
+          submenu: [
+            { disabled: true, icon: SquaresUnite, label: t('contextMenus.editor.stitchPanorama') },
+            { disabled: true, icon: Images, label: t('contextMenus.editor.mergeHdr') },
+            { disabled: true, icon: Layers, label: t('contextMenus.merge.focusStack') },
           ],
         },
         { type: OPTION_SEPARATOR },
@@ -579,6 +587,21 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               },
             },
             {
+              icon: LayoutTemplate,
+              label: collageLabel,
+              onClick: () => {
+                const imagesForCollage = imageList.filter((img) => finalSelection.includes(img.path));
+                setUI({ collageModalState: { isOpen: true, sourceImages: imagesForCollage } });
+              },
+              disabled: selectionCount === 0 || selectionCount > 9,
+            },
+          ],
+        },
+        {
+          label: t('contextMenus.merge.title'),
+          icon: Layers,
+          submenu: [
+            {
               disabled: selectionCount < 2 || selectionCount > 30,
               icon: SquaresUnite,
               label: stitchLabel,
@@ -613,13 +636,22 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
               },
             },
             {
-              icon: LayoutTemplate,
-              label: collageLabel,
+              disabled: selectionCount < 2,
+              icon: Layers,
+              label: t('contextMenus.merge.focusStack'),
               onClick: () => {
-                const imagesForCollage = imageList.filter((img) => finalSelection.includes(img.path));
-                setUI({ collageModalState: { isOpen: true, sourceImages: imagesForCollage } });
+                setUI({
+                  focusStackModalState: {
+                    error: null,
+                    finalImageBase64: null,
+                    depthMapBase64: null,
+                    isOpen: true,
+                    isProcessing: false,
+                    progressMessage: null,
+                    sourcePaths: finalSelection,
+                  },
+                });
               },
-              disabled: selectionCount === 0 || selectionCount > 9,
             },
           ],
         },
@@ -634,11 +666,11 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
         {
           icon: CopyPlus,
           label: t('contextMenus.thumbnail.duplicateImage'),
-          disabled: !isSingleSelection,
           submenu: [
             {
               label: t('contextMenus.thumbnail.physicalCopy'),
               icon: Copy,
+              disabled: !isSingleSelection,
               onClick: async () => {
                 try {
                   await invoke(Invokes.DuplicateFile, {
@@ -659,6 +691,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
             {
               label: t('contextMenus.thumbnail.virtualCopy'),
               icon: CopyPlus,
+              disabled: !isSingleSelection,
               onClick: () => handleCreateVirtualCopy(finalSelection[0]),
             },
           ],

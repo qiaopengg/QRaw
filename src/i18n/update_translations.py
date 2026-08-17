@@ -5,93 +5,249 @@ LOCALES_DIR = Path("./locales")
 
 TRANSLATIONS = {
     "ca": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Commutar l'anàlisi al panell d'ajustos"
+        "tethering": {
+            "wbTemp": "Temp. WB (K)",
+            "wbTempPlaceholder": "p. ex. 5600",
+            "expComp": "Comp. Exp.",
+            "expCompPlaceholder": "p. ex. 0.0",
+            "expMode": "Mode Exp.",
+            "metering": "Mode de mesura",
+            "generalSettings": "Ajustaments generals",
+            "autoApplyPreset": "Aplica preajust automàticament",
+            "changePreset": "Canvia",
+            "clearPreset": "Neteja el preajust",
+            "triggerAutofocus": "Dispara l'enfocament automàtic",
+            "toasts": {
+                "afFailed": "Error en disparar l'enfocament automàtic",
+                "presetApplyFailed": "Error en aplicar el preajust a la captura"
             }
         }
     },
     "de": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Analyseanzeige im Anpassungen-Panel umschalten"
+        "tethering": {
+            "wbTemp": "Farbtemp. (K)",
+            "wbTempPlaceholder": "z. B. 5600",
+            "expComp": "Belichtungskorr.",
+            "expCompPlaceholder": "z. B. 0.0",
+            "expMode": "Belichtungsmodus",
+            "metering": "Messmodus",
+            "generalSettings": "Allgemeine Einstellungen",
+            "autoApplyPreset": "Preset autom. anwenden",
+            "changePreset": "Ändern",
+            "clearPreset": "Preset entfernen",
+            "triggerAutofocus": "Autofokus auslösen",
+            "toasts": {
+                "afFailed": "Autofokus fehlgeschlagen",
+                "presetApplyFailed": "Fehler beim Anwenden des Presets auf die Aufnahme"
             }
         }
     },
     "en": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Toggle analytics in Adjustments panel"
+        "tethering": {
+            "wbTemp": "WB Temp (K)",
+            "wbTempPlaceholder": "e.g. 5600",
+            "expComp": "Exp. Comp",
+            "expCompPlaceholder": "e.g. 0.0",
+            "expMode": "Exp. Mode",
+            "metering": "Metering Mode",
+            "generalSettings": "General Settings",
+            "autoApplyPreset": "Auto Apply Preset",
+            "changePreset": "Change",
+            "clearPreset": "Clear Preset",
+            "triggerAutofocus": "Trigger Autofocus",
+            "toasts": {
+                "afFailed": "Autofocus trigger failed",
+                "presetApplyFailed": "Failed to apply preset to captured image"
             }
         }
     },
     "es": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Alternar análisis en el panel de Ajustes"
+        "tethering": {
+            "wbTemp": "Temp. WB (K)",
+            "wbTempPlaceholder": "ej. 5600",
+            "expComp": "Comp. Exp.",
+            "expCompPlaceholder": "ej. 0.0",
+            "expMode": "Modo Exp.",
+            "metering": "Modo de medición",
+            "generalSettings": "Ajustes generales",
+            "autoApplyPreset": "Aplicar preajuste autom.",
+            "changePreset": "Cambiar",
+            "clearPreset": "Borrar preajuste",
+            "triggerAutofocus": "Disparar enfoque automático",
+            "toasts": {
+                "afFailed": "Error al enfocar automáticamente",
+                "presetApplyFailed": "Error al aplicar el preajuste a la captura"
             }
         }
     },
     "fr": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Afficher/Masquer l'analyse dans le panneau Réglages"
+        "tethering": {
+            "wbTemp": "Témperature WB (K)",
+            "wbTempPlaceholder": "ex. 5600",
+            "expComp": "Comp. Exp.",
+            "expCompPlaceholder": "ex. 0.0",
+            "expMode": "Mode Exp.",
+            "metering": "Mode de mesure",
+            "generalSettings": "Paramètres généraux",
+            "autoApplyPreset": "Appliquer preset auto.",
+            "changePreset": "Changer",
+            "clearPreset": "Effacer le preset",
+            "triggerAutofocus": "Déclencher l'autofocus",
+            "toasts": {
+                "afFailed": "Échec du déclenchement de l'autofocus",
+                "presetApplyFailed": "Échec de l'application du preset à la photo"
             }
         }
     },
     "it": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Mostra/Nascondi analisi nel pannello Regolazioni"
+        "tethering": {
+            "wbTemp": "Temp. WB (K)",
+            "wbTempPlaceholder": "es. 5600",
+            "expComp": "Comp. Esp.",
+            "expCompPlaceholder": "es. 0.0",
+            "expMode": "Modo Esp.",
+            "metering": "Misurazione",
+            "generalSettings": "Impostazioni generali",
+            "autoApplyPreset": "Applica preset autom.",
+            "changePreset": "Cambia",
+            "clearPreset": "Rimuovi preset",
+            "triggerAutofocus": "Attiva autofocus",
+            "toasts": {
+                "afFailed": "Attivazione autofocus fallita",
+                "presetApplyFailed": "Impossibile applicare il preset allo scatto"
             }
         }
     },
     "ja": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "調整パネルでアナリティクスを切り替える"
+        "tethering": {
+            "wbTemp": "色温度 (K)",
+            "wbTempPlaceholder": "例: 5600",
+            "expComp": "露出補正",
+            "expCompPlaceholder": "例: 0.0",
+            "expMode": "露出モード",
+            "metering": "測光モード",
+            "generalSettings": "一般設定",
+            "autoApplyPreset": "プリセット自動適用",
+            "changePreset": "変更",
+            "clearPreset": "プリセットを解除",
+            "triggerAutofocus": "AFを実行",
+            "toasts": {
+                "afFailed": "オートフォーカスの実行に失敗しました",
+                "presetApplyFailed": "撮影画像へのプリセット適用に失敗しました"
             }
         }
     },
     "ko": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "조정 패널에서 분석 토글"
+        "tethering": {
+            "wbTemp": "색온도 (K)",
+            "wbTempPlaceholder": "예: 5600",
+            "expComp": "노출 보정",
+            "expCompPlaceholder": "예: 0.0",
+            "expMode": "노출 모드",
+            "metering": "측광 모드",
+            "generalSettings": "일반 설정",
+            "autoApplyPreset": "프리셋 자동 적용",
+            "changePreset": "변경",
+            "clearPreset": "프리셋 제거",
+            "triggerAutofocus": "자동 초점 실행",
+            "toasts": {
+                "afFailed": "자동 초점 실행에 실패했습니다",
+                "presetApplyFailed": "촬영된 이미지에 프리셋 적용 실패"
             }
         }
     },
     "pl": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Przełącz analizę w panelu Dopasowania"
+        "tethering": {
+            "wbTemp": "Temp. barwowa (K)",
+            "wbTempPlaceholder": "np. 5600",
+            "expComp": "Komp. eksp.",
+            "expCompPlaceholder": "np. 0.0",
+            "expMode": "Tryb ekspozycji",
+            "metering": "Tryb pomiaru",
+            "generalSettings": "Ustawienia ogólne",
+            "autoApplyPreset": "Automatycznie stosuj preset",
+            "changePreset": "Zmień",
+            "clearPreset": "Wyczyść preset",
+            "triggerAutofocus": "Wyzwól autofocus",
+            "toasts": {
+                "afFailed": "Błąd wyzwalania autofocusu",
+                "presetApplyFailed": "Nie udało się zastosować presetu do zdjęcia"
             }
         }
     },
     "pt": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Alternar análise no painel de Ajustes"
+        "tethering": {
+            "wbTemp": "Temp. WB (K)",
+            "wbTempPlaceholder": "ex. 5600",
+            "expComp": "Comp. Exp.",
+            "expCompPlaceholder": "ex. 0.0",
+            "expMode": "Modo Exp.",
+            "metering": "Modo de Medição",
+            "generalSettings": "Configurações Gerais",
+            "autoApplyPreset": "Aplicar Predefinição Auto.",
+            "changePreset": "Alterar",
+            "clearPreset": "Limpar Predefinição",
+            "triggerAutofocus": "Disparar Foco Automático",
+            "toasts": {
+                "afFailed": "Falha ao acionar foco automático",
+                "presetApplyFailed": "Falha ao aplicar predefinição à captura"
             }
         }
     },
     "ru": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "Переключить аналитику на панели «Коррекция»"
+        "tethering": {
+            "wbTemp": "Цвет. темп. (K)",
+            "wbTempPlaceholder": "напр. 5600",
+            "expComp": "Экспокоррекция",
+            "expCompPlaceholder": "напр. 0.0",
+            "expMode": "Режим эксп.",
+            "metering": "Режим замера",
+            "generalSettings": "Общие настройки",
+            "autoApplyPreset": "Авто-применение пресета",
+            "changePreset": "Изменить",
+            "clearPreset": "Очистить пресет",
+            "triggerAutofocus": "Сфокусироваться",
+            "toasts": {
+                "afFailed": "Ошибка автофокусировки",
+                "presetApplyFailed": "Не удалось применить пресет к снимку"
             }
         }
     },
     "zh-CN": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "在调整面板中切换分析"
+        "tethering": {
+            "wbTemp": "色温 (K)",
+            "wbTempPlaceholder": "例如 5600",
+            "expComp": "曝光补偿",
+            "expCompPlaceholder": "例如 0.0",
+            "expMode": "曝光模式",
+            "metering": "测光模式",
+            "generalSettings": "常规设置",
+            "autoApplyPreset": "自动应用预设",
+            "changePreset": "更改",
+            "clearPreset": "清除预设",
+            "triggerAutofocus": "触发自动对焦",
+            "toasts": {
+                "afFailed": "触发自动对焦失败",
+                "presetApplyFailed": "对捕获的图像应用预设失败"
             }
         }
     },
     "zh-TW": {
-        "editor": {
-            "masks": {
-                "toggleAnalyticsInAdjustments": "在調整面板中切換分析"
+        "tethering": {
+            "wbTemp": "色溫 (K)",
+            "wbTempPlaceholder": "例如 5600",
+            "expComp": "曝光補償",
+            "expCompPlaceholder": "例如 0.0",
+            "expMode": "曝光模式",
+            "metering": "測光模式",
+            "generalSettings": "一般設定",
+            "autoApplyPreset": "自動套用預設集",
+            "changePreset": "變更",
+            "clearPreset": "清除預設集",
+            "triggerAutofocus": "觸發自動對焦",
+            "toasts": {
+                "afFailed": "觸發自動對焦失敗",
+                "presetApplyFailed": "對拍攝的影像套用預設集失敗"
             }
         }
     }
@@ -140,7 +296,7 @@ def main():
         print(f"Error: Locales directory '{LOCALES_DIR}' does not exist.")
         return
 
-    print("Starting Analytics translation updates...")
+    print("Starting translation updates for tethering...")
     for lang, trans in TRANSLATIONS.items():
         file_path = LOCALES_DIR / f"{lang}.json"
         update_json_file(file_path, trans)

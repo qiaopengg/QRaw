@@ -229,6 +229,10 @@
       "addCopiedToAlbum_other": "Adicionar {{count}} imagens copiadas ao álbum",
       "refreshView": "Atualizar Exibição"
     },
+    "merge": {
+      "focusStack": "Empilhamento de Foco",
+      "title": "Mesclar"
+    },
     "tagging": {
       "addTagTooltip": "Adicionar etiqueta",
       "noTags": "Nenhuma etiqueta adicionada",
@@ -738,7 +742,8 @@
         "info": "Informações",
         "inpaint": "Preencher",
         "masks": "Máscaras",
-        "presets": "Predefinições"
+        "presets": "Predefinições",
+        "tethering": "Captura Conectada (Tethering)"
       }
     },
     "toolbar": {
@@ -1257,6 +1262,24 @@
       "strengthLabel": "Força",
       "titleBatch": "Reduzir Ruído de Imagens",
       "titleSingle": "Reduzir Ruído da Imagem"
+    },
+    "focusStack": {
+      "cancel": "Cancelar",
+      "close": "Fechar",
+      "depthMap": "Mapa de Profundidade",
+      "description": "Combine várias imagens com diferentes distâncias de foco em uma única imagem perfeitamente nítida.",
+      "descriptionWithCount_many": "Combine {{count}} imagens com diferentes distâncias de foco em uma única imagem perfeitamente nítida.",
+      "descriptionWithCount_one": "Combine {{count}} imagem com diferentes distâncias de foco em uma única imagem perfeitamente nítida.",
+      "descriptionWithCount_other": "Combine {{count}} imagens com diferentes distâncias de foco em uma única imagem perfeitamente nítida.",
+      "failed": "Falha no Empilhamento de Foco",
+      "initializing": "Inicializando...",
+      "openInEditor": "Abrir no Editor",
+      "result": "Resultado",
+      "save": "Salvar",
+      "savedSuccess": "Empilhamento de foco salvo com sucesso!",
+      "stacking": "Empilhando Foco",
+      "start": "Iniciar",
+      "title": "Empilhamento de Foco"
     },
     "hdr": {
       "cancel": "Cancelar",
@@ -1794,6 +1817,59 @@
     "tooltips": {
       "goHome": "Ir para Início"
     }
+  },
+  "tethering": {
+    "aperture": "Abertura",
+    "aperturePlaceholder": "ex. 2.8",
+    "autoApplyPreset": "Aplicar Predefinição Auto.",
+    "autoOpenCaptured": "Abrir automaticamente imagem capturada",
+    "cameraConnected": "Câmera Conectada",
+    "capturing": "Capturando...",
+    "changePreset": "Alterar",
+    "clearPreset": "Limpar Predefinição",
+    "connectCamera": "Conectar Câmera",
+    "expComp": "Comp. Exp.",
+    "expCompPlaceholder": "ex. 0.0",
+    "expMode": "Modo Exp.",
+    "exposureSettings": "Configurações de Exposição",
+    "flipHorizontal": "Espelhar Horizontalmente",
+    "generalSettings": "Configurações Gerais",
+    "ghostOverlayAlt": "Sobreposição Fantasma",
+    "iso": "ISO",
+    "isoPlaceholder": "ex. 400",
+    "liveViewAlt": "Live View",
+    "metering": "Modo de Medição",
+    "noCameraDetected": "Nenhuma câmera detectada",
+    "noCamerasFound": "Nenhuma câmera encontrada. Certifique-se de que esteja conectada e no modo PC Remote.",
+    "overlayLastShot": "Sobrepor Última Foto",
+    "overlayOff": "Desligado",
+    "rotate90": "Girar 90°",
+    "scanTooltip": "Buscar Câmeras",
+    "selectCamera": "Selecionar Câmera",
+    "selectCameraPlaceholder": "Selecione uma câmera",
+    "shutter": "Obturador",
+    "shutterPlaceholder": "ex. 1/200",
+    "startLiveView": "Iniciar Live View",
+    "status": "Status",
+    "stopLiveView": "Parar Live View",
+    "title": "Tethering",
+    "toasts": {
+      "afFailed": "Falha ao acionar foco automático",
+      "cameraDisconnected": "Câmera desconectada",
+      "captureFailed": "Falha na captura: {{err}}",
+      "communicationFailed": "Falha na comunicação com a câmera",
+      "connectionFailed": "Falha na conexão: {{err}}",
+      "detectionFailed": "Falha na detecção: {{err}}",
+      "noCamerasFound": "Nenhuma câmera encontrada. Verifique se está no modo PC Remote.",
+      "presetApplyFailed": "Falha ao aplicar predefinição à captura",
+      "selectFolderFirst": "Selecione uma pasta padrão na sua Biblioteca primeiro.",
+      "setFailed": "Falha ao definir {{key}}: {{err}}"
+    },
+    "triggerAutofocus": "Disparar Foco Automático",
+    "triggerCapture": "Disparar Captura",
+    "wbTemp": "Temp. WB (K)",
+    "wbTempPlaceholder": "ex. 5600",
+    "whiteBalance": "Balanço de Branco"
   },
   "ui": {
     "bottomBar": {

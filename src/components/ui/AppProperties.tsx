@@ -72,6 +72,7 @@ export enum Invokes {
   ImportFiles = 'import_files',
   InvokeGenerativeReplace = 'invoke_generative_replace',
   InvokeGenerativeReplaseWithMaskDef = 'invoke_generative_replace_with_mask_def',
+  IsTetheringSupported = 'is_tethering_supported',
   ListImagesInDir = 'list_images_in_dir',
   ListImagesRecursive = 'list_images_recursive',
   LoadImage = 'load_image',
@@ -96,6 +97,8 @@ export enum Invokes {
   ShowInFinder = 'show_in_finder',
   StartBackgroundIndexing = 'start_background_indexing',
   StitchPanorama = 'stitch_panorama',
+  StitchFocusStack = 'stitch_focus_stack',
+  SaveFocusStack = 'save_focus_stack',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
   UpdateWgpuTransform = 'update_wgpu_transform',
@@ -108,6 +111,12 @@ export enum Invokes {
   SaveAlbums = 'save_albums',
   AddToAlbum = 'add_to_album',
   GetAlbumImages = 'get_album_images',
+  TetherListCameras = 'tether_list_cameras',
+  TetherConnect = 'tether_connect',
+  TetherGetSettings = 'tether_get_settings',
+  TetherSetSetting = 'tether_set_setting',
+  TetherCapture = 'tether_capture',
+  TetherGetPreview = 'tether_get_preview',
 }
 
 export enum ExifOverlay {
@@ -125,6 +134,7 @@ export enum Panel {
   Metadata = 'metadata',
   Presets = 'presets',
   FolderTree = 'folderTree',
+  Tethering = 'tethering',
 }
 
 export type PanelRegion = 'leftTop' | 'leftBottom' | 'rightTop' | 'rightBottom';

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ImageFile, Panel, UiVisibility, PanelRegion } from '../components/ui/AppProperties';
+import { ImageFile, Panel, UiVisibility, PanelRegion, WorkspaceState } from '../components/ui/AppProperties';
 
 export type SwitcherPlacement = 'bottom' | 'right' | 'left' | 'top';
 
@@ -34,6 +34,16 @@ export interface PanoramaModalState {
   stitchingSourcePaths: Array<string>;
 }
 
+export interface FocusStackModalState {
+  error: string | null;
+  finalImageBase64: string | null;
+  depthMapBase64: string | null;
+  isOpen: boolean;
+  isProcessing: boolean;
+  progressMessage: string | null;
+  sourcePaths: Array<string>;
+}
+
 export interface HdrModalState {
   error: string | null;
   finalImageBase64: string | null;
@@ -57,6 +67,121 @@ export interface DenoiseModalState {
 export interface NegativeConversionModalState {
   isOpen: boolean;
   targetPaths: Array<string>;
+}
+
+export const ALL_PANELS: Panel[] = [
+  Panel.Metadata,
+  Panel.FolderTree,
+  Panel.Export,
+  Panel.Tethering,
+  Panel.Adjustments,
+  Panel.Crop,
+  Panel.Masks,
+  Panel.Ai,
+  Panel.Presets,
+];
+
+export const DEFAULT_PANEL_DEFAULT_REGIONS: Record<Panel, PanelRegion> = {
+  [Panel.Metadata]: 'leftTop',
+  [Panel.FolderTree]: 'leftTop',
+  [Panel.Export]: 'leftTop',
+  [Panel.Tethering]: 'leftTop',
+  [Panel.Adjustments]: 'rightTop',
+  [Panel.Crop]: 'rightTop',
+  [Panel.Masks]: 'rightTop',
+  [Panel.Ai]: 'rightTop',
+  [Panel.Presets]: 'rightTop',
+};
+
+export function reconcileWorkspace(
+  savedWorkspace: WorkspaceState | undefined,
+  isTetheringSupported: boolean,
+): WorkspaceState {
+  const allowedPanels = new Set(ALL_PANELS.filter((p) => p !== Panel.Tethering || isTetheringSupported));
+
+  const defaultWorkspace: WorkspaceState = {
+    leftPanelWidth: 350,
+    rightPanelWidth: 350,
+    leftTopHeight: 450,
+    rightTopHeight: 450,
+    panelLayout: {
+      leftTop: [Panel.Metadata, Panel.FolderTree, Panel.Export, ...(isTetheringSupported ? [Panel.Tethering] : [])],
+      leftBottom: [],
+      rightTop: [Panel.Adjustments, Panel.Crop, Panel.Masks, Panel.Ai, Panel.Presets],
+      rightBottom: [],
+    },
+    activePanels: {
+      leftTop: Panel.FolderTree,
+      leftBottom: null,
+      rightTop: Panel.Adjustments,
+      rightBottom: null,
+    },
+    panelSwitcherPlacement: {
+      leftTop: 'bottom',
+      leftBottom: 'bottom',
+      rightTop: 'right',
+      rightBottom: 'right',
+    },
+  };
+
+  if (!savedWorkspace || !savedWorkspace.panelLayout) {
+    return defaultWorkspace;
+  }
+
+  const seenPanels = new Set<Panel>();
+  const sanitizedLayout: Record<PanelRegion, Panel[]> = {
+    leftTop: [],
+    leftBottom: [],
+    rightTop: [],
+    rightBottom: [],
+  };
+
+  (['leftTop', 'leftBottom', 'rightTop', 'rightBottom'] as PanelRegion[]).forEach((region) => {
+    const list = savedWorkspace.panelLayout[region] || [];
+    list.forEach((panel) => {
+      if (allowedPanels.has(panel) && !seenPanels.has(panel)) {
+        sanitizedLayout[region].push(panel);
+        seenPanels.add(panel);
+      }
+    });
+  });
+
+  allowedPanels.forEach((panel) => {
+    if (!seenPanels.has(panel)) {
+      const targetRegion = DEFAULT_PANEL_DEFAULT_REGIONS[panel] || 'leftTop';
+      sanitizedLayout[targetRegion].push(panel);
+      seenPanels.add(panel);
+    }
+  });
+
+  const sanitizedActive: Record<PanelRegion, Panel | null> = {
+    leftTop: null,
+    leftBottom: null,
+    rightTop: null,
+    rightBottom: null,
+  };
+
+  (['leftTop', 'leftBottom', 'rightTop', 'rightBottom'] as PanelRegion[]).forEach((region) => {
+    const currentActive = savedWorkspace.activePanels?.[region];
+    if (currentActive && sanitizedLayout[region].includes(currentActive)) {
+      sanitizedActive[region] = currentActive;
+    } else {
+      sanitizedActive[region] = sanitizedLayout[region].length > 0 ? sanitizedLayout[region][0] : null;
+    }
+  });
+
+  return {
+    leftPanelWidth: savedWorkspace.leftPanelWidth || defaultWorkspace.leftPanelWidth,
+    rightPanelWidth: savedWorkspace.rightPanelWidth || defaultWorkspace.rightPanelWidth,
+    leftTopHeight: savedWorkspace.leftTopHeight || defaultWorkspace.leftTopHeight,
+    rightTopHeight: savedWorkspace.rightTopHeight || defaultWorkspace.rightTopHeight,
+    panelLayout: sanitizedLayout,
+    activePanels: sanitizedActive,
+    panelSwitcherPlacement: {
+      ...defaultWorkspace.panelSwitcherPlacement,
+      ...(savedWorkspace.panelSwitcherPlacement || {}),
+    },
+  };
 }
 
 interface UIState {
@@ -109,6 +234,7 @@ interface UIState {
 
   confirmModalState: ConfirmModalState;
   panoramaModalState: PanoramaModalState;
+  focusStackModalState: FocusStackModalState;
   hdrModalState: HdrModalState;
   negativeModalState: NegativeConversionModalState;
   denoiseModalState: DenoiseModalState;
@@ -191,6 +317,15 @@ export const useUIStore = create<UIState>((set, get) => ({
     isProcessing: false,
     progressMessage: '',
     stitchingSourcePaths: [],
+  },
+  focusStackModalState: {
+    error: null,
+    finalImageBase64: null,
+    depthMapBase64: null,
+    isOpen: false,
+    isProcessing: false,
+    progressMessage: '',
+    sourcePaths: [],
   },
   hdrModalState: {
     error: null,

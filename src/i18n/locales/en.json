@@ -225,6 +225,10 @@
       "addCopiedToAlbum_other": "Add {{count}} copied images to album",
       "refreshView": "Refresh View"
     },
+    "merge": {
+      "focusStack": "Focus Stacking",
+      "title": "Merge"
+    },
     "tagging": {
       "addTagTooltip": "Add tag",
       "noTags": "No tags added",
@@ -717,7 +721,8 @@
         "info": "Info",
         "inpaint": "Inpaint",
         "masks": "Masks",
-        "presets": "Presets"
+        "presets": "Presets",
+        "tethering": "Tethering"
       }
     },
     "toolbar": {
@@ -1231,6 +1236,23 @@
       "strengthLabel": "Strength",
       "titleBatch": "Denoise Images",
       "titleSingle": "Denoise Image"
+    },
+    "focusStack": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "depthMap": "Depth Map",
+      "description": "Combine multiple images with varying focus distances into a single perfectly sharp image.",
+      "descriptionWithCount_one": "Combine {{count}} image with varying focus distances into a single perfectly sharp image.",
+      "descriptionWithCount_other": "Combine {{count}} images with varying focus distances into a single perfectly sharp image.",
+      "failed": "Focus Stack Failed",
+      "initializing": "Initializing...",
+      "openInEditor": "Open in Editor",
+      "result": "Result",
+      "save": "Save",
+      "savedSuccess": "Focus Stack Saved Successfully!",
+      "stacking": "Stacking Focus",
+      "start": "Start",
+      "title": "Focus Stacking"
     },
     "hdr": {
       "cancel": "Cancel",
@@ -1761,6 +1783,59 @@
     "tooltips": {
       "goHome": "Go to Home"
     }
+  },
+  "tethering": {
+    "aperture": "Aperture",
+    "aperturePlaceholder": "e.g. 2.8",
+    "autoApplyPreset": "Auto Apply Preset",
+    "autoOpenCaptured": "Auto-open captured image",
+    "cameraConnected": "Camera Connected",
+    "capturing": "Capturing...",
+    "changePreset": "Change",
+    "clearPreset": "Clear Preset",
+    "connectCamera": "Connect Camera",
+    "expComp": "Exp. Comp",
+    "expCompPlaceholder": "e.g. 0.0",
+    "expMode": "Exp. Mode",
+    "exposureSettings": "Exposure Settings",
+    "flipHorizontal": "Flip Horizontal",
+    "generalSettings": "General Settings",
+    "ghostOverlayAlt": "Ghost Overlay",
+    "iso": "ISO",
+    "isoPlaceholder": "e.g. 400",
+    "liveViewAlt": "Live View",
+    "metering": "Metering Mode",
+    "noCameraDetected": "No camera detected",
+    "noCamerasFound": "No cameras found. Ensure it is connected and in PC Remote mode.",
+    "overlayLastShot": "Overlay Last Shot",
+    "overlayOff": "Off",
+    "rotate90": "Rotate 90°",
+    "scanTooltip": "Scan for Cameras",
+    "selectCamera": "Select Camera",
+    "selectCameraPlaceholder": "Select a camera",
+    "shutter": "Shutter",
+    "shutterPlaceholder": "e.g. 1/200",
+    "startLiveView": "Start Live View",
+    "status": "Status",
+    "stopLiveView": "Stop Live View",
+    "title": "Tethering",
+    "toasts": {
+      "afFailed": "Autofocus trigger failed",
+      "cameraDisconnected": "Camera disconnected",
+      "captureFailed": "Capture failed: {{err}}",
+      "communicationFailed": "Failed to communicate with camera",
+      "connectionFailed": "Connection failed: {{err}}",
+      "detectionFailed": "Detection failed: {{err}}",
+      "noCamerasFound": "No cameras found. Ensure it is in PC Remote mode.",
+      "presetApplyFailed": "Failed to apply preset to captured image",
+      "selectFolderFirst": "Please select a standard folder in your Library first.",
+      "setFailed": "Failed to set {{key}}: {{err}}"
+    },
+    "triggerAutofocus": "Trigger Autofocus",
+    "triggerCapture": "Trigger Capture",
+    "wbTemp": "WB Temp (K)",
+    "wbTempPlaceholder": "e.g. 5600",
+    "whiteBalance": "White Balance"
   },
   "ui": {
     "bottomBar": {

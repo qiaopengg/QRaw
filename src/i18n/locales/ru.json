@@ -233,6 +233,10 @@
       "addCopiedToAlbum_other": "Добавить {{count}} скопированных изображений в альбом",
       "refreshView": "Обновить вид"
     },
+    "merge": {
+      "focusStack": "Стекинг по фокусу",
+      "title": "Объединить"
+    },
     "tagging": {
       "addTagTooltip": "Добавить тег",
       "noTags": "Теги не добавлены",
@@ -759,7 +763,8 @@
         "info": "Инфо",
         "inpaint": "Восстановление",
         "masks": "Маски",
-        "presets": "Пресеты"
+        "presets": "Пресеты",
+        "tethering": "Съемка на ПК (Тетеринг)"
       }
     },
     "toolbar": {
@@ -1283,6 +1288,25 @@
       "strengthLabel": "Интенсивность",
       "titleBatch": "Шумоподавление изображений",
       "titleSingle": "Шумоподавление кадра"
+    },
+    "focusStack": {
+      "cancel": "Отмена",
+      "close": "Закрыть",
+      "depthMap": "Карта глубины",
+      "description": "Объедините несколько изображений с разным фокусным расстоянием в одно идеально резкое изображение.",
+      "descriptionWithCount_few": "Объедините {{count}} изображения с разным фокусным расстоянием в одно идеально резкое изображение.",
+      "descriptionWithCount_many": "Объедините {{count}} изображений с разным фокусным расстоянием в одно идеально резкое изображение.",
+      "descriptionWithCount_one": "Объедините {{count}} изображение с разным фокусным расстоянием в одно идеально резкое изображение.",
+      "descriptionWithCount_other": "Объедините {{count}} изображений с разным фокусным расстоянием в одно идеально резкое изображение.",
+      "failed": "Стекинг по фокусу не удался",
+      "initializing": "Инициализация...",
+      "openInEditor": "Открыть в редакторе",
+      "result": "Результат",
+      "save": "Сохранить",
+      "savedSuccess": "Стек фокуса успешно сохранен!",
+      "stacking": "Выполнение стекинга",
+      "start": "Начать",
+      "title": "Стекинг по фокусу"
     },
     "hdr": {
       "cancel": "Отмена",
@@ -1827,6 +1851,59 @@
     "tooltips": {
       "goHome": "На главную"
     }
+  },
+  "tethering": {
+    "aperture": "Диафрагма",
+    "aperturePlaceholder": "напр. 2.8",
+    "autoApplyPreset": "Авто-применение пресета",
+    "autoOpenCaptured": "Автоматически открывать снимок",
+    "cameraConnected": "Камера подключена",
+    "capturing": "Съемка...",
+    "changePreset": "Изменить",
+    "clearPreset": "Очистить пресет",
+    "connectCamera": "Подключить камеру",
+    "expComp": "Экспокоррекция",
+    "expCompPlaceholder": "напр. 0.0",
+    "expMode": "Режим эксп.",
+    "exposureSettings": "Настройки экспозиции",
+    "flipHorizontal": "Отразить по горизонтали",
+    "generalSettings": "Общие настройки",
+    "ghostOverlayAlt": "Полупрозрачное наложение",
+    "iso": "ISO",
+    "isoPlaceholder": "напр. 400",
+    "liveViewAlt": "Live View",
+    "metering": "Режим замера",
+    "noCameraDetected": "Камера не обнаружена",
+    "noCamerasFound": "Камеры не найдены. Убедитесь, что камера подключена и включен режим ПК.",
+    "overlayLastShot": "Наложить прошлый снимок",
+    "overlayOff": "Выкл.",
+    "rotate90": "Повернуть на 90°",
+    "scanTooltip": "Поиск камер",
+    "selectCamera": "Выбрать камеру",
+    "selectCameraPlaceholder": "Выберите камеру",
+    "shutter": "Выдержка",
+    "shutterPlaceholder": "напр. 1/200",
+    "startLiveView": "Запустить Live View",
+    "status": "Статус",
+    "stopLiveView": "Остановить Live View",
+    "title": "Тетеринг",
+    "toasts": {
+      "afFailed": "Ошибка автофокусировки",
+      "cameraDisconnected": "Камера отключена",
+      "captureFailed": "Ошибка съемки: {{err}}",
+      "communicationFailed": "Не удалось связаться с камерой",
+      "connectionFailed": "Ошибка подключения: {{err}}",
+      "detectionFailed": "Ошибка обнаружения: {{err}}",
+      "noCamerasFound": "Камеры не найдены. Убедитесь, что включен режим дистанционного управления ПК.",
+      "presetApplyFailed": "Не удалось применить пресет к снимку",
+      "selectFolderFirst": "Сначала выберите стандартную папку в Библиотеке.",
+      "setFailed": "Не удалось установить {{key}}: {{err}}"
+    },
+    "triggerAutofocus": "Сфокусироваться",
+    "triggerCapture": "Сделать снимок",
+    "wbTemp": "Цвет. темп. (K)",
+    "wbTempPlaceholder": "напр. 5600",
+    "whiteBalance": "Баланс белого"
   },
   "ui": {
     "bottomBar": {
