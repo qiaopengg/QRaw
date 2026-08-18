@@ -11,7 +11,7 @@ use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.2-macos-calibration";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.3-macos-calibration";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
 pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.1";
 #[cfg(all(debug_assertions, target_os = "macos"))]

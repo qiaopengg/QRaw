@@ -1,6 +1,7 @@
 //! Explicit paired replay of manual truth, persisted AI output, current
 //! production scoring, and isolated face-motion evidence.
 
+mod blind_snapshot;
 mod dataset;
 
 use std::collections::BTreeMap;
@@ -18,7 +19,7 @@ use super::super::infrastructure::scan_catalog;
 use super::super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::super::models::load_face_models_for_test;
 use super::super::runner::analysis_hasher;
-use super::super::scoring::{AnalysisCandidate, organize_results};
+use super::super::scoring::{AnalysisCandidate, MODEL_VERSION, POLICY_VERSION, organize_results};
 use super::super::types::FaceResult;
 use super::extract_calibration_evidence;
 
@@ -26,19 +27,47 @@ const CHILD_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_CHILD";
 const ROOT_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_ROOT";
 const OUTPUT_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_OUTPUT";
 const REQUIRE_PERSISTENCE_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_REQUIRE_PERSISTENCE";
-const TEST_NAME: &str =
+const SNAPSHOT_OUTPUT_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT_OUTPUT";
+const SNAPSHOT_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT";
+const SNAPSHOT_SHA256_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT_SHA256";
+const REPLAY_TEST_NAME: &str =
     "features::smart_culling::face_motion_poc::paired_eval::paired_manual_ai_replay";
+const BLIND_REVEAL_TEST_NAME: &str =
+    "features::smart_culling::face_motion_poc::paired_eval::blind_manual_ai_reveal";
 const PASS_MARKER: &str = "QRAW_PAIRED_CULLING_EVAL_PASS";
 
 #[test]
 #[ignore = "explicit local paired-dataset calibration; never part of production analysis"]
 fn paired_manual_ai_replay() {
+    run_replay_test(REPLAY_TEST_NAME, false);
+}
+
+#[test]
+#[ignore = "freezes AI results before manual-reference is revealed"]
+fn freeze_blind_ai_snapshot() {
+    let digest = blind_snapshot::freeze_from_environment(
+        ROOT_ENV,
+        SNAPSHOT_OUTPUT_ENV,
+        POLICY_VERSION,
+        MODEL_VERSION,
+    )
+    .unwrap();
+    println!("{SNAPSHOT_SHA256_ENV}={digest}");
+}
+
+#[test]
+#[ignore = "strict blind reveal; requires a previously frozen AI snapshot"]
+fn blind_manual_ai_reveal() {
+    run_replay_test(BLIND_REVEAL_TEST_NAME, true);
+}
+
+fn run_replay_test(test_name: &str, blind_reveal: bool) {
     if std::env::var_os(CHILD_ENV).is_none() {
-        run_isolated_parent();
+        run_isolated_parent(test_name, blind_reveal);
         return;
     }
 
-    run_dataset().unwrap();
+    run_dataset(blind_reveal).unwrap();
     println!("{PASS_MARKER}");
     std::io::stdout().flush().unwrap();
     std::io::stderr().flush().unwrap();
@@ -53,15 +82,19 @@ fn paired_manual_ai_replay() {
     std::process::exit(0);
 }
 
-fn run_isolated_parent() {
-    for required in [ROOT_ENV, OUTPUT_ENV] {
+fn run_isolated_parent(test_name: &str, blind_reveal: bool) {
+    let mut required_envs = vec![ROOT_ENV, OUTPUT_ENV];
+    if blind_reveal {
+        required_envs.extend([SNAPSHOT_ENV, SNAPSHOT_SHA256_ENV]);
+    }
+    for required in required_envs {
         assert!(
             std::env::var_os(required).is_some(),
             "missing required environment variable {required}"
         );
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", TEST_NAME, "--ignored", "--nocapture"])
+        .args(["--exact", test_name, "--ignored", "--nocapture"])
         .env(CHILD_ENV, "1")
         .output()
         .unwrap();
@@ -75,7 +108,16 @@ fn run_isolated_parent() {
     );
 }
 
-fn run_dataset() -> Result<()> {
+fn run_dataset(blind_reveal: bool) -> Result<()> {
+    if blind_reveal {
+        blind_snapshot::verify_from_environment(
+            ROOT_ENV,
+            SNAPSHOT_ENV,
+            SNAPSHOT_SHA256_ENV,
+            POLICY_VERSION,
+            MODEL_VERSION,
+        )?;
+    }
     let dataset = PairedDataset::from_environment(ROOT_ENV, OUTPUT_ENV)?;
     let resource_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/smart_culling_models");
     let production_models = load_face_models_for_test(&resource_dir)?;
@@ -158,6 +200,11 @@ fn run_dataset() -> Result<()> {
     let mut writer = BufWriter::new(File::create(&dataset.output_path)?);
     let mut replay_counts = BTreeMap::<u8, usize>::new();
     let mut persistence_mismatches = Vec::new();
+    let mut labeled_count = 0usize;
+    let mut exact_count = 0usize;
+    let mut within_one_count = 0usize;
+    let mut usable_match_count = 0usize;
+    let mut absolute_error = 0usize;
     for (file_name, item) in &dataset.items {
         let result = replay
             .get(file_name)
@@ -169,6 +216,15 @@ fn run_dataset() -> Result<()> {
         };
         if !persistence_equivalent {
             persistence_mismatches.push(file_name.clone());
+        }
+        if item.manual_rating > 0 {
+            let saved_ai_rating = item.saved_ai_rating.unwrap_or(0);
+            let difference = item.manual_rating.abs_diff(saved_ai_rating) as usize;
+            labeled_count += 1;
+            exact_count += usize::from(difference == 0);
+            within_one_count += usize::from(difference <= 1);
+            usable_match_count += usize::from((item.manual_rating >= 3) == (saved_ai_rating >= 3));
+            absolute_error += difference;
         }
         serde_json::to_writer(
             &mut writer,
@@ -193,20 +249,31 @@ fn run_dataset() -> Result<()> {
         writeln!(writer)?;
     }
     writer.flush()?;
+    let require_persistence = std::env::var(REQUIRE_PERSISTENCE_ENV)
+        .map(|value| value != "0")
+        .unwrap_or(true);
+    if !persistence_mismatches.is_empty() && require_persistence {
+        return Err(anyhow!(
+            "current replay differs from persisted {} for: {}",
+            dataset.ai_run,
+            persistence_mismatches.join(", ")
+        ));
+    }
+
     println!(
         "paired replay wrote {} rows to {} with ratings {:?}",
         dataset.items.len(),
         dataset.output_path.display(),
         replay_counts
     );
-    let require_persistence = std::env::var(REQUIRE_PERSISTENCE_ENV)
-        .map(|value| value != "0")
-        .unwrap_or(true);
-    if !persistence_mismatches.is_empty() && require_persistence {
-        return Err(anyhow!(
-            "current replay differs from persisted v001 for: {}",
-            persistence_mismatches.join(", ")
-        ));
+    if labeled_count > 0 {
+        println!(
+            "frozen AI vs manual (manual 0 excluded): n={labeled_count}, exact={:.1}%, within1={:.1}%, mae={:.3}, usable={:.1}%",
+            percentage(exact_count, labeled_count),
+            percentage(within_one_count, labeled_count),
+            absolute_error as f64 / labeled_count as f64,
+            percentage(usable_match_count, labeled_count),
+        );
     }
     if !persistence_mismatches.is_empty() {
         println!(
@@ -215,6 +282,10 @@ fn run_dataset() -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn percentage(count: usize, total: usize) -> f64 {
+    count as f64 * 100.0 / total as f64
 }
 
 fn face_motion_json(image: &image::DynamicImage, faces: &[FaceResult]) -> Value {

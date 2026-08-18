@@ -8,7 +8,10 @@ use sha2::{Digest, Sha256};
 
 use crate::formats::is_supported_image_file;
 
+pub(super) const AI_RUN_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_AI_RUN";
+
 pub(super) struct PairedDataset {
+    pub ai_run: String,
     pub source_dir: PathBuf,
     pub output_path: PathBuf,
     pub items: BTreeMap<String, PairedItem>,
@@ -28,11 +31,7 @@ impl PairedDataset {
         let root = required_dir(root_env)?;
         let source_dir = required_child_dir(&root, "source")?;
         let manual_dir = required_child_dir(&root, "manual-reference")?;
-        let ai_run = std::env::var("QRAW_PAIRED_CULLING_EVAL_AI_RUN")
-            .unwrap_or_else(|_| "ai-run-v001".to_string());
-        if Path::new(&ai_run).components().count() != 1 {
-            return Err(anyhow!("paired AI run must be a direct child name"));
-        }
+        let ai_run = ai_run_name()?;
         let ai_dir = required_child_dir(&root, &ai_run)?;
         let output_path = PathBuf::from(required_value(output_env)?);
 
@@ -88,6 +87,7 @@ impl PairedDataset {
         }
 
         Ok(Self {
+            ai_run,
             source_dir,
             output_path,
             items,
@@ -95,12 +95,14 @@ impl PairedDataset {
     }
 }
 
-struct StoredRating {
-    rating: u8,
-    source: Option<String>,
+pub(super) struct StoredRating {
+    pub rating: u8,
+    pub source: Option<String>,
+    pub policy_version: Option<String>,
+    pub model_version: Option<String>,
 }
 
-fn read_rating(path: &Path, required: bool) -> Result<Option<StoredRating>> {
+pub(super) fn read_rating(path: &Path, required: bool) -> Result<Option<StoredRating>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => return Ok(None),
@@ -122,13 +124,23 @@ fn read_rating(path: &Path, required: bool) -> Result<Option<StoredRating>> {
         .pointer("/featureData/smartCullingV2/source")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let policy_version = value
+        .pointer("/featureData/smartCullingV2/policyVersion")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let model_version = value
+        .pointer("/featureData/smartCullingV2/modelVersion")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     Ok(Some(StoredRating {
         rating: rating as u8,
         source,
+        policy_version,
+        model_version,
     }))
 }
 
-fn image_names(dir: &Path) -> Result<BTreeSet<String>> {
+pub(super) fn image_names(dir: &Path) -> Result<BTreeSet<String>> {
     fs::read_dir(dir)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
@@ -143,7 +155,11 @@ fn image_names(dir: &Path) -> Result<BTreeSet<String>> {
         .collect()
 }
 
-fn ensure_same_image_names(expected: &BTreeSet<String>, dir: &Path, name: &str) -> Result<()> {
+pub(super) fn ensure_same_image_names(
+    expected: &BTreeSet<String>,
+    dir: &Path,
+    name: &str,
+) -> Result<()> {
     let actual = image_names(dir)?;
     if &actual != expected {
         return Err(anyhow!(
@@ -155,7 +171,7 @@ fn ensure_same_image_names(expected: &BTreeSet<String>, dir: &Path, name: &str) 
     Ok(())
 }
 
-fn ensure_source_has_no_sidecars(source: &Path) -> Result<()> {
+pub(super) fn ensure_source_has_no_sidecars(source: &Path) -> Result<()> {
     if fs::read_dir(source)?.filter_map(Result::ok).any(|entry| {
         entry
             .path()
@@ -168,11 +184,11 @@ fn ensure_source_has_no_sidecars(source: &Path) -> Result<()> {
     Ok(())
 }
 
-fn required_value(name: &str) -> Result<String> {
+pub(super) fn required_value(name: &str) -> Result<String> {
     std::env::var(name).map_err(|_| anyhow!("missing required environment variable {name}"))
 }
 
-fn required_dir(name: &str) -> Result<PathBuf> {
+pub(super) fn required_dir(name: &str) -> Result<PathBuf> {
     let path = PathBuf::from(required_value(name)?);
     if !path.is_dir() {
         return Err(anyhow!("{name} is not a directory: {}", path.display()));
@@ -180,7 +196,7 @@ fn required_dir(name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn required_child_dir(root: &Path, name: &str) -> Result<PathBuf> {
+pub(super) fn required_child_dir(root: &Path, name: &str) -> Result<PathBuf> {
     let path = root.join(name);
     if !path.is_dir() {
         return Err(anyhow!(
@@ -189,4 +205,18 @@ fn required_child_dir(root: &Path, name: &str) -> Result<PathBuf> {
         ));
     }
     Ok(path)
+}
+
+pub(super) fn ai_run_name() -> Result<String> {
+    let ai_run = std::env::var(AI_RUN_ENV).unwrap_or_else(|_| "ai-run-v001".to_string());
+    if ai_run.is_empty()
+        || Path::new(&ai_run).components().count() != 1
+        || Path::new(&ai_run)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(&ai_run)
+    {
+        return Err(anyhow!("paired AI run must be a direct child name"));
+    }
+    Ok(ai_run)
 }
