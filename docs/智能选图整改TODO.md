@@ -125,9 +125,10 @@
 - [!] `MODEL-02` 审批并隔离验证 DINOv2 特征，用于相似组和后续自有排序头。
 - [!] `MODEL-03` 审批并隔离验证 ARNIQA 无参考画质证据。
 - [!] `MODEL-04` 审批并隔离验证 RTMPose face，用于姿态、遮挡和嘴型等技术可用性证据。
-- [!] `MODEL-05` 表情模型已改选并接入 **FER+**（`emotion_ferplus_8.onnx`，ONNX Model Zoo，MIT）。原候选 EmotiEffLib 已否决：其权重基于 AffectNet 训练，属研究/非商业授权，不可随安装包分发；LibreFace 亦自述 non-commercial（USC 版权），同样否决。已完成：SHA256 固定校验、`Input3 [1,1,64,64]` / `Plus692_Output_0 [1,8]` 契约校验、Core ML MLProgram / DirectML 强制 GPU 且禁用 CPU 回退、加载期 smoke test、`THIRD_PARTY_NOTICES.md` 授权声明。**用法边界**：只消费输出分布的峰度（top-1 概率 + 归一化熵）判断「是否稳定可用瞬间」，从不解释、不展示、不用任何情绪类别影响星级，符合「表情只判断技术可用瞬间」规则；侧脸（`MODE-17` 姿态门控）时同样标记为不可用。FER+ 为 opset-8 CNTK 导出，故会话为**可选**：若某设备的严格 GPU 路径不接受该图，表情证据降级为不可用并打印告警，其余功能不受影响，绝不静默回落 CPU。证据：`expression.rs` 5 项新增回归（峰化=stable、平坦=transitional、中间带=unknown、畸形输出=unavailable、任何类别胜出都不泄露情绪标签），Rust 专项 135 项通过。**macOS Core ML 已确认接受**：新增 `models::tests::expression_model_is_accepted_by_the_validated_gpu_path`（`#[ignore]`，需 dylib 与模型文件）在 `disable_cpu_ep_fallback=1` + `error_on_failure()` 下成功建会话、通过契约校验并完成推理，返回 8 个有限 logits（实测 `state=stable`），证明 opset-8 图无需 CPU 回落即被 Core ML 接受。注意该 harness 进程在断言通过**之后**会因 ONNX Runtime 全局环境与 Core ML 的退出期清理竞态而 abort；生产 app 由 `FACE_MODELS`（`OnceCell`）持有会话至进程结束，不经过该路径，故以断言结果为准而非进程退出码。仍为 `[!]`：Windows DirectML 一致性与真实样片准确率尚未验证，未通过前不参与自动写星。
+- [!] `MODEL-05` **FER+ 路线已判定无效并退出生产分析链**。原因：情绪分类分布的峰度或熵不能证明抓拍瞬间“稳定/过渡”，此前把峰化输出映射为 `stable`、平坦输出映射为 `transitional` 没有真实连拍数据或模型语义依据；模型能加载、能在 GPU 推理和单元测试通过，只能证明工程契约，不能证明表情筛选准确。当前表情证据固定为 `unknown`，不参与自动评分。后续候选必须直接提供面部动作/Blendshape/Action Unit 或经摄影样片标注训练的技术可用性输出，并依次通过许可、双平台、冻结真实任务集和摄影师验收；在此之前不得恢复 FER+ 阈值映射。
 - [!] `MODEL-06` 每个候选分别完成代码、权重、训练数据和再分发许可审查。
 - [!] `MODEL-07` 每个候选完成 ONNX 参考输出、Core ML、DirectML、数值一致性和禁止静默 CPU 回退验证。
+- [!] `MODEL-08` FaceMeshV2 + BlendshapeV2 已完成隔离 POC：资产位于 `src-tauri/src/features/smart_culling/model_assets` 且不随应用打包；官方 TFLite 与原 ONNX 确定性输入最大绝对误差为 FaceMesh 关键点 `0.000305176`、presence logit `0.000056982`、tongue_out `0.0000000077`，Blendshape `0.000001431`；原 ONNX 与派生图 CPU 全输出误差为 `0`；项目内置 ORT 1.22/Core ML 严格禁止 CPU 回退的双模型推理通过。仍为 `[!]`：Windows DirectML、官方等价 ROI/坐标投影、真实连拍准确率、性能和摄影师验收未完成；不得接入生产评分。
 - [!] `DATA-01` 建立按完整拍摄任务和相似组切分的真实照片数据集，冻结标注规范和最终测试集。
 - [!] `DATA-02` 冻结五模式准确率、关键人物召回/误认、人工审核率、相似组误合并和人工评分覆盖门槛。
 - [!] `RELEASE-01` 冻结 macOS/Windows 设备矩阵、耗时、内存、显存、包体、冷启动和取消延迟预算。

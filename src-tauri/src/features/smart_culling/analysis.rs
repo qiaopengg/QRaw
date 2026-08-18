@@ -3,21 +3,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImageView, GrayImage, imageops};
 
-use super::expression::{ExpressionEvidence, evaluate_expression};
+#[cfg(not(all(debug_assertions, target_os = "macos")))]
+use super::expression::ExpressionEvidence;
 use super::face_geometry::estimate_pose;
 use super::face_identity::run_sface_embedding;
-use super::face_models::{
-    crop_eye_region, run_ferplus_expression, run_ocec_classification, run_yunet_detection,
-};
+use super::face_models::run_yunet_detection;
 use super::models::SmartCullingFaceModels;
-use super::types::{EyeResult, FaceResult};
+use super::types::FaceResult;
+#[cfg(not(all(debug_assertions, target_os = "macos")))]
+use super::types::{EyeDisposition, EyeResult};
 
 /// Dimension used for sharpness/exposure analysis. Kept close to the
 /// original full-resolution image (instead of the old 720px downscale) so
 /// mild focus/blur defects that a heavy downscale would hide are still
 /// detected. Fixes the FIXME in the original `culling.rs` implementation.
 const ANALYSIS_DIM: u32 = 1600;
-const MIN_INTER_OCULAR_DISTANCE: f32 = 16.0;
 
 pub fn calculate_laplacian_variance(image: &GrayImage) -> f64 {
     let (width, height) = image.dimensions();
@@ -148,23 +148,44 @@ fn detect_faces_in_image(
         .into_iter()
         .map(|face| -> Result<FaceResult> {
             ensure_not_cancelled(cancellation)?;
-            let right_eye = face.landmarks[0];
-            let left_eye = face.landmarks[1];
-            let inter_ocular_distance =
-                ((left_eye.0 - right_eye.0).powi(2) + (left_eye.1 - right_eye.1).powi(2)).sqrt();
-
-            // On a strongly turned head the per-eye crops handed to OCEC are
-            // foreshortened and partly self-occluded, so a "closed" reading there
-            // is not evidence of a blink. Report the eye state as unknown instead
-            // of letting a profile shot take a closed-eye penalty.
-            let pose_hides_eyes = estimate_pose(&face.landmarks).suppresses_eye_state();
-            let (right_eye_result, left_eye_result) = if pose_hides_eyes {
-                (unknown_eye(0), unknown_eye(0))
-            } else {
-                let right = analyze_eye(img, right_eye, inter_ocular_distance, models)?;
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            let (left_eye_result, right_eye_result, eye_disposition, expression) = {
+                let pose_suppresses_eye_state =
+                    estimate_pose(&face.landmarks).suppresses_eye_state();
+                let motion = super::face_motion_poc::analyze_calibration_face(
+                    img,
+                    &face,
+                    pose_suppresses_eye_state,
+                )?;
                 ensure_not_cancelled(cancellation)?;
-                let left = analyze_eye(img, left_eye, inter_ocular_distance, models)?;
-                (right, left)
+                (
+                    motion.left_eye,
+                    motion.right_eye,
+                    motion.eye_disposition,
+                    motion.expression,
+                )
+            };
+            #[cfg(not(all(debug_assertions, target_os = "macos")))]
+            let (left_eye_result, right_eye_result, eye_disposition, expression) = {
+                // YuNet exposes only one point per eye, not an eye bounding box or
+                // eyelid contour. OCEC was trained for actual eye crops, so deriving
+                // its input size from the two YuNet eye points is not validated
+                // evidence. Keep eye state unavailable until an eye detector or a
+                // dense-landmark model passes real-photo validation.
+                let pose_hides_eyes = estimate_pose(&face.landmarks).suppresses_eye_state();
+                let unavailable_reason = if pose_hides_eyes {
+                    "eye_pose_unreliable"
+                } else {
+                    "eye_model_input_unvalidated"
+                };
+                let right_eye_result = EyeResult::unavailable(unavailable_reason, 0, None);
+                let left_eye_result = EyeResult::unavailable(unavailable_reason, 0, None);
+                (
+                    left_eye_result,
+                    right_eye_result,
+                    EyeDisposition::Unknown,
+                    ExpressionEvidence::unavailable("expression_model_unvalidated"),
+                )
             };
             let face_crop = crop_pixel_bbox(img, face.bbox);
             let (sharpness_metric, exposure_metric, local_confidence) = face_crop
@@ -187,23 +208,6 @@ fn detect_faces_in_image(
             } else {
                 None
             };
-
-            // Expression usability, not emotion: only the certainty of the FER+
-            // distribution is consumed. A turned head also invalidates this, for
-            // the same reason it invalidates the eye state.
-            let expression = match (&models.expression, pose_hides_eyes) {
-                (_, true) => ExpressionEvidence::unavailable("expression_pose_unreliable"),
-                (None, _) => ExpressionEvidence::unavailable("expression_model_unavailable"),
-                (Some(session), false) => face_crop
-                    .as_ref()
-                    .map(|crop| match run_ferplus_expression(crop, session) {
-                        Ok(logits) => evaluate_expression(&logits),
-                        Err(_) => ExpressionEvidence::unavailable("expression_inference_failed"),
-                    })
-                    .unwrap_or_else(|| {
-                        ExpressionEvidence::unavailable("expression_face_crop_unavailable")
-                    }),
-            };
             ensure_not_cancelled(cancellation)?;
 
             Ok(FaceResult {
@@ -212,6 +216,7 @@ fn detect_faces_in_image(
                 detection_score: face.score,
                 left_eye: left_eye_result,
                 right_eye: right_eye_result,
+                eye_disposition,
                 expression_state: expression.state.to_string(),
                 expression_confidence: expression.confidence,
                 expression_reason: expression.reason.to_string(),
@@ -230,47 +235,6 @@ fn ensure_not_cancelled(cancellation: Option<&AtomicBool>) -> Result<()> {
         Err(anyhow!("smart-culling analysis was cancelled"))
     } else {
         Ok(())
-    }
-}
-
-fn analyze_eye(
-    image: &DynamicImage,
-    position: (f32, f32),
-    inter_ocular_distance: f32,
-    models: &SmartCullingFaceModels,
-) -> Result<EyeResult> {
-    if inter_ocular_distance < MIN_INTER_OCULAR_DISTANCE {
-        return Ok(unknown_eye(0));
-    }
-    let Some(crop) = crop_eye_region(image, position, inter_ocular_distance) else {
-        return Ok(unknown_eye(0));
-    };
-    let effective_pixels = crop.width().saturating_mul(crop.height());
-    let sharpness_metric = Some(calculate_laplacian_variance(&crop.to_luma8()));
-    let probability = run_ocec_classification(&crop, &models.ocec)?;
-    let (state, confidence) = if probability <= 0.30 {
-        ("closed", 1.0 - probability)
-    } else if probability >= 0.70 {
-        ("open", probability)
-    } else {
-        ("unknown", ((probability - 0.5).abs() * 2.0).min(0.39))
-    };
-    Ok(EyeResult {
-        open_probability: Some(probability),
-        state: state.to_string(),
-        confidence,
-        effective_pixels,
-        sharpness_metric,
-    })
-}
-
-fn unknown_eye(effective_pixels: u32) -> EyeResult {
-    EyeResult {
-        open_probability: None,
-        state: "unknown".to_string(),
-        confidence: 0.0,
-        effective_pixels,
-        sharpness_metric: None,
     }
 }
 

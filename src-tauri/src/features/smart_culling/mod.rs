@@ -8,6 +8,8 @@ mod expression;
 mod face_geometry;
 mod face_identity;
 mod face_models;
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+mod face_motion_poc;
 mod grouping;
 pub(crate) mod infrastructure;
 mod key_person_policy;

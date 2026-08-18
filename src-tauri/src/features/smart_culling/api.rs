@@ -218,6 +218,7 @@ pub struct EyeEvidenceDto {
     pub open_probability: Option<f32>,
     pub state: String,
     pub confidence: f32,
+    pub reason: String,
     pub effective_pixels: u32,
     pub sharpness_metric: Option<f64>,
 }

@@ -22,12 +22,6 @@ const TILE_FRACTION: f32 = 0.6;
 const OCEC_INPUT_HEIGHT: u32 = 24;
 const OCEC_INPUT_WIDTH: u32 = 40;
 
-pub const FERPLUS_INPUT_SIZE: u32 = 64;
-#[cfg(test)]
-const OCEC_STRONG_CLOSED_THRESHOLD: f32 = 0.30;
-#[cfg(test)]
-const OCEC_CONFIDENT_OPEN_THRESHOLD: f32 = 0.70;
-
 #[derive(Debug, Clone)]
 pub struct DetectedFace {
     /// Bounding box in pixel coordinates of the input image: [x, y, width, height]
@@ -269,47 +263,7 @@ fn box_iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     }
 }
 
-/// Runs the FER+ expression classifier on a cropped face and returns the raw
-/// eight logits.
-///
-/// The caller converts these into usability evidence via
-/// `expression::evaluate_expression`; the individual emotion classes are never
-/// interpreted here or downstream.
-pub fn run_ferplus_expression(
-    face_crop: &DynamicImage,
-    session: &Mutex<Session>,
-) -> Result<Vec<f32>> {
-    let input = prepare_ferplus_input(face_crop);
-    let tensor = Tensor::from_array(input.into_dyn().as_standard_layout().into_owned())?;
-    let mut session_guard = session
-        .lock()
-        .map_err(|_| anyhow!("FER+ inference session lock is poisoned"))?;
-    let outputs = session_guard.run(ort::inputs!["Input3" => tensor])?;
-    Ok(outputs[0]
-        .try_extract_array::<f32>()?
-        .iter()
-        .copied()
-        .collect())
-}
-
-/// FER+ takes a single-channel 64x64 crop. The reference pipeline feeds raw
-/// 0-255 grayscale values with no mean subtraction or rescaling, so the same
-/// contract is kept here.
-fn prepare_ferplus_input(face_crop: &DynamicImage) -> Array4<f32> {
-    let resized =
-        face_crop.resize_exact(FERPLUS_INPUT_SIZE, FERPLUS_INPUT_SIZE, FilterType::Triangle);
-    let gray = resized.to_luma8();
-    let size = FERPLUS_INPUT_SIZE as usize;
-    let mut input = Array4::<f32>::zeros((1, 1, size, size));
-    for y in 0..size {
-        for x in 0..size {
-            input[[0, 0, y, x]] = gray.get_pixel(x as u32, y as u32)[0] as f32;
-        }
-    }
-    input
-}
-
-/// Classifies whether the eyes in a cropped face region are open or closed
+/// Classifies whether an aligned eye region is open or closed
 /// using the OCEC model. Returns the probability that the eyes are open
 /// (0.0 = closed, 1.0 = open).
 pub fn run_ocec_classification(face_crop: &DynamicImage, session: &Mutex<Session>) -> Result<f32> {
@@ -322,9 +276,24 @@ pub fn run_ocec_classification(face_crop: &DynamicImage, session: &Mutex<Session
         .map_err(|_| anyhow!("OCEC inference session lock is poisoned"))?;
     let outputs = session_guard.run(ort::inputs!["images" => t_input])?;
     let output_tensor = outputs[0].try_extract_array::<f32>()?.to_owned();
-    let prob_open = *output_tensor.as_slice().unwrap().first().unwrap_or(&1.0);
+    let output = output_tensor
+        .as_slice()
+        .ok_or_else(|| anyhow!("OCEC output tensor must be contiguous"))?;
 
-    Ok(prob_open.clamp(0.0, 1.0))
+    validated_ocec_probability(output)
+}
+
+fn validated_ocec_probability(output: &[f32]) -> Result<f32> {
+    if output.len() != 1 {
+        return Err(anyhow!(
+            "OCEC output must contain exactly one prob_open value"
+        ));
+    }
+    let probability = output[0];
+    if !probability.is_finite() {
+        return Err(anyhow!("OCEC prob_open must be finite"));
+    }
+    Ok(probability.clamp(0.0, 1.0))
 }
 
 fn prepare_ocec_input(face_crop: &DynamicImage) -> Array4<f32> {
@@ -346,51 +315,6 @@ fn prepare_ocec_input(face_crop: &DynamicImage) -> Array4<f32> {
         }
     }
     input_tensor
-}
-
-#[cfg(test)]
-pub fn summarize_eye_state(probabilities: &[f32]) -> (Option<f32>, bool) {
-    if probabilities.len() != 2 || probabilities.iter().any(|value| !value.is_finite()) {
-        return (None, false);
-    }
-    let weakest_eye = probabilities[0].min(probabilities[1]);
-    if weakest_eye <= OCEC_STRONG_CLOSED_THRESHOLD {
-        (Some(weakest_eye), true)
-    } else if probabilities
-        .iter()
-        .all(|value| *value >= OCEC_CONFIDENT_OPEN_THRESHOLD)
-    {
-        (Some(weakest_eye), false)
-    } else {
-        (None, false)
-    }
-}
-
-/// Crops a square region around a single eye landmark, sized relative to the
-/// inter-ocular distance so the crop tightly frames the eye regardless of
-/// face size or distance from the camera.
-pub fn crop_eye_region(
-    image: &DynamicImage,
-    eye_position: (f32, f32),
-    inter_ocular_distance: f32,
-) -> Option<DynamicImage> {
-    if inter_ocular_distance <= 0.0 {
-        return None;
-    }
-
-    let half_size = (inter_ocular_distance * 0.4).max(4.0);
-    let (img_w, img_h) = image.dimensions();
-
-    let x1 = (eye_position.0 - half_size).max(0.0) as u32;
-    let y1 = (eye_position.1 - half_size).max(0.0) as u32;
-    let x2 = ((eye_position.0 + half_size) as u32).min(img_w);
-    let y2 = ((eye_position.1 + half_size) as u32).min(img_h);
-
-    if x2 <= x1 || y2 <= y1 {
-        return None;
-    }
-
-    Some(image.crop_imm(x1, y1, x2 - x1, y2 - y1))
 }
 
 #[cfg(test)]
@@ -474,10 +398,10 @@ mod tests {
     }
 
     #[test]
-    fn eye_state_requires_strong_evidence_and_both_eyes() {
-        assert_eq!(summarize_eye_state(&[0.1, 0.9]), (Some(0.1), true));
-        assert_eq!(summarize_eye_state(&[0.8, 0.9]), (Some(0.8), false));
-        assert_eq!(summarize_eye_state(&[0.45, 0.9]), (None, false));
-        assert_eq!(summarize_eye_state(&[0.1]), (None, false));
+    fn ocec_output_never_defaults_malformed_evidence_to_open() {
+        assert!(validated_ocec_probability(&[]).is_err());
+        assert!(validated_ocec_probability(&[f32::NAN]).is_err());
+        assert!(validated_ocec_probability(&[0.5, 0.6]).is_err());
+        assert_eq!(validated_ocec_probability(&[1.2]).unwrap(), 1.0);
     }
 }

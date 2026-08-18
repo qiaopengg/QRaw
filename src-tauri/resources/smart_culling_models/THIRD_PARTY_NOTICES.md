@@ -90,10 +90,11 @@ SOFTWARE.
 - Paper: "Training Deep Networks for Facial Expression Recognition with
   Crowd-Sourced Label Distribution", arXiv:1608.01041
 
-Note on how QRaw uses this model: only the certainty (peakedness) of the output
-distribution is consumed, to judge whether a captured instant is technically
-usable. The individual emotion classes are never interpreted, surfaced, or used
-to influence a photo's rating.
+QRaw no longer loads or interprets this model. The file is retained only as a
+temporary rollback artifact while the replacement face-motion path is being
+validated. FER+ class confidence, entropy, or distribution peakedness is not
+valid evidence that a captured expression is technically stable, so none of
+those values influence eye state, expression state, rating, or selection.
 
 MIT License
 

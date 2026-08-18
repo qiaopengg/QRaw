@@ -1,5 +1,5 @@
 use super::scoring::AnalysisCandidate;
-use super::types::{FaceResult, MIN_RELIABLE_FACE_DETECTION_SCORE};
+use super::types::{EyeDisposition, FaceResult, MIN_RELIABLE_FACE_DETECTION_SCORE};
 
 const MIN_SUBJECT_FRAME_AREA: f32 = 0.003;
 const MIN_IMPORTANCE_TO_LARGEST_FACE: f32 = 0.20;
@@ -14,14 +14,14 @@ pub(crate) struct ModeEvaluation {
 }
 
 #[derive(Clone, Copy)]
-struct Signal {
+pub(crate) struct Signal {
     value: Option<f64>,
     confidence: f64,
     unavailable_reason: Option<&'static str>,
 }
 
 impl Signal {
-    fn available(value: f64, confidence: f64) -> Self {
+    pub(crate) fn available(value: f64, confidence: f64) -> Self {
         Self {
             value: Some(value.clamp(0.0, 1.0)),
             confidence: confidence.clamp(0.0, 1.0),
@@ -29,7 +29,7 @@ impl Signal {
         }
     }
 
-    fn unavailable(reason: &'static str) -> Self {
+    pub(crate) fn unavailable(reason: &'static str) -> Self {
         Self {
             value: None,
             confidence: 0.0,
@@ -156,11 +156,25 @@ fn portrait_evaluation(item: &AnalysisCandidate) -> ModeEvaluation {
         ),
         (Signal::unavailable("expression_model_unavailable"), 0.15),
     ]);
-    if subject.has_closed_eye() {
+    let quality_gate = calibration_portrait_quality_gate(item, subject);
+    if let Some((_, score_cap)) = quality_gate {
+        score = score.min(score_cap);
+    }
+    if subject.has_unusable_eye() {
         score = score.min(0.31);
     }
-    let reason_code = if subject.has_closed_eye() {
+    if subject.eye_disposition == EyeDisposition::DeliberatePoseCandidate {
+        // A single frame cannot prove intent. Preserve a potentially deliberate
+        // closed-eye pose as usable, but never promote it beyond the user's
+        // manually defined "basically usable" tier.
+        score = score.min(0.62);
+    }
+    let reason_code = if subject.has_unusable_eye() {
         "portrait_closed_eyes"
+    } else if let Some((reason, _)) = quality_gate {
+        reason
+    } else if subject.eye_disposition == EyeDisposition::DeliberatePoseCandidate {
+        "portrait_deliberate_eye_pose"
     } else if subject.eye_state_is_known() {
         "portrait_eyes_open"
     } else {
@@ -173,6 +187,26 @@ fn portrait_evaluation(item: &AnalysisCandidate) -> ModeEvaluation {
         requires_human_review: eye.value.is_none() && rating_for_mode("portrait", score) >= 4,
         reason_code,
     }
+}
+
+fn calibration_portrait_quality_gate(
+    item: &AnalysisCandidate,
+    subject: &FaceResult,
+) -> Option<(&'static str, f64)> {
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    {
+        if item.sharpness_metric < 2.4 && subject.sharpness_metric < 2.8 {
+            return Some(("portrait_severe_blur", 0.31));
+        }
+        if item.exposure_metric < 0.10 && subject.exposure_metric < 0.70 {
+            return Some(("portrait_severe_exposure", 0.31));
+        }
+        if subject.detection_score < 0.78 {
+            return Some(("portrait_face_evidence_weak", 0.47));
+        }
+    }
+    let _ = (item, subject);
+    None
 }
 
 fn group_evaluation(item: &AnalysisCandidate) -> ModeEvaluation {
@@ -196,7 +230,7 @@ fn group_evaluation(item: &AnalysisCandidate) -> ModeEvaluation {
         .fold(1.0, f64::min);
     let eyes = if faces.iter().all(|face| face.eye_state_is_known()) {
         Signal::available(
-            if faces.iter().any(|face| face.has_closed_eye()) {
+            if faces.iter().any(|face| face.has_unusable_eye()) {
                 0.0
             } else {
                 1.0
@@ -227,10 +261,10 @@ fn group_evaluation(item: &AnalysisCandidate) -> ModeEvaluation {
         ),
         (Signal::unavailable("expression_model_unavailable"), 0.15),
     ]);
-    if faces.iter().any(|face| face.has_closed_eye()) {
+    if faces.iter().any(|face| face.has_unusable_eye()) {
         score = score.min(0.29);
     }
-    let reason_code = if faces.iter().any(|face| face.has_closed_eye()) {
+    let reason_code = if faces.iter().any(|face| face.has_unusable_eye()) {
         "group_closed_eyes"
     } else if faces.iter().all(|face| face.eye_state_is_known()) {
         "group_eyes_open"
@@ -309,21 +343,28 @@ fn face_area(face: &FaceResult) -> f32 {
     face.bbox[2].max(0.0) * face.bbox[3].max(0.0)
 }
 
-fn eye_signal(face: &FaceResult) -> Signal {
-    if !face.eye_state_is_known() {
-        return Signal::unavailable("eye_state_unknown");
+pub(super) fn eye_signal(face: &FaceResult) -> Signal {
+    match face.eye_disposition {
+        EyeDisposition::Open => Signal::available(
+            1.0,
+            face.left_eye.confidence.min(face.right_eye.confidence) as f64,
+        ),
+        EyeDisposition::Unusable => Signal::available(
+            0.0,
+            face.left_eye.confidence.max(face.right_eye.confidence) as f64,
+        ),
+        // Residual aperture + downward pose can preserve an intentional pose
+        // as usable, but confidence stays low and portrait scoring caps it at 3.
+        EyeDisposition::DeliberatePoseCandidate => Signal::available(0.65, 0.40),
+        EyeDisposition::Unknown => Signal::unavailable("eye_state_unknown"),
     }
-    Signal::available(
-        if face.has_closed_eye() { 0.0 } else { 1.0 },
-        face.left_eye.confidence.min(face.right_eye.confidence) as f64,
-    )
 }
 
 fn exposure_confidence(exposure: f64) -> f64 {
     if exposure.is_finite() { 0.85 } else { 0.0 }
 }
 
-fn combine(signals: &[(Signal, f64)]) -> (f64, f32) {
+pub(crate) fn combine(signals: &[(Signal, f64)]) -> (f64, f32) {
     debug_assert!(
         signals
             .iter()
@@ -363,6 +404,7 @@ mod tests {
             open_probability: None,
             state: state.to_string(),
             confidence: if state == "unknown" { 0.0 } else { 0.9 },
+            reason: format!("eye_{state}_test"),
             effective_pixels: 100,
             sharpness_metric: Some(100.0),
         }
@@ -375,6 +417,12 @@ mod tests {
             detection_score: 0.95,
             left_eye: eye(state),
             right_eye: eye(state),
+            eye_disposition: match state {
+                "open" => EyeDisposition::Open,
+                "closed" => EyeDisposition::Unusable,
+                "deliberate" => EyeDisposition::DeliberatePoseCandidate,
+                _ => EyeDisposition::Unknown,
+            },
             expression_state: "unknown".to_string(),
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
@@ -457,5 +505,27 @@ mod tests {
         ]);
         assert_eq!(score, 1.0);
         assert_eq!(confidence, 0.5);
+    }
+
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    #[test]
+    fn calibration_gate_caps_joint_global_and_face_blur() {
+        let mut item = candidate(vec![face(5.0, "open")]);
+        item.sharpness_metric = 2.0;
+        item.faces[0].sharpness_metric = 2.0;
+
+        let evaluation = evaluate_mode("portrait", &item);
+
+        assert!(evaluation.score <= 0.31);
+        assert_eq!(evaluation.reason_code, "portrait_severe_blur");
+    }
+
+    #[test]
+    fn deliberate_closed_eye_pose_never_exceeds_three_stars() {
+        let evaluation = evaluate_mode("portrait", &candidate(vec![face(5.0, "deliberate")]));
+
+        assert_eq!(evaluation.reason_code, "portrait_deliberate_eye_pose");
+        assert_eq!(rating_for_mode("portrait", evaluation.score), 3);
+        assert!(!evaluation.requires_human_review);
     }
 }

@@ -200,7 +200,7 @@ pub(crate) fn detect_people(
         .collect())
 }
 
-fn analysis_hasher() -> Hasher {
+pub(super) fn analysis_hasher() -> Hasher {
     HasherConfig::new()
         .hash_alg(HashAlg::DoubleGradient)
         .hash_size(16, 16)

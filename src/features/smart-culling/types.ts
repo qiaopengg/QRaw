@@ -40,6 +40,7 @@ export interface EyeEvidence {
   openProbability: number | null;
   state: 'open' | 'closed' | 'unknown';
   confidence: number;
+  reason: string;
   effectivePixels: number;
   sharpnessMetric: number | null;
 }

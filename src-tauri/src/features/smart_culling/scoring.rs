@@ -10,8 +10,15 @@ use super::key_person_scoring::rank_key_person_performance;
 use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::types::{FaceResult, KeyPersonEvidence};
 
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.0";
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+ocec-l-bgr+sface-coreml-v3";
+#[cfg(all(debug_assertions, target_os = "macos"))]
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.2-macos-calibration";
+#[cfg(not(all(debug_assertions, target_os = "macos")))]
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.1";
+#[cfg(all(debug_assertions, target_os = "macos"))]
+pub(crate) const MODEL_VERSION: &str =
+    "yunet-2023mar+facemesh-v2+blendshape-v2+sface-coreml-calibration-v1";
+#[cfg(not(all(debug_assertions, target_os = "macos")))]
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+eye-expression-unvalidated+sface-coreml-v3";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
     pub path: PathBuf,
@@ -329,6 +336,7 @@ fn eye_dto(eye: &super::types::EyeResult) -> EyeEvidenceDto {
         open_probability: eye.open_probability,
         state: eye.state.clone(),
         confidence: eye.confidence,
+        reason: eye.reason.clone(),
         effective_pixels: eye.effective_pixels,
         sharpness_metric: eye.sharpness_metric,
     }
@@ -371,6 +379,7 @@ mod tests {
                 open_probability: None,
                 state: "open".to_string(),
                 confidence: 1.0,
+                reason: "eye_open_confident".to_string(),
                 effective_pixels: 100,
                 sharpness_metric: Some(100.0),
             },
@@ -378,9 +387,11 @@ mod tests {
                 open_probability: None,
                 state: "open".to_string(),
                 confidence: 1.0,
+                reason: "eye_open_confident".to_string(),
                 effective_pixels: 100,
                 sharpness_metric: Some(100.0),
             },
+            eye_disposition: super::super::types::EyeDisposition::Open,
             expression_state: "unknown".to_string(),
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
@@ -448,6 +459,18 @@ mod tests {
             vec![candidate("frame.jpg", 1_000, 1)],
         );
         assert!(results.iter().all(|result| result.color_label.is_none()));
+    }
+
+    #[test]
+    fn eye_unavailability_reason_survives_the_review_contract() {
+        let eye =
+            super::super::types::EyeResult::unavailable("eye_resolution_insufficient", 0, None);
+
+        let dto = eye_dto(&eye);
+
+        assert_eq!(dto.state, "unknown");
+        assert_eq!(dto.confidence, 0.0);
+        assert_eq!(dto.reason, "eye_resolution_insufficient");
     }
 
     #[test]

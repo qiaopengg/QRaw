@@ -6,22 +6,18 @@
 //! recovered from it. Claiming otherwise would put an unvalidated signal into
 //! the rating pipeline, which the release rules forbid.
 //!
-//! What the five points *do* support reliably is head orientation, and that is
-//! what the portrait rating logic is currently missing. The eye-state model
-//! (OCEC) is fed a crop around each eye landmark; on a strongly turned head
-//! that crop is foreshortened and partially self-occluded, so its "closed"
-//! readings there are not trustworthy. Reporting an unknown eye state for such
-//! faces is what keeps a profile shot from being penalised as if the subject
-//! had blinked.
+//! The five points provide only coarse head-orientation evidence. Eye state is
+//! currently always unknown; this estimate distinguishes a visibly turned face
+//! from a frontal face whose eye-model input contract is still unvalidated. It
+//! does not create an eye-state score.
 
 /// Below this inter-ocular distance the landmarks are too coarse for the
 /// orientation estimate to mean anything.
 const MIN_USABLE_INTEROCULAR: f32 = 10.0;
 
-/// Normalised nose offset beyond which the head is turned far enough that the
-/// eye crops are foreshortened. Deliberately conservative: it only suppresses
-/// eye evidence, it never adds a penalty of its own. The exact boundary still
-/// needs the frozen real-photo set (`DATA-01`) before it can drive scoring.
+/// Normalised nose offset used only to select the unavailable-evidence reason.
+/// It never creates a rating signal or penalty. The exact boundary still needs
+/// the frozen real-photo set (`DATA-01`) before it can drive scoring.
 const STRONG_PROFILE_YAW_RATIO: f32 = 0.55;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,8 +41,7 @@ impl FacePose {
         }
     }
 
-    /// True only when the geometry is usable *and* clearly off-axis, so a
-    /// missing estimate never suppresses eye evidence.
+    /// True only when the geometry is usable *and* clearly off-axis.
     pub fn suppresses_eye_state(&self) -> bool {
         self.usable && self.yaw_ratio >= STRONG_PROFILE_YAW_RATIO
     }
@@ -110,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn a_frontal_face_reports_no_yaw_and_keeps_eye_evidence() {
+    fn a_frontal_face_reports_no_yaw() {
         let pose = estimate_pose(&frontal());
 
         assert!(pose.usable);
@@ -120,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn a_turned_head_is_detected_and_suppresses_eye_evidence() {
+    fn a_turned_head_is_detected() {
         let mut landmarks = frontal();
         // Nose shifted well towards one eye: the head is turned.
         landmarks[2].0 = 152.0;
@@ -160,7 +155,7 @@ mod tests {
         assert!(!small_pose.usable);
         assert!(
             !small_pose.suppresses_eye_state(),
-            "missing geometry must not suppress eye evidence"
+            "missing geometry must not be reported as a strong profile"
         );
 
         let mut broken = frontal();
