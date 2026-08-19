@@ -99,14 +99,14 @@ function reasonText(code: string, isChinese: boolean) {
     const label = keyPersonIdentityLabel(Number(priority));
     const zhState = {
       confirmed: '已确认包含',
-      missing: '未确认包含，星级限制在低星范围',
+      missing: '未包含，保持 0 星并请人工确认',
       suspected: '疑是关键人物，请人工确认',
       ambiguous: '可能匹配多人，请人工确认',
       unknown: '无法可靠判断，请人工确认',
     }[state];
     const enState = {
       confirmed: 'confirmed present',
-      missing: 'not confirmed present; rating is capped in the low range',
+      missing: 'not present; kept at 0 stars for manual review',
       suspected: 'possibly present; verify manually',
       ambiguous: 'matches more than one candidate; verify manually',
       unknown: 'cannot be determined reliably; verify manually',
@@ -130,7 +130,7 @@ const zh = {
   chooseModeHint: '每次任务选择一种，系统据此调整判断重点。',
   optional: '可选',
   keyPeopleSetupTitle: '本次有需要优先的人吗？',
-  keyPeopleSetupHint: '可选，仅用于人像或环境人像中的指定人物。',
+  keyPeopleSetupHint: '可选，仅用于人像或群像中的指定人物。',
   keyPeoplePickerHint: '识别后，点击人脸框选择；再次点击取消。',
   choosePeople: '指定关键人物',
   noPeople: '未选择',
@@ -391,7 +391,7 @@ const en: Record<keyof typeof zh, string> = {
   chooseModeHint: 'Choose one mode so the system can adjust its priorities.',
   optional: 'Optional',
   keyPeopleSetupTitle: 'Is there someone to prioritize in this task?',
-  keyPeopleSetupHint: 'Optional only for Portrait or Environmental portrait mode.',
+  keyPeopleSetupHint: 'Optional only for Portrait or Group mode.',
   keyPeoplePickerHint: 'After detection, click a face to select it; click again to deselect.',
   choosePeople: 'Set key people',
   noPeople: 'Not selected',

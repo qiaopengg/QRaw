@@ -35,8 +35,8 @@ pub(crate) fn apply_key_person_gate(
 
     if let Some(missing) = evidence.iter().find(|item| item.status == "missing") {
         return KeyPersonDecision {
-            rating: base_rating.min(2),
-            requires_human_review: false,
+            rating: 0,
+            requires_human_review: true,
             reason_code: Some(format!("key_person_{}_missing", missing.priority)),
         };
     }
@@ -82,11 +82,15 @@ mod tests {
     }
 
     #[test]
-    fn a_clearly_missing_person_caps_the_result_at_two_stars() {
+    fn a_missing_selected_person_stays_unrated_for_manual_review() {
         let decision =
             apply_key_person_gate(&[evidence(1, "confirmed"), evidence(2, "missing")], 5);
-        assert_eq!(decision.rating, 2);
-        assert!(!decision.requires_human_review);
+        assert_eq!(decision.rating, 0);
+        assert!(decision.requires_human_review);
+        assert_eq!(
+            decision.reason_code.as_deref(),
+            Some("key_person_2_missing")
+        );
     }
 
     #[test]
@@ -96,5 +100,24 @@ mod tests {
             assert_eq!(decision.rating, 0);
             assert!(decision.requires_human_review);
         }
+    }
+
+    #[test]
+    fn all_selected_identities_must_be_confirmed_before_using_the_base_rating() {
+        let decision = apply_key_person_gate(
+            &[
+                evidence(1, "confirmed"),
+                evidence(2, "confirmed"),
+                evidence(3, "confirmed"),
+            ],
+            5,
+        );
+
+        assert_eq!(decision.rating, 5);
+        assert!(!decision.requires_human_review);
+        assert_eq!(
+            decision.reason_code.as_deref(),
+            Some("key_person_1_confirmed")
+        );
     }
 }

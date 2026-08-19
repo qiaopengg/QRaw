@@ -8,5 +8,5 @@ export const SMART_CULLING_MODES = ['auto', 'landscape', 'portrait', 'environmen
 export type SmartCullingMode = (typeof SMART_CULLING_MODES)[number];
 
 export function smartCullingModeSupportsKeyPeople(mode: SmartCullingMode) {
-  return mode === 'portrait' || mode === 'environment';
+  return mode === 'portrait' || mode === 'group';
 }

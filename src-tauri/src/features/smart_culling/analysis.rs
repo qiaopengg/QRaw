@@ -158,12 +158,7 @@ fn detect_faces_in_image(
                     pose_suppresses_eye_state,
                 )?;
                 ensure_not_cancelled(cancellation)?;
-                (
-                    motion.left_eye,
-                    motion.right_eye,
-                    motion.eye_disposition,
-                    motion.expression,
-                )
+                motion.into_legacy_parts()
             };
             #[cfg(not(all(debug_assertions, target_os = "macos")))]
             let (left_eye_result, right_eye_result, eye_disposition, expression) = {

@@ -1,35 +1,61 @@
-//! Conservative eye-state adapter for development calibration.
+//! Frozen eye-state assessment built from the audited face-motion evidence.
 
-use super::super::expression::ExpressionEvidence;
 use super::super::types::{EyeDisposition, EyeResult};
 use super::evidence::FaceMotionEvidenceDump;
 use super::eye_policy::EyeUsability;
+use super::{EYE_MODEL_CONTRACT_VERSION, EYE_POLICY_VERSION};
 
 const DELIBERATE_POSE_MAX_PITCH_DEGREES: f32 = -5.0;
 const DELIBERATE_POSE_MIN_EYE_ASPECT_RATIO: f32 = 0.10;
 const DELIBERATE_POSE_MAX_BLINK_SCORE: f32 = 0.50;
 
-pub(in crate::features::smart_culling) struct FaceMotionAnalysis {
-    pub left_eye: EyeResult,
-    pub right_eye: EyeResult,
-    pub eye_disposition: EyeDisposition,
-    pub expression: ExpressionEvidence,
+pub(in crate::features::smart_culling) struct EyeAssessment {
+    left_eye: EyeResult,
+    right_eye: EyeResult,
+    disposition: EyeDisposition,
 }
 
-pub(super) fn decide(
+impl EyeAssessment {
+    pub(in crate::features::smart_culling) fn left_eye(&self) -> &EyeResult {
+        &self.left_eye
+    }
+
+    pub(in crate::features::smart_culling) fn right_eye(&self) -> &EyeResult {
+        &self.right_eye
+    }
+
+    pub(in crate::features::smart_culling) const fn disposition(&self) -> EyeDisposition {
+        self.disposition
+    }
+
+    pub(in crate::features::smart_culling) const fn policy_version(&self) -> &'static str {
+        EYE_POLICY_VERSION
+    }
+
+    pub(in crate::features::smart_culling) const fn model_contract_version(&self) -> &'static str {
+        EYE_MODEL_CONTRACT_VERSION
+    }
+
+    pub(in crate::features::smart_culling) fn into_legacy_parts(
+        self,
+    ) -> (EyeResult, EyeResult, EyeDisposition) {
+        (self.left_eye, self.right_eye, self.disposition)
+    }
+}
+
+pub(super) fn assess(
     evidence: &FaceMotionEvidenceDump,
     pose_suppresses_eye_state: bool,
-) -> FaceMotionAnalysis {
+) -> EyeAssessment {
     if pose_suppresses_eye_state {
-        return FaceMotionAnalysis {
+        return EyeAssessment {
             left_eye: EyeResult::unavailable("eye_pose_unreliable", 0, None),
             right_eye: EyeResult::unavailable("eye_pose_unreliable", 0, None),
-            eye_disposition: EyeDisposition::Unknown,
-            expression: ExpressionEvidence::unavailable("expression_requires_sequence_context"),
+            disposition: EyeDisposition::Unknown,
         };
     }
 
-    FaceMotionAnalysis {
+    EyeAssessment {
         left_eye: eye_result(
             evidence.left_eye,
             evidence.left_eye_aspect_ratio,
@@ -42,10 +68,7 @@ pub(super) fn decide(
             evidence.blendshapes.get("eyeBlinkRight").copied(),
             evidence,
         ),
-        eye_disposition: disposition(evidence),
-        // A single frame cannot prove that an expression is settled rather
-        // than transitional, even when motion coefficients are available.
-        expression: ExpressionEvidence::unavailable("expression_requires_sequence_context"),
+        disposition: disposition(evidence),
     }
 }
 
@@ -152,11 +175,13 @@ mod tests {
 
     #[test]
     fn frontal_bilateral_closure_remains_unusable() {
-        let result = decide(
+        let result = assess(
             &evidence(EyeUsability::Unusable, EyeUsability::Unusable),
             false,
         );
-        assert_eq!(result.eye_disposition, EyeDisposition::Unusable);
+        assert_eq!(result.disposition(), EyeDisposition::Unusable);
+        assert_eq!(result.left_eye().state, "closed");
+        assert_eq!(result.right_eye().state, "closed");
     }
 
     #[test]
@@ -164,9 +189,9 @@ mod tests {
         let mut sample = evidence(EyeUsability::Unusable, EyeUsability::Unusable);
         sample.head_pitch_degrees = Some(-20.0);
 
-        let result = decide(&sample, false);
+        let result = assess(&sample, false);
 
-        assert_eq!(result.eye_disposition, EyeDisposition::Unusable);
+        assert_eq!(result.disposition(), EyeDisposition::Unusable);
     }
 
     #[test]
@@ -177,27 +202,41 @@ mod tests {
         sample.head_pitch_degrees = Some(-8.0);
         sample.blendshapes.insert("eyeBlinkLeft", 0.45);
 
-        let result = decide(&sample, false);
+        let result = assess(&sample, false);
 
         assert_eq!(
-            result.eye_disposition,
+            result.disposition(),
             EyeDisposition::DeliberatePoseCandidate
         );
     }
 
     #[test]
     fn one_closed_eye_is_unusable_without_boundary_evidence() {
-        let result = decide(&evidence(EyeUsability::Open, EyeUsability::Unusable), false);
-        assert_eq!(result.eye_disposition, EyeDisposition::Unusable);
+        let result = assess(&evidence(EyeUsability::Open, EyeUsability::Unusable), false);
+        assert_eq!(result.disposition(), EyeDisposition::Unusable);
+        assert_eq!(result.left_eye().state, "open");
+        assert_eq!(result.right_eye().state, "closed");
     }
 
     #[test]
     fn strong_profile_keeps_eye_state_unknown() {
-        let result = decide(&evidence(EyeUsability::Open, EyeUsability::Open), true);
+        let result = assess(&evidence(EyeUsability::Open, EyeUsability::Open), true);
 
-        assert_eq!(result.eye_disposition, EyeDisposition::Unknown);
-        assert_eq!(result.left_eye.state, "unknown");
-        assert_eq!(result.right_eye.state, "unknown");
-        assert_eq!(result.left_eye.reason, "eye_pose_unreliable");
+        assert_eq!(result.disposition(), EyeDisposition::Unknown);
+        assert_eq!(result.left_eye().state, "unknown");
+        assert_eq!(result.right_eye().state, "unknown");
+        assert_eq!(result.left_eye().reason, "eye_pose_unreliable");
+    }
+
+    #[test]
+    fn assessment_exposes_the_frozen_contract_without_mutators() {
+        let result = assess(&evidence(EyeUsability::Open, EyeUsability::Open), false);
+
+        assert_eq!(result.policy_version(), "qraw-eye-policy-1.0");
+        assert_eq!(
+            result.model_contract_version(),
+            "qraw-eye-model-contract-1.0"
+        );
+        assert_eq!(result.disposition(), EyeDisposition::Open);
     }
 }

@@ -3,6 +3,10 @@
 //! The models remain outside bundled resources. Tests can inspect raw evidence,
 //! while macOS debug builds may use the conservative calibration adapter. Release
 //! builds remain unchanged until dual-platform and independent-data gates pass.
+//!
+//! Eye-state decisions are a separately versioned, frozen contract. Expression
+//! work may reuse the raw face-motion evidence, but it must not replace the
+//! pinned model inputs or mutate the resulting eye assessment.
 
 mod decision;
 #[cfg(test)]
@@ -23,8 +27,15 @@ use once_cell::sync::OnceCell;
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 
+use super::expression::ExpressionEvidence;
 use super::face_models::DetectedFace;
 use super::models::{gpu_session_with_optimization, validate_session_contract, verify_model};
+use super::types::{EyeDisposition, EyeResult};
+
+pub(in crate::features::smart_culling) const EYE_POLICY_VERSION: &str =
+    eye_policy::EYE_POLICY_VERSION;
+pub(in crate::features::smart_culling) const EYE_MODEL_CONTRACT_VERSION: &str =
+    "qraw-eye-model-contract-1.0";
 
 const FACE_MESH_MODEL_FILENAME: &str = "face_landmarks_detector_v2_qraw_poc.onnx";
 const FACE_BLENDSHAPES_MODEL_FILENAME: &str = "face_blendshapes_v2_qraw_poc.onnx";
@@ -123,6 +134,20 @@ struct FaceMotionPocModels {
 
 static CALIBRATION_MODELS: OnceCell<FaceMotionPocModels> = OnceCell::new();
 
+pub(in crate::features::smart_culling) struct FaceMotionAnalysis {
+    eye: decision::EyeAssessment,
+    expression: ExpressionEvidence,
+}
+
+impl FaceMotionAnalysis {
+    pub(in crate::features::smart_culling) fn into_legacy_parts(
+        self,
+    ) -> (EyeResult, EyeResult, EyeDisposition, ExpressionEvidence) {
+        let (left_eye, right_eye, disposition) = self.eye.into_legacy_parts();
+        (left_eye, right_eye, disposition, self.expression)
+    }
+}
+
 fn extract_calibration_evidence(
     image: &DynamicImage,
     detection: &DetectedFace,
@@ -135,9 +160,15 @@ pub(super) fn analyze_calibration_face(
     image: &DynamicImage,
     detection: &DetectedFace,
     pose_suppresses_eye_state: bool,
-) -> Result<decision::FaceMotionAnalysis> {
+) -> Result<FaceMotionAnalysis> {
     let evidence = extract_calibration_evidence(image, detection)?;
-    Ok(decision::decide(&evidence, pose_suppresses_eye_state))
+    Ok(FaceMotionAnalysis {
+        eye: decision::assess(&evidence, pose_suppresses_eye_state),
+        // Expression is intentionally kept outside the frozen eye decision.
+        // A single frame cannot prove that an expression is settled rather
+        // than transitional, even when motion coefficients are available.
+        expression: ExpressionEvidence::unavailable("expression_requires_sequence_context"),
+    })
 }
 
 fn model_asset_dir() -> PathBuf {
@@ -335,6 +366,34 @@ mod tests {
             FACE_BLENDSHAPES_SHA256,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn eye_model_contract_identifiers_are_frozen() {
+        assert_eq!(EYE_MODEL_CONTRACT_VERSION, "qraw-eye-model-contract-1.0");
+        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.0");
+        assert_eq!(
+            FACE_MESH_MODEL_FILENAME,
+            "face_landmarks_detector_v2_qraw_poc.onnx"
+        );
+        assert_eq!(
+            FACE_BLENDSHAPES_MODEL_FILENAME,
+            "face_blendshapes_v2_qraw_poc.onnx"
+        );
+        assert_eq!(
+            FACE_MESH_SHA256,
+            "b047d95fab6702c327175e7b77eea71ffd2b2ef0110c7466eee9b6e2ae87b552"
+        );
+        assert_eq!(
+            FACE_BLENDSHAPES_SHA256,
+            "b90ed4146dfdb43745c5988b1d411ed026d4b5e2ba9c1d7c271954fd1f5cb60e"
+        );
+        assert_eq!(FACE_MESH_INPUT_SIZE, 256);
+        assert_eq!(FACE_MESH_LANDMARK_COUNT, 478);
+        assert_eq!(BLENDSHAPE_LANDMARK_INDICES.len(), 146);
+        assert_eq!(BLENDSHAPE_NAMES.len(), 52);
+        assert_eq!(BLENDSHAPE_NAMES[9], "eyeBlinkLeft");
+        assert_eq!(BLENDSHAPE_NAMES[10], "eyeBlinkRight");
     }
 
     #[test]

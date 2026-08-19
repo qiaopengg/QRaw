@@ -1,9 +1,11 @@
-//! Conservative eye-usability candidate for the isolated real-photo POC.
+//! Frozen eye-usability policy for the isolated real-photo inference path.
 //!
-//! These boundaries are calibration evidence, not a production policy. A
-//! decided state requires the dense eyelid geometry and the independently
+//! A decided state requires the dense eyelid geometry and the independently
 //! inferred blink coefficient to agree. Disagreement remains unknown instead
-//! of being forced into open or unusable.
+//! of being forced into open or unusable. Any threshold or semantic change
+//! requires a policy-version bump and a fresh blind regression run.
+
+pub(super) const EYE_POLICY_VERSION: &str = "qraw-eye-policy-1.0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EyeUsability {
@@ -28,8 +30,8 @@ pub(super) struct EyeMotionEvidence {
     pub blink_score: Option<f32>,
 }
 
-// Frozen only as POC candidates after the first 29-photo calibration set. They
-// must not be moved into production until independently labelled photos pass.
+// Frozen by EYE_POLICY_VERSION. Do not tune these for expression, optical, or
+// composition work; those features consume the decision without changing it.
 const UNUSABLE_MAX_ASPECT_RATIO: f32 = 0.18;
 const UNUSABLE_MIN_BLINK_SCORE: f32 = 0.30;
 const OPEN_MIN_ASPECT_RATIO: f32 = 0.20;
@@ -109,5 +111,18 @@ mod tests {
             combine_eyes(EyeUsability::Open, EyeUsability::Unknown),
             EyeUsability::Unknown
         );
+    }
+
+    #[test]
+    fn policy_version_and_threshold_boundaries_are_frozen() {
+        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.0");
+        assert_eq!(UNUSABLE_MAX_ASPECT_RATIO, 0.18);
+        assert_eq!(UNUSABLE_MIN_BLINK_SCORE, 0.30);
+        assert_eq!(OPEN_MIN_ASPECT_RATIO, 0.20);
+        assert_eq!(OPEN_MAX_BLINK_SCORE, 0.35);
+
+        assert_eq!(classify_eye(evidence(0.18, 0.30)), EyeUsability::Unusable);
+        assert_eq!(classify_eye(evidence(0.20, 0.35)), EyeUsability::Open);
+        assert_eq!(classify_eye(evidence(0.19, 0.34)), EyeUsability::Unknown);
     }
 }
