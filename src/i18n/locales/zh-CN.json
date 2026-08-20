@@ -1762,10 +1762,12 @@
         "depth": "为强大的单目深度估计模型提供支持，实现了 AI 深度蒙版功能。",
         "lama": "为强大且简单的图像修复模型提供支持，实现了内容感知填充和对象移除。",
         "lensfun": "为无价的开源库和全面的数据库提供支持，实现了自动镜头校正。",
+        "libgphoto2": "感谢提供全面的相机通信库，为 RapidRAW 的联机拍摄与远程控制子系统提供支持。",
         "negpy": "为负片转换逻辑提供了灵感。",
         "nind": "为 AI 模型提供支持，驱动了 RapidRAW 中的 AI 降噪功能。",
         "rawler": "为优秀的 Rust 库提供支持，构成了本项目 RAW 文件处理的基础。",
         "sam2": "为提供基础模型，用于 AI 主体检测功能。",
+        "spektrafilm": "感谢 Andrea Volpato 提供基于光谱的胶片模拟 LUT，为 RapidRAW 的内置胶片模拟提供支持。采用 CC BY-SA 4.0 许可。",
         "u2net": "为提供稳健的架构，用于 AI 天空和前景检测功能。",
         "you": "感谢您使用和支持 RapidRAW。您的关注使本项目持续发展。",
         "youLabel": "您"
@@ -1895,7 +1897,9 @@
     },
     "lut": {
       "clearLut": "清除 LUT",
+      "customLuts": "自定义 LUT",
       "empty": "暂无 LUT — 请导入一些",
+      "filmEmulations": "胶片模拟",
       "filterLabel": "LUT 文件",
       "import": "导入配置文件",
       "importFailed": "导入 LUT 失败",

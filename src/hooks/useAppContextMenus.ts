@@ -477,16 +477,11 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       };
 
       const onExportClick = () => {
-        if (selectedImage) {
-          if (selectedImage.path !== path) {
-            props.handleImageSelect(path);
-          }
-          setLibrary({ multiSelectedPaths: finalSelection });
-          setPanel(Panel.Export);
-        } else {
-          setLibrary({ multiSelectedPaths: finalSelection });
-          setUI({ isLibraryExportPanelVisible: true });
+        setLibrary({ multiSelectedPaths: finalSelection });
+        if (activeView === 'editor' && selectedImage && selectedImage.path !== path) {
+          props.handleImageSelect(path);
         }
+        setPanel(Panel.Export);
       };
 
       const handleRemoveFromAlbum = async () => {

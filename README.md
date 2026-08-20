@@ -60,6 +60,7 @@ RapidRAW is still in active development and isn't yet as polished as mature tool
 <details>
 <summary><strong>Recent Changes</strong></summary>
 
+- **2026-08-17:** Integrated built-in analog film emulations powered by Spektrafilm, featuring a scene-referred V-Log color pipeline in the WGSL shader
 - **2026-08-16:** Added native Camera Tethering with real-time Live View, exposure controls, ghost overlay, and direct library ingestion (macOS & Linux)
 - **2026-08-16:** Added Focus Stacking to merge multi-focus brackets into a single sharp image
 - **2026-08-14:** Export now preserves and writes full EXIF metadata
@@ -69,11 +70,11 @@ RapidRAW is still in active development and isn't yet as polished as mature tool
 - **2026-08-06:** Added customizable keyboard shortcuts and visibility toggles for left, right, and bottom panels
 - **2026-08-05:** Added Catalan language support and folder tree shortcut
 - **2026-08-03:** Added support for image-based LUTs (.png, .jpg, .jpeg, .tiff) and batch importing multiple presets
-- **2026-08-01:** Implemented customizable workspace layout system with animated side panels
 
 <details>
 <summary><strong>Expand further</strong></summary>
 
+- **2026-08-01:** Implemented customizable workspace layout system with drag & drop panels
 - **2026-07-31:** Enabled White Balance color picker tool for the WGPU renderer
 - **2026-07-29:** Added Cmd/Ctrl+L keyboard shortcut to quickly copy image file paths to the clipboard
 - **2026-07-26:** Added AI Lens Blur (Bokeh) for realistic depth-of-field background blurring
@@ -635,6 +636,7 @@ RapidRAW is fully translated into the following 13 languages:
 
 Here is an outlook on what is actively being developed and planned for the coming months:
 
+- **Astrophotography Stacking:** Implementing GPU-accelerated star alignment and stacking (mean, median, sigma-clipping) to merge multi-exposure night sky sequences into 32-bit linear composites.
 - **Bug Fixes & Stability:** Continuous memory optimization, resolving OS-specific crashes (such as Linux Wayland/WebKit edge cases), and refining GPU processing backend auto-selection for seamless performance across all platforms.
 - **Cloud AI Inpainting:** Launching the optional cloud generative AI integration to deliver high-quality object removal and generative replace without requiring local ComfyUI setups or heavy GPU hardware.
 - **Performance & Algorithm Refinements:** Further optimizing processing speed on older GPU architectures, refining Fujifilm X-Trans sensor demosaicing algorithms, and expanding UI responsiveness on mobile/Android devices.
@@ -950,6 +952,7 @@ A huge thank you to the following projects and tools that were very important in
 - **[pixls.us](https://discuss.pixls.us/):** For being an incredible community full of knowledgeable people who offered inspiration, advice, and ideas.
 - **[darktable & co.](https://github.com/darktable-org/darktable):** For some reference implementations that guided parts of this work.
 - **[libgphoto2](http://gphoto.org/):** For the comprehensive camera communication library powering RapidRAW's tethering and remote capture subsystem.
+- **[spektrafilm](https://github.com/andreavolpato/spektrafilm):** For the spectrally-based film emulation LUTs by Andrea Volpato, used to power RapidRAW's built-in film emulations.
 - **You:** For using and supporting RapidRAW. Your interest keeps this project alive and evolving.
 
 ## Support the Project

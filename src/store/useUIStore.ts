@@ -429,6 +429,18 @@ export const useUIStore = create<UIState>((set, get) => ({
         activePanel: panel,
         renderedPanel: panel,
       };
+
+      const isLeft = region === 'leftTop' || region === 'leftBottom';
+      const isRight = region === 'rightTop' || region === 'rightBottom';
+
+      if ((isLeft && !state.uiVisibility.leftPanel) || (isRight && !state.uiVisibility.rightPanel)) {
+        updates.uiVisibility = {
+          ...state.uiVisibility,
+          leftPanel: isLeft ? true : state.uiVisibility.leftPanel,
+          rightPanel: isRight ? true : state.uiVisibility.rightPanel,
+        };
+      }
+
       return updates;
     }),
 

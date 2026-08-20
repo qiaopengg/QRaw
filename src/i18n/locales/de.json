@@ -1764,10 +1764,12 @@
         "depth": "Für das Modell zur monokularen Tiefenschätzung (Tiefenmasken).",
         "lama": "Für das leistungsstarke Bild-Inpainting-Modell.",
         "lensfun": "Für die unschätzbare Open-Source-Bibliothek für Objektivkorrektur.",
+        "libgphoto2": "Für die umfassende Kamera-Kommunikationsbibliothek, die RapidRAWs Tethering und Fernauslösung ermöglicht.",
         "negpy": "Für die Inspiration hinter der Negativumwandlungslogik.",
         "nind": "Für die Bereitstellung von KI-Modellen für die Rauschreduzierung.",
         "rawler": "Für die hervorragende Rust-Crate zur RAW-Bildverarbeitung.",
         "sam2": "Für das grundlegende Modell der KI-Motiverkennung.",
+        "spektrafilm": "Für die spektralbasierten Filmemulations-LUTs von Andrea Volpato, die RapidRAWs integrierte Filmemulationen ermöglichen. Lizenziert unter CC BY-SA 4.0.",
         "u2net": "Für die Architektur zur Erkennung von Himmel und Vordergrund.",
         "you": "Dafür, dass Sie RapidRAW nutzen. Ihr Interesse hält dieses Projekt am Leben.",
         "youLabel": "Ihnen"
@@ -1897,7 +1899,9 @@
     },
     "lut": {
       "clearLut": "LUT löschen",
+      "customLuts": "Eigene LUTs",
       "empty": "Noch keine LUTs — importiere welche",
+      "filmEmulations": "Filmemulationen",
       "filterLabel": "LUT-Dateien",
       "import": "Profile importieren",
       "importFailed": "LUTs konnten nicht importiert werden",

@@ -98,6 +98,7 @@ const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[
 
 function App() {
   const COMPACT_EDITOR_MAX_WIDTH = 900;
+  const ANDROID_PHONE_MAX_WIDTH = 600;
 
   const { appSettings, theme, osPlatform, handleSettingsChange } = useSettingsStore(
     useShallow((state) => ({
@@ -230,8 +231,9 @@ function App() {
 
   const isAndroid = osPlatform === 'android';
   const isPortraitViewport = viewportSize.width > 0 && viewportSize.height > viewportSize.width;
-  const isCompactPortrait =
-    viewportSize.width > 0 && viewportSize.width <= COMPACT_EDITOR_MAX_WIDTH && isPortraitViewport;
+  const compactEditorMaxWidth = isAndroid ? ANDROID_PHONE_MAX_WIDTH : COMPACT_EDITOR_MAX_WIDTH;
+  const isCompactPortrait = viewportSize.width > 0 && viewportSize.width <= compactEditorMaxWidth && isPortraitViewport;
+  const useCompactAndroidPanels = isAndroid && isCompactPortrait;
 
   const compactEditorPanelMinHeight = 220;
   const compactEditorPanelMaxHeight =
@@ -700,7 +702,7 @@ function App() {
   const hasRoots = rootPaths && rootPaths.length > 0;
   const hasMainContent = hasRoots || (activeView === 'editor' && !!selectedImage);
 
-  const shouldHideFolderTree = isAndroid;
+  const shouldHideFolderTree = useCompactAndroidPanels;
   const isWgpuActive =
     activeView === 'editor' &&
     appSettings?.useWgpuRenderer !== false &&
@@ -863,7 +865,7 @@ function App() {
                   </div>
                 )}
               </div>
-              {!isAndroid && hasMainContent && (
+              {!useCompactAndroidPanels && hasMainContent && (
                 <SidePanelArea
                   side="right"
                   width={effectiveRightWidth}

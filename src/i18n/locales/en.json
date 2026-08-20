@@ -1764,10 +1764,12 @@
         "depth": "For the powerful monocular depth estimation model that enables the AI depth masking capabilities.",
         "lama": "For the powerful & simple image inpainting model, which enables content-aware fill and object removal.",
         "lensfun": "For its invaluable open-source library and comprehensive database for automatic lens correction.",
+        "libgphoto2": "For the comprehensive camera communication library powering RapidRAW's tethering and remote capture subsystem.",
         "negpy": "For the inspiration behind the negative conversion logic.",
         "nind": "For providing AI models that power the AI noise reduction capabilities in RapidRAW.",
         "rawler": "For the excellent Rust crate that provides the foundation for RAW file processing in this project.",
         "sam2": "For providing the foundation model used for the AI subject detection capabilities.",
+        "spektrafilm": "For the spectrally-based film emulation LUTs by Andrea Volpato, used to power RapidRAW's built-in film emulations. Licensed CC BY-SA 4.0.",
         "u2net": "For providing the robust architecture used for the AI sky and foreground detection capabilities.",
         "you": "For using and supporting RapidRAW. Your interest keeps this project alive and evolving.",
         "youLabel": "You"
@@ -1897,7 +1899,9 @@
     },
     "lut": {
       "clearLut": "Clear LUT",
+      "customLuts": "Custom LUTs",
       "empty": "No LUTs yet — import some",
+      "filmEmulations": "Film Emulations",
       "filterLabel": "LUT Files",
       "import": "Import profiles",
       "importFailed": "Failed to import LUTs",

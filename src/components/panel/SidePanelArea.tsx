@@ -335,8 +335,8 @@ export default function SidePanelArea({
 
       const doDrag = (moveEvent: PointerEvent) => {
         const containerHeight = colContainerRef.current?.clientHeight || window.innerHeight;
-        const maxTopHeight = Math.max(150, containerHeight - 150);
-        const newHeight = Math.max(150, Math.min(maxTopHeight, startHeight + (moveEvent.clientY - startY)));
+        const maxTopHeight = Math.max(250, containerHeight - 250);
+        const newHeight = Math.max(250, Math.min(maxTopHeight, startHeight + (moveEvent.clientY - startY)));
 
         if (side === 'left') {
           setUI({ leftTopHeight: newHeight });

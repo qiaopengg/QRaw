@@ -1583,6 +1583,17 @@ export default function SettingsPanel({
                       </li>
                       <li>
                         <a
+                          href="https://github.com/andreavolpato/spektrafilm"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-accent hover:underline"
+                        >
+                          spektrafilm
+                        </a>
+                        : {t('settings.thanks.list.spektrafilm')}
+                      </li>
+                      <li>
+                        <a
                           href="https://github.com/marcinz606/NegPy"
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1646,6 +1657,17 @@ export default function SettingsPanel({
                           nind-denoise
                         </a>
                         : {t('settings.thanks.list.nind')}
+                      </li>
+                      <li>
+                        <a
+                          href="http://gphoto.org/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-accent hover:underline"
+                        >
+                          libgphoto2
+                        </a>
+                        : {t('settings.thanks.list.libgphoto2')}
                       </li>
                       <li>
                         <a

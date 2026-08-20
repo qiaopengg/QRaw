@@ -123,6 +123,7 @@ pub fn all_available_adjustments() -> HashSet<String> {
         "lutPath",
         "lutSize",
         "lutData",
+        "lutIsSceneReferred",
         "glowAmount",
         "halationAmount",
         "flareAmount",

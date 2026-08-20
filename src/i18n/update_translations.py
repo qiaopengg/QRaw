@@ -5,249 +5,210 @@ LOCALES_DIR = Path("./locales")
 
 TRANSLATIONS = {
     "ca": {
-        "tethering": {
-            "wbTemp": "Temp. WB (K)",
-            "wbTempPlaceholder": "p. ex. 5600",
-            "expComp": "Comp. Exp.",
-            "expCompPlaceholder": "p. ex. 0.0",
-            "expMode": "Mode Exp.",
-            "metering": "Mode de mesura",
-            "generalSettings": "Ajustaments generals",
-            "autoApplyPreset": "Aplica preajust automàticament",
-            "changePreset": "Canvia",
-            "clearPreset": "Neteja el preajust",
-            "triggerAutofocus": "Dispara l'enfocament automàtic",
-            "toasts": {
-                "afFailed": "Error en disparar l'enfocament automàtic",
-                "presetApplyFailed": "Error en aplicar el preajust a la captura"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Per les LUTs d'emulació de pel·lícula basades en espectres, d'Andrea Volpato, que impulsen les emulacions integrades de RapidRAW. Amb llicència CC BY-SA 4.0.",
+                    "libgphoto2": "Per la completa biblioteca de comunicació amb càmeres que impulsa el sistema de tethering i captura remota de RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Emulacions de pel·lícula",
+                "customLuts": "LUTs personalitzades"
             }
         }
     },
     "de": {
-        "tethering": {
-            "wbTemp": "Farbtemp. (K)",
-            "wbTempPlaceholder": "z. B. 5600",
-            "expComp": "Belichtungskorr.",
-            "expCompPlaceholder": "z. B. 0.0",
-            "expMode": "Belichtungsmodus",
-            "metering": "Messmodus",
-            "generalSettings": "Allgemeine Einstellungen",
-            "autoApplyPreset": "Preset autom. anwenden",
-            "changePreset": "Ändern",
-            "clearPreset": "Preset entfernen",
-            "triggerAutofocus": "Autofokus auslösen",
-            "toasts": {
-                "afFailed": "Autofokus fehlgeschlagen",
-                "presetApplyFailed": "Fehler beim Anwenden des Presets auf die Aufnahme"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Für die spektralbasierten Filmemulations-LUTs von Andrea Volpato, die RapidRAWs integrierte Filmemulationen ermöglichen. Lizenziert unter CC BY-SA 4.0.",
+                    "libgphoto2": "Für die umfassende Kamera-Kommunikationsbibliothek, die RapidRAWs Tethering und Fernauslösung ermöglicht."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Filmemulationen",
+                "customLuts": "Eigene LUTs"
             }
         }
     },
     "en": {
-        "tethering": {
-            "wbTemp": "WB Temp (K)",
-            "wbTempPlaceholder": "e.g. 5600",
-            "expComp": "Exp. Comp",
-            "expCompPlaceholder": "e.g. 0.0",
-            "expMode": "Exp. Mode",
-            "metering": "Metering Mode",
-            "generalSettings": "General Settings",
-            "autoApplyPreset": "Auto Apply Preset",
-            "changePreset": "Change",
-            "clearPreset": "Clear Preset",
-            "triggerAutofocus": "Trigger Autofocus",
-            "toasts": {
-                "afFailed": "Autofocus trigger failed",
-                "presetApplyFailed": "Failed to apply preset to captured image"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "For the spectrally-based film emulation LUTs by Andrea Volpato, used to power RapidRAW's built-in film emulations. Licensed CC BY-SA 4.0.",
+                    "libgphoto2": "For the comprehensive camera communication library powering RapidRAW's tethering and remote capture subsystem."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Film Emulations",
+                "customLuts": "Custom LUTs"
             }
         }
     },
     "es": {
-        "tethering": {
-            "wbTemp": "Temp. WB (K)",
-            "wbTempPlaceholder": "ej. 5600",
-            "expComp": "Comp. Exp.",
-            "expCompPlaceholder": "ej. 0.0",
-            "expMode": "Modo Exp.",
-            "metering": "Modo de medición",
-            "generalSettings": "Ajustes generales",
-            "autoApplyPreset": "Aplicar preajuste autom.",
-            "changePreset": "Cambiar",
-            "clearPreset": "Borrar preajuste",
-            "triggerAutofocus": "Disparar enfoque automático",
-            "toasts": {
-                "afFailed": "Error al enfocar automáticamente",
-                "presetApplyFailed": "Error al aplicar el preajuste a la captura"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Por las LUTs de emulación de película basadas en espectros, de Andrea Volpato, que impulsan las emulaciones integradas de RapidRAW. Con licencia CC BY-SA 4.0.",
+                    "libgphoto2": "Por la completa biblioteca de comunicación con cámaras que impulsa el sistema de tethering y captura remota de RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Emulaciones de película",
+                "customLuts": "LUTs personalizadas"
             }
         }
     },
     "fr": {
-        "tethering": {
-            "wbTemp": "Témperature WB (K)",
-            "wbTempPlaceholder": "ex. 5600",
-            "expComp": "Comp. Exp.",
-            "expCompPlaceholder": "ex. 0.0",
-            "expMode": "Mode Exp.",
-            "metering": "Mode de mesure",
-            "generalSettings": "Paramètres généraux",
-            "autoApplyPreset": "Appliquer preset auto.",
-            "changePreset": "Changer",
-            "clearPreset": "Effacer le preset",
-            "triggerAutofocus": "Déclencher l'autofocus",
-            "toasts": {
-                "afFailed": "Échec du déclenchement de l'autofocus",
-                "presetApplyFailed": "Échec de l'application du preset à la photo"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Pour les LUTs d'émulation de film à base spectrale d'Andrea Volpato, qui alimentent les émulations intégrées de RapidRAW. Sous licence CC BY-SA 4.0.",
+                    "libgphoto2": "Pour la bibliothèque complète de communication avec les appareils photo qui alimente le tethering et la capture à distance de RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Émulations de film",
+                "customLuts": "LUTs personnalisées"
             }
         }
     },
     "it": {
-        "tethering": {
-            "wbTemp": "Temp. WB (K)",
-            "wbTempPlaceholder": "es. 5600",
-            "expComp": "Comp. Esp.",
-            "expCompPlaceholder": "es. 0.0",
-            "expMode": "Modo Esp.",
-            "metering": "Misurazione",
-            "generalSettings": "Impostazioni generali",
-            "autoApplyPreset": "Applica preset autom.",
-            "changePreset": "Cambia",
-            "clearPreset": "Rimuovi preset",
-            "triggerAutofocus": "Attiva autofocus",
-            "toasts": {
-                "afFailed": "Attivazione autofocus fallita",
-                "presetApplyFailed": "Impossibile applicare il preset allo scatto"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Per le LUT di emulazione pellicola su base spettrale di Andrea Volpato, che alimentano le emulazioni integrate di RapidRAW. Concesse in licenza CC BY-SA 4.0.",
+                    "libgphoto2": "Per la completa libreria di comunicazione con le fotocamere che alimenta il tethering e lo scatto remoto di RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Emulazioni pellicola",
+                "customLuts": "LUT personalizzate"
             }
         }
     },
     "ja": {
-        "tethering": {
-            "wbTemp": "色温度 (K)",
-            "wbTempPlaceholder": "例: 5600",
-            "expComp": "露出補正",
-            "expCompPlaceholder": "例: 0.0",
-            "expMode": "露出モード",
-            "metering": "測光モード",
-            "generalSettings": "一般設定",
-            "autoApplyPreset": "プリセット自動適用",
-            "changePreset": "変更",
-            "clearPreset": "プリセットを解除",
-            "triggerAutofocus": "AFを実行",
-            "toasts": {
-                "afFailed": "オートフォーカスの実行に失敗しました",
-                "presetApplyFailed": "撮影画像へのプリセット適用に失敗しました"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "RapidRAW の内蔵フィルムエミュレーションを支える、Andrea Volpato 氏によるスペクトルベースのフィルムエミュレーション LUT を提供してくださったことに。ライセンスは CC BY-SA 4.0 です。",
+                    "libgphoto2": "RapidRAW のテザリングおよびリモート撮影機能を支える、包括的なカメラ通信ライブラリを提供してくださったことに。"
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "フィルムエミュレーション",
+                "customLuts": "カスタム LUT"
             }
         }
     },
     "ko": {
-        "tethering": {
-            "wbTemp": "색온도 (K)",
-            "wbTempPlaceholder": "예: 5600",
-            "expComp": "노출 보정",
-            "expCompPlaceholder": "예: 0.0",
-            "expMode": "노출 모드",
-            "metering": "측광 모드",
-            "generalSettings": "일반 설정",
-            "autoApplyPreset": "프리셋 자동 적용",
-            "changePreset": "변경",
-            "clearPreset": "프리셋 제거",
-            "triggerAutofocus": "자동 초점 실행",
-            "toasts": {
-                "afFailed": "자동 초점 실행에 실패했습니다",
-                "presetApplyFailed": "촬영된 이미지에 프리셋 적용 실패"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "RapidRAW의 내장 필름 에뮬레이션을 구동하는, Andrea Volpato의 스펙트럼 기반 필름 에뮬레이션 LUT를 제공해 주셔서. CC BY-SA 4.0 라이선스입니다.",
+                    "libgphoto2": "RapidRAW의 테더링 및 원격 촬영 시스템을 구동하는 포괄적인 카메라 통신 라이브러리를 제공해 주셔서."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "필름 에뮬레이션",
+                "customLuts": "사용자 LUT"
             }
         }
     },
     "pl": {
-        "tethering": {
-            "wbTemp": "Temp. barwowa (K)",
-            "wbTempPlaceholder": "np. 5600",
-            "expComp": "Komp. eksp.",
-            "expCompPlaceholder": "np. 0.0",
-            "expMode": "Tryb ekspozycji",
-            "metering": "Tryb pomiaru",
-            "generalSettings": "Ustawienia ogólne",
-            "autoApplyPreset": "Automatycznie stosuj preset",
-            "changePreset": "Zmień",
-            "clearPreset": "Wyczyść preset",
-            "triggerAutofocus": "Wyzwól autofocus",
-            "toasts": {
-                "afFailed": "Błąd wyzwalania autofocusu",
-                "presetApplyFailed": "Nie udało się zastosować presetu do zdjęcia"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Za oparte na danych spektralnych LUT-y emulacji filmu autorstwa Andrei Volpato, napędzające wbudowane emulacje filmowe RapidRAW. Licencja CC BY-SA 4.0.",
+                    "libgphoto2": "Za kompleksową bibliotekę komunikacji z aparatami, napędzającą tethering i zdalne wyzwalanie w RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Emulacje filmowe",
+                "customLuts": "Własne LUT-y"
             }
         }
     },
     "pt": {
-        "tethering": {
-            "wbTemp": "Temp. WB (K)",
-            "wbTempPlaceholder": "ex. 5600",
-            "expComp": "Comp. Exp.",
-            "expCompPlaceholder": "ex. 0.0",
-            "expMode": "Modo Exp.",
-            "metering": "Modo de Medição",
-            "generalSettings": "Configurações Gerais",
-            "autoApplyPreset": "Aplicar Predefinição Auto.",
-            "changePreset": "Alterar",
-            "clearPreset": "Limpar Predefinição",
-            "triggerAutofocus": "Disparar Foco Automático",
-            "toasts": {
-                "afFailed": "Falha ao acionar foco automático",
-                "presetApplyFailed": "Falha ao aplicar predefinição à captura"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "Pelas LUTs de emulação de filme com base espectral, de Andrea Volpato, que alimentam as emulações integradas do RapidRAW. Licenciadas sob CC BY-SA 4.0.",
+                    "libgphoto2": "Pela abrangente biblioteca de comunicação com câmeras que alimenta o tethering e a captura remota do RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Emulações de filme",
+                "customLuts": "LUTs personalizadas"
             }
         }
     },
     "ru": {
-        "tethering": {
-            "wbTemp": "Цвет. темп. (K)",
-            "wbTempPlaceholder": "напр. 5600",
-            "expComp": "Экспокоррекция",
-            "expCompPlaceholder": "напр. 0.0",
-            "expMode": "Режим эксп.",
-            "metering": "Режим замера",
-            "generalSettings": "Общие настройки",
-            "autoApplyPreset": "Авто-применение пресета",
-            "changePreset": "Изменить",
-            "clearPreset": "Очистить пресет",
-            "triggerAutofocus": "Сфокусироваться",
-            "toasts": {
-                "afFailed": "Ошибка автофокусировки",
-                "presetApplyFailed": "Не удалось применить пресет к снимку"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "За основанные на спектральных данных LUT эмуляции плёнки от Andrea Volpato, на которых построены встроенные плёночные эмуляции RapidRAW. Лицензия CC BY-SA 4.0.",
+                    "libgphoto2": "За обширную библиотеку связи с камерами, на которой построены тезеринг и дистанционная съёмка в RapidRAW."
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "Эмуляции плёнки",
+                "customLuts": "Свои LUT"
             }
         }
     },
     "zh-CN": {
-        "tethering": {
-            "wbTemp": "色温 (K)",
-            "wbTempPlaceholder": "例如 5600",
-            "expComp": "曝光补偿",
-            "expCompPlaceholder": "例如 0.0",
-            "expMode": "曝光模式",
-            "metering": "测光模式",
-            "generalSettings": "常规设置",
-            "autoApplyPreset": "自动应用预设",
-            "changePreset": "更改",
-            "clearPreset": "清除预设",
-            "triggerAutofocus": "触发自动对焦",
-            "toasts": {
-                "afFailed": "触发自动对焦失败",
-                "presetApplyFailed": "对捕获的图像应用预设失败"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "感谢 Andrea Volpato 提供基于光谱的胶片模拟 LUT，为 RapidRAW 的内置胶片模拟提供支持。采用 CC BY-SA 4.0 许可。",
+                    "libgphoto2": "感谢提供全面的相机通信库，为 RapidRAW 的联机拍摄与远程控制子系统提供支持。"
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "胶片模拟",
+                "customLuts": "自定义 LUT"
             }
         }
     },
     "zh-TW": {
-        "tethering": {
-            "wbTemp": "色溫 (K)",
-            "wbTempPlaceholder": "例如 5600",
-            "expComp": "曝光補償",
-            "expCompPlaceholder": "例如 0.0",
-            "expMode": "曝光模式",
-            "metering": "測光模式",
-            "generalSettings": "一般設定",
-            "autoApplyPreset": "自動套用預設集",
-            "changePreset": "變更",
-            "clearPreset": "清除預設集",
-            "triggerAutofocus": "觸發自動對焦",
-            "toasts": {
-                "afFailed": "觸發自動對焦失敗",
-                "presetApplyFailed": "對拍攝的影像套用預設集失敗"
+        "settings": {
+            "thanks": {
+                "list": {
+                    "spektrafilm": "感謝 Andrea Volpato 提供基於光譜的底片模擬 LUT，為 RapidRAW 的內建底片模擬提供支援。採用 CC BY-SA 4.0 授權。",
+                    "libgphoto2": "感謝提供全面的相機通訊函式庫，為 RapidRAW 的連線拍攝與遠端控制子系統提供支援。"
+                }
+            }
+        },
+        "ui": {
+            "lut": {
+                "filmEmulations": "底片模擬",
+                "customLuts": "自訂 LUT"
             }
         }
     }
@@ -296,7 +257,7 @@ def main():
         print(f"Error: Locales directory '{LOCALES_DIR}' does not exist.")
         return
 
-    print("Starting translation updates for tethering...")
+    print("Starting translation updates for LUT film emulations & credits...")
     for lang, trans in TRANSLATIONS.items():
         file_path = LOCALES_DIR / f"{lang}.json"
         update_json_file(file_path, trans)
