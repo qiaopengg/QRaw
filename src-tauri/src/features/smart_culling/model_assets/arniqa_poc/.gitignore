@@ -1,0 +1,3 @@
+# ARNIQA-derived weights are local research artifacts only. Their commercial
+# redistribution rights are not established, so they must never be committed.
+*.onnx

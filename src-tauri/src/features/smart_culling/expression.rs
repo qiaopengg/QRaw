@@ -10,8 +10,10 @@ mod sequence;
 use std::collections::BTreeMap;
 
 pub(in crate::features::smart_culling) use sequence::{
-    ExpressionSequenceAssessment, ExpressionTechnicalState, assess_sequence,
+    ExpressionSequenceAssessment, ExpressionTechnicalState, assess_sequence, assess_sequence_slots,
 };
+
+use super::types::FaceResult;
 
 pub(in crate::features::smart_culling) const EXPRESSION_DESCRIPTOR_VERSION: &str =
     "qraw-expression-descriptor-1.0";
@@ -100,9 +102,7 @@ impl ExpressionDescriptor {
         validate_probability(face_presence, "facePresence")?;
         validate_optional_finite(head_pitch_degrees, "headPitch")?;
         validate_optional_finite(head_yaw_degrees, "headYaw")?;
-        if landmark_consistency_error
-            .is_some_and(|value| !value.is_finite() || value < 0.0)
-        {
+        if landmark_consistency_error.is_some_and(|value| !value.is_finite() || value < 0.0) {
             return Err(ExpressionDescriptorError::InvalidValue(
                 "landmarkConsistencyError",
             ));
@@ -143,9 +143,9 @@ impl ExpressionDescriptor {
             && self
                 .landmark_consistency_error
                 .is_some_and(|error| error <= MAX_RELIABLE_LANDMARK_ERROR)
-            && self.head_pitch_degrees.is_some_and(|angle| {
-                angle.abs() <= MAX_RELIABLE_ABS_HEAD_ANGLE_DEGREES
-            })
+            && self
+                .head_pitch_degrees
+                .is_some_and(|angle| angle.abs() <= MAX_RELIABLE_ABS_HEAD_ANGLE_DEGREES)
             && self
                 .head_yaw_degrees
                 .is_some_and(|angle| angle.abs() <= MAX_RELIABLE_ABS_HEAD_ANGLE_DEGREES)
@@ -201,7 +201,9 @@ pub(in crate::features::smart_culling) enum ExpressionDescriptorError {
 impl std::fmt::Display for ExpressionDescriptorError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingBlendshape(name) => write!(formatter, "missing expression blendshape: {name}"),
+            Self::MissingBlendshape(name) => {
+                write!(formatter, "missing expression blendshape: {name}")
+            }
             Self::InvalidValue(name) => write!(formatter, "invalid expression evidence: {name}"),
         }
     }
@@ -246,10 +248,30 @@ impl ExpressionEvidence {
     }
 }
 
-fn validate_probability(
-    value: f32,
-    name: &'static str,
-) -> Result<(), ExpressionDescriptorError> {
+/// Updates one chronological, same-subject sequence in place.
+///
+/// Each slice position represents one frame. A missing or unresolved subject
+/// must remain `None`; it is not removed from the sequence. This function only
+/// writes expression fields and never reads or mutates eye assessment data.
+pub(in crate::features::smart_culling) fn apply_same_subject_sequence(
+    frames: &mut [Option<&mut FaceResult>],
+) {
+    let assessments = {
+        let descriptors = frames
+            .iter()
+            .map(|frame| frame.as_deref().and_then(FaceResult::expression_descriptor))
+            .collect::<Vec<_>>();
+        assess_sequence_slots(&descriptors)
+    };
+
+    for (frame, assessment) in frames.iter_mut().zip(&assessments) {
+        if let Some(face) = frame.as_deref_mut() {
+            face.apply_expression_sequence_assessment(assessment);
+        }
+    }
+}
+
+fn validate_probability(value: f32, name: &'static str) -> Result<(), ExpressionDescriptorError> {
     if value.is_finite() && (0.0..=1.0).contains(&value) {
         Ok(())
     } else {
@@ -271,6 +293,7 @@ fn validate_optional_finite(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::smart_culling::types::{EyeDisposition, EyeResult};
 
     fn scores() -> BTreeMap<&'static str, f32> {
         NON_EYE_BLENDSHAPE_NAMES
@@ -281,15 +304,28 @@ mod tests {
     }
 
     fn descriptor(scores: &BTreeMap<&'static str, f32>) -> ExpressionDescriptor {
-        ExpressionDescriptor::from_face_motion(
-            scores,
-            0.0,
-            Some(0.0),
-            Some(0.0),
-            Some(0.01),
-            0.99,
-        )
-        .unwrap()
+        ExpressionDescriptor::from_face_motion(scores, 0.0, Some(0.0), Some(0.0), Some(0.01), 0.99)
+            .unwrap()
+    }
+
+    fn face(expression_descriptor: Option<ExpressionDescriptor>) -> FaceResult {
+        FaceResult {
+            bbox: [0.0, 0.0, 100.0, 100.0],
+            landmarks: [(0.0, 0.0); 5],
+            detection_score: 1.0,
+            left_eye: EyeResult::unavailable("test", 0, None),
+            right_eye: EyeResult::unavailable("test", 0, None),
+            eye_disposition: EyeDisposition::Unknown,
+            expression_state: "unknown".to_string(),
+            expression_confidence: 0.0,
+            expression_reason: "expression_requires_sequence_context".to_string(),
+            expression_descriptor,
+            sharpness_metric: 1.0,
+            sharpness_confidence: 1.0,
+            exposure_metric: 1.0,
+            exposure_confidence: 1.0,
+            identity_embedding: None,
+        }
     }
 
     #[test]
@@ -343,15 +379,17 @@ mod tests {
 
         let mut invalid = scores();
         invalid.insert("jawOpen", f32::NAN);
-        assert!(ExpressionDescriptor::from_face_motion(
-            &invalid,
-            0.0,
-            Some(0.0),
-            Some(0.0),
-            Some(0.0),
-            1.0,
-        )
-        .is_err());
+        assert!(
+            ExpressionDescriptor::from_face_motion(
+                &invalid,
+                0.0,
+                Some(0.0),
+                Some(0.0),
+                Some(0.0),
+                1.0,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -371,5 +409,41 @@ mod tests {
         ]);
 
         assert_eq!(results[1].state(), ExpressionTechnicalState::Stable);
+    }
+
+    #[test]
+    fn same_subject_api_writes_only_aligned_sequence_results() {
+        let baseline = descriptor(&scores());
+        let mut transitioned_scores = scores();
+        for name in ["jawOpen", "mouthFunnel", "mouthLeft", "mouthRight"] {
+            transitioned_scores.insert(name, 0.9);
+        }
+        let transition = descriptor(&transitioned_scores);
+        let mut first = face(Some(baseline.clone()));
+        let mut middle = face(Some(transition));
+        let mut last = face(Some(baseline));
+
+        apply_same_subject_sequence(&mut [Some(&mut first), Some(&mut middle), Some(&mut last)]);
+
+        assert_eq!(first.expression_state, "unknown");
+        assert_eq!(middle.expression_state, "transitional");
+        assert_eq!(
+            middle.expression_reason,
+            "expression_sequence_isolated_transition"
+        );
+        assert!(middle.expression_confidence > 0.0);
+        assert_eq!(last.expression_state, "unknown");
+        assert!(middle.expression_descriptor().is_some());
+    }
+
+    #[test]
+    fn one_frame_api_cannot_promote_expression_out_of_unknown() {
+        let mut only = face(Some(descriptor(&scores())));
+
+        apply_same_subject_sequence(&mut [Some(&mut only)]);
+
+        assert_eq!(only.expression_state, "unknown");
+        assert_eq!(only.expression_confidence, 0.0);
+        assert_eq!(only.expression_reason, "expression_sequence_too_short");
     }
 }

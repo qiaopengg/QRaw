@@ -1,8 +1,6 @@
 //! Conservative chronological sequence policy for expression technical state.
 
-use super::{
-    EXPRESSION_SEQUENCE_POLICY_VERSION, ExpressionDescriptor, ExpressionEvidence,
-};
+use super::{EXPRESSION_SEQUENCE_POLICY_VERSION, ExpressionDescriptor, ExpressionEvidence};
 
 const MIN_SEQUENCE_LENGTH: usize = 3;
 const MIN_STABLE_DISTANCE: f32 = 0.035;
@@ -72,6 +70,18 @@ impl ExpressionSequenceAssessment {
 pub(in crate::features::smart_culling) fn assess_sequence(
     descriptors: &[ExpressionDescriptor],
 ) -> Vec<ExpressionSequenceAssessment> {
+    let descriptor_slots = descriptors.iter().map(Some).collect::<Vec<_>>();
+    assess_sequence_slots(&descriptor_slots)
+}
+
+/// Assesses an aligned chronological sequence without removing missing faces.
+///
+/// The caller is responsible for providing one slot per frame for the same
+/// tracked subject. Keeping `None` slots in place prevents two non-adjacent
+/// observations from being treated as neighboring frames.
+pub(in crate::features::smart_culling) fn assess_sequence_slots(
+    descriptors: &[Option<&ExpressionDescriptor>],
+) -> Vec<ExpressionSequenceAssessment> {
     if descriptors.len() < MIN_SEQUENCE_LENGTH {
         return descriptors
             .iter()
@@ -81,7 +91,11 @@ pub(in crate::features::smart_culling) fn assess_sequence(
 
     let adjacent_distances = descriptors
         .windows(2)
-        .map(|pair| comparable_distance(&pair[0], &pair[1]))
+        .map(|pair| {
+            pair[0]
+                .zip(pair[1])
+                .and_then(|(left, right)| comparable_distance(left, right))
+        })
         .collect::<Vec<_>>();
     let reliable_distances = adjacent_distances
         .iter()
@@ -94,6 +108,11 @@ pub(in crate::features::smart_culling) fn assess_sequence(
         .iter()
         .enumerate()
         .map(|(index, current)| {
+            let Some(current) = current else {
+                return ExpressionSequenceAssessment::unknown(
+                    "expression_frame_evidence_unavailable",
+                );
+            };
             if !current.is_reliable() {
                 return ExpressionSequenceAssessment::unknown(
                     "expression_frame_evidence_unreliable",
@@ -109,13 +128,16 @@ pub(in crate::features::smart_culling) fn assess_sequence(
                     "expression_neighbors_not_comparable",
                 );
             };
-            let previous = &descriptors[index - 1];
-            let next = &descriptors[index + 1];
+            let (Some(previous), Some(next)) = (descriptors[index - 1], descriptors[index + 1])
+            else {
+                return ExpressionSequenceAssessment::unknown(
+                    "expression_neighbors_not_comparable",
+                );
+            };
 
             if previous_distance <= stable_limit && next_distance <= stable_limit {
                 let confidence = frame_reliability(previous, current, next)
-                    * (1.0 - previous_distance.max(next_distance) / stable_limit)
-                        .clamp(0.35, 1.0);
+                    * (1.0 - previous_distance.max(next_distance) / stable_limit).clamp(0.35, 1.0);
                 return ExpressionSequenceAssessment {
                     state: ExpressionTechnicalState::Stable,
                     confidence,
@@ -129,8 +151,8 @@ pub(in crate::features::smart_culling) fn assess_sequence(
                 && anchor_distance.is_some_and(|distance| distance <= stable_limit)
             {
                 let anchor_distance = anchor_distance.unwrap_or(stable_limit);
-                let separation = (previous_distance.min(next_distance) / transition_limit)
-                    .clamp(0.35, 1.0);
+                let separation =
+                    (previous_distance.min(next_distance) / transition_limit).clamp(0.35, 1.0);
                 let return_to_anchor = (1.0 - anchor_distance / stable_limit).clamp(0.35, 1.0);
                 return ExpressionSequenceAssessment {
                     state: ExpressionTechnicalState::Transitional,
@@ -164,10 +186,7 @@ fn adaptive_limits(distances: &[f32]) -> (f32, f32) {
     )
 }
 
-fn comparable_distance(
-    left: &ExpressionDescriptor,
-    right: &ExpressionDescriptor,
-) -> Option<f32> {
+fn comparable_distance(left: &ExpressionDescriptor, right: &ExpressionDescriptor) -> Option<f32> {
     if !left.is_comparable_with(right) {
         return None;
     }
@@ -243,13 +262,12 @@ mod tests {
 
     #[test]
     fn sequence_policy_and_descriptor_are_independently_versioned() {
-        let results = assess_sequence(&[
-            descriptor(&[]),
-            descriptor(&[]),
-            descriptor(&[]),
-        ]);
+        let results = assess_sequence(&[descriptor(&[]), descriptor(&[]), descriptor(&[])]);
 
-        assert_eq!(EXPRESSION_DESCRIPTOR_VERSION, "qraw-expression-descriptor-1.0");
+        assert_eq!(
+            EXPRESSION_DESCRIPTOR_VERSION,
+            "qraw-expression-descriptor-1.0"
+        );
         assert_eq!(
             results[1].policy_version(),
             "qraw-expression-sequence-policy-1.0"
@@ -260,12 +278,37 @@ mod tests {
     fn a_short_sequence_stays_unknown() {
         let results = assess_sequence(&[descriptor(&[]), descriptor(&[])]);
 
-        assert!(results
-            .iter()
-            .all(|result| result.state() == ExpressionTechnicalState::Unknown));
-        assert!(results
-            .iter()
-            .all(|result| result.reason() == "expression_sequence_too_short"));
+        assert!(
+            results
+                .iter()
+                .all(|result| result.state() == ExpressionTechnicalState::Unknown)
+        );
+        assert!(
+            results
+                .iter()
+                .all(|result| result.reason() == "expression_sequence_too_short")
+        );
+    }
+
+    #[test]
+    fn missing_face_slots_are_not_removed_before_neighbor_comparison() {
+        let first = descriptor(&[]);
+        let third = descriptor(&[]);
+        let fourth = descriptor(&[]);
+        let fifth = descriptor(&[]);
+        let results = assess_sequence_slots(&[
+            Some(&first),
+            None,
+            Some(&third),
+            Some(&fourth),
+            Some(&fifth),
+        ]);
+
+        assert_eq!(results[1].state(), ExpressionTechnicalState::Unknown);
+        assert_eq!(results[1].reason(), "expression_frame_evidence_unavailable");
+        assert_eq!(results[2].state(), ExpressionTechnicalState::Unknown);
+        assert_eq!(results[2].reason(), "expression_neighbors_not_comparable");
+        assert_eq!(results[3].state(), ExpressionTechnicalState::Stable);
     }
 
     #[test]
@@ -291,11 +334,7 @@ mod tests {
             ("mouthLeft", 0.9),
             ("mouthRight", 0.9),
         ];
-        let results = assess_sequence(&[
-            descriptor(&[]),
-            descriptor(&transition),
-            descriptor(&[]),
-        ]);
+        let results = assess_sequence(&[descriptor(&[]), descriptor(&transition), descriptor(&[])]);
 
         assert_eq!(results[1].state(), ExpressionTechnicalState::Transitional);
         assert_eq!(
@@ -323,10 +362,7 @@ mod tests {
         ]);
 
         assert_eq!(results[1].state(), ExpressionTechnicalState::Unknown);
-        assert_eq!(
-            results[1].reason(),
-            "expression_neighbors_not_comparable"
-        );
+        assert_eq!(results[1].reason(), "expression_neighbors_not_comparable");
     }
 
     #[test]
@@ -338,10 +374,7 @@ mod tests {
         ]);
 
         assert_eq!(results[1].state(), ExpressionTechnicalState::Unknown);
-        assert_eq!(
-            results[1].reason(),
-            "expression_frame_evidence_unreliable"
-        );
+        assert_eq!(results[1].reason(), "expression_frame_evidence_unreliable");
     }
 
     #[test]

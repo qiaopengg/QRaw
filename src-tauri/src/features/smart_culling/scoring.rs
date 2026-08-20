@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use image_hasher::ImageHash;
 
 use super::api::{DetectedFaceDto, EyeEvidenceDto, KeyPersonEvidenceDto, ReviewResult};
+use super::expression_grouping::apply_group_expression_sequences;
 use super::grouping::{CaptureDescriptor, group_capture_sequence};
 use super::key_person_policy::apply_key_person_gate;
 use super::key_person_scoring::rank_key_person_performance;
@@ -11,14 +12,14 @@ use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.3-macos-calibration";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.0-macos-calibration";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-3.1";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.0-safe-evidence";
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const MODEL_VERSION: &str =
-    "yunet-2023mar+facemesh-v2+blendshape-v2+sface-coreml-calibration-v1";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.0+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+eye-expression-unvalidated+sface-coreml-v3";
+pub(crate) const MODEL_VERSION: &str =
+    "yunet-2023mar+ocec-loaded-unscored+sface-2021dec+eye-expression-unavailable-v1";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
     pub path: PathBuf,
@@ -62,6 +63,7 @@ pub(crate) fn organize_results(
             })
             .collect::<Vec<_>>();
         for group in group_capture_sequence(&descriptors) {
+            apply_group_expression_sequences(&mut folder_items, &group.indices, mode);
             if group.indices.len() > 1 {
                 rank_key_person_performance(&mut folder_items, &group.indices);
             }
@@ -395,12 +397,20 @@ mod tests {
             expression_state: "unknown".to_string(),
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
+            expression_descriptor: None,
             sharpness_metric: 100.0,
             sharpness_confidence: 1.0,
             exposure_metric: 0.8,
             exposure_confidence: 1.0,
             identity_embedding: None,
         }
+    }
+
+    #[test]
+    fn result_versions_identify_the_seven_strategy_contract() {
+        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.0-"));
+        assert!(MODEL_VERSION.contains("yunet-2023mar"));
+        assert!(MODEL_VERSION.contains("sface-2021dec"));
     }
 
     fn candidate(path: &str, capture_time_millis: i64, sequence_number: u64) -> AnalysisCandidate {
@@ -559,15 +569,15 @@ mod tests {
         );
         assert_eq!(
             evaluate_mode("group", &item).reason_code,
-            "group_subject_unreliable"
+            "group_image_unclear"
         );
         assert_eq!(
             evaluate_mode("environment", &item).reason_code,
-            "environment_landscape_fallback"
+            "environment_subject_unreliable"
         );
         assert_eq!(
             evaluate_mode("landscape", &item).reason_code,
-            "landscape_exposure_balanced"
+            "landscape_image_unclear"
         );
     }
 

@@ -149,7 +149,13 @@ fn detect_faces_in_image(
         .map(|face| -> Result<FaceResult> {
             ensure_not_cancelled(cancellation)?;
             #[cfg(all(debug_assertions, target_os = "macos"))]
-            let (left_eye_result, right_eye_result, eye_disposition, expression) = {
+            let (
+                left_eye_result,
+                right_eye_result,
+                eye_disposition,
+                expression,
+                expression_descriptor,
+            ) = {
                 let pose_suppresses_eye_state =
                     estimate_pose(&face.landmarks).suppresses_eye_state();
                 let motion = super::face_motion_poc::analyze_calibration_face(
@@ -161,7 +167,13 @@ fn detect_faces_in_image(
                 motion.into_legacy_parts()
             };
             #[cfg(not(all(debug_assertions, target_os = "macos")))]
-            let (left_eye_result, right_eye_result, eye_disposition, expression) = {
+            let (
+                left_eye_result,
+                right_eye_result,
+                eye_disposition,
+                expression,
+                expression_descriptor,
+            ) = {
                 // YuNet exposes only one point per eye, not an eye bounding box or
                 // eyelid contour. OCEC was trained for actual eye crops, so deriving
                 // its input size from the two YuNet eye points is not validated
@@ -180,6 +192,7 @@ fn detect_faces_in_image(
                     right_eye_result,
                     EyeDisposition::Unknown,
                     ExpressionEvidence::unavailable("expression_model_unvalidated"),
+                    None,
                 )
             };
             let face_crop = crop_pixel_bbox(img, face.bbox);
@@ -215,6 +228,7 @@ fn detect_faces_in_image(
                 expression_state: expression.state.to_string(),
                 expression_confidence: expression.confidence,
                 expression_reason: expression.reason.to_string(),
+                expression_descriptor,
                 sharpness_metric,
                 sharpness_confidence: local_confidence,
                 exposure_metric,

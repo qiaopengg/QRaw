@@ -171,6 +171,62 @@ mod tests {
     }
 
     #[test]
+    fn every_strategy_keeps_its_exact_frozen_weights_and_clarity_gate() {
+        let expected = [
+            (
+                ModeStrategy::Portrait,
+                ClarityGateTarget::Person,
+                [0.0, 0.40, 0.40, 0.10, 0.10],
+            ),
+            (
+                ModeStrategy::GroupWithKeyPeople,
+                ClarityGateTarget::Person,
+                [0.0, 0.40, 0.40, 0.10, 0.10],
+            ),
+            (
+                ModeStrategy::GroupScene,
+                ClarityGateTarget::Image,
+                [0.0, 0.0, 0.0, 0.90, 0.10],
+            ),
+            (
+                ModeStrategy::Environment,
+                ClarityGateTarget::Image,
+                [0.05, 0.05, 0.05, 0.50, 0.35],
+            ),
+            (
+                ModeStrategy::Landscape,
+                ClarityGateTarget::Image,
+                [0.0, 0.0, 0.0, 0.50, 0.50],
+            ),
+            (
+                ModeStrategy::AutoPeople,
+                ClarityGateTarget::Image,
+                [0.50, 0.15, 0.15, 0.10, 0.10],
+            ),
+            (
+                ModeStrategy::AutoScene,
+                ClarityGateTarget::Image,
+                [0.0, 0.0, 0.0, 0.50, 0.50],
+            ),
+        ];
+
+        for (strategy, clarity_gate, weights) in expected {
+            let policy = policy_for(strategy);
+            assert_eq!(policy.clarity_gate, clarity_gate);
+            assert_eq!(
+                [
+                    policy.weights.person_clarity,
+                    policy.weights.eyes,
+                    policy.weights.expression,
+                    policy.weights.optical,
+                    policy.weights.composition,
+                ],
+                weights
+            );
+        }
+    }
+
+    #[test]
     fn only_portrait_and_key_person_group_hard_cap_closed_eyes() {
         let capped = [ModeStrategy::Portrait, ModeStrategy::GroupWithKeyPeople];
         let weighted_only = [
@@ -181,10 +237,16 @@ mod tests {
             ModeStrategy::AutoScene,
         ];
 
-        assert!(capped.into_iter().all(|strategy| policy_for(strategy).closed_eye_hard_cap));
-        assert!(weighted_only
-            .into_iter()
-            .all(|strategy| !policy_for(strategy).closed_eye_hard_cap));
+        assert!(
+            capped
+                .into_iter()
+                .all(|strategy| policy_for(strategy).closed_eye_hard_cap)
+        );
+        assert!(
+            weighted_only
+                .into_iter()
+                .all(|strategy| !policy_for(strategy).closed_eye_hard_cap)
+        );
     }
 
     #[test]

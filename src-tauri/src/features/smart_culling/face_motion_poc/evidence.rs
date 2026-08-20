@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use image::DynamicImage;
 
+use super::super::expression::{ExpressionDescriptor, ExpressionDescriptorError};
 use super::super::face_models::DetectedFace;
 use super::eye_policy::{EyeMotionEvidence, EyeUsability, classify_eye, combine_eyes};
 use super::roi::FaceRoi;
@@ -23,6 +24,23 @@ pub(super) struct FaceMotionEvidenceDump {
     pub right_eye: EyeUsability,
     pub overall_eye: EyeUsability,
     pub blendshapes: BTreeMap<&'static str, f32>,
+}
+
+impl FaceMotionEvidenceDump {
+    /// Derives expression-only evidence without consulting eye classifications
+    /// or any `eye*` blendshape coefficient.
+    pub(super) fn expression_descriptor(
+        &self,
+    ) -> Result<ExpressionDescriptor, ExpressionDescriptorError> {
+        ExpressionDescriptor::from_face_motion(
+            &self.blendshapes,
+            self.tongue_out,
+            self.head_pitch_degrees,
+            self.head_yaw_degrees,
+            self.landmark_consistency_error,
+            self.face_presence,
+        )
+    }
 }
 
 pub(super) fn extract_face_motion_evidence(
@@ -186,6 +204,62 @@ fn distance(left: [f32; 2], right: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn complete_evidence() -> FaceMotionEvidenceDump {
+        FaceMotionEvidenceDump {
+            roi: FaceRoi {
+                center_x: 50.0,
+                center_y: 50.0,
+                width: 100.0,
+                height: 100.0,
+                rotation: 0.0,
+            },
+            face_presence: 0.99,
+            tongue_out: 0.0,
+            left_eye_aspect_ratio: Some(0.25),
+            right_eye_aspect_ratio: Some(0.25),
+            head_pitch_degrees: Some(0.0),
+            head_yaw_degrees: Some(0.0),
+            landmark_consistency_error: Some(0.01),
+            left_eye: EyeUsability::Open,
+            right_eye: EyeUsability::Open,
+            overall_eye: EyeUsability::Open,
+            blendshapes: super::super::BLENDSHAPE_NAMES
+                .into_iter()
+                .map(|name| (name, 0.0))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn raw_motion_dump_derives_a_read_only_expression_descriptor() {
+        let evidence = complete_evidence();
+
+        let descriptor = evidence.expression_descriptor().unwrap();
+
+        assert_eq!(
+            descriptor.descriptor_version(),
+            "qraw-expression-descriptor-1.0"
+        );
+        assert!(descriptor.is_reliable());
+    }
+
+    #[test]
+    fn eye_blendshapes_do_not_change_dump_derived_expression_evidence() {
+        let baseline = complete_evidence();
+        let mut changed_eyes = complete_evidence();
+        for name in super::super::BLENDSHAPE_NAMES
+            .into_iter()
+            .filter(|name| name.starts_with("eye"))
+        {
+            changed_eyes.blendshapes.insert(name, 1.0);
+        }
+
+        assert_eq!(
+            baseline.expression_descriptor().unwrap(),
+            changed_eyes.expression_descriptor().unwrap()
+        );
+    }
 
     #[test]
     fn eye_aspect_ratio_is_scale_invariant() {

@@ -47,6 +47,12 @@ pub(crate) fn run_preflight(
         }
     };
 
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    if let Err(error) = super::face_motion_poc::preflight_calibration_models() {
+        log::warn!("Smart-culling eye/expression calibration preflight failed: {error}");
+        return Err(unsupported("gpu_inference_unavailable"));
+    }
+
     Ok((
         DevicePreflight {
             checked: true,

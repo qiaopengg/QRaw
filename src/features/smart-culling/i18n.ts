@@ -50,6 +50,43 @@ const zhReasons: Record<string, string> = {
   environment_landscape_fallback: '环境人像：人物证据低于门槛，本张仅按环境画面评估',
   environment_people_uncertain: '环境人像：检测到较弱人物线索，高星边界需人工确认',
   key_person_identity_unknown: '指定人物身份无法可靠判断，请人工确认',
+  auto_people_uncertain: '自动模式：存在较弱人物线索，无法可靠按无人场景打星',
+  environment_subject_unreliable: '环境人像：未找到可靠人物主体，保持 0 星并请人工确认',
+  portrait_key_person_unresolved: '人像模式：指定人物未全部确认，保持 0 星并请人工确认',
+  group_key_person_unresolved: '群像模式：指定人物未全部确认，保持 0 星并请人工确认',
+  key_person_unresolved: '指定人物未全部可靠确认，保持 0 星并请人工确认',
+  portrait_person_unclear: '人像模式：人物清晰门禁确认不清晰，按 1 星处理',
+  group_key_person_unclear: '群像模式：指定人物清晰门禁未通过，按 1 星处理',
+  group_image_unclear: '群像模式：整体画面清晰门禁未通过，按 1 星处理',
+  environment_image_unclear: '环境人像：整体画面清晰门禁未通过，按 1 星处理',
+  landscape_image_unclear: '风光模式：整体画面清晰门禁未通过，按 1 星处理',
+  auto_image_unclear: '自动模式：整体画面清晰门禁未通过，按 1 星处理',
+  clarity_gate_unclear: '清晰度第一层门禁确认不清晰，按 1 星处理',
+  portrait_deliberate_eye_pose: '人像模式：疑似有意闭目姿态，最高限制为 3 星',
+  group_deliberate_eye_pose: '群像模式：指定人物疑似有意闭目姿态，最高限制为 3 星',
+  portrait_expression_transition: '人像模式：非眼面部动作疑似处于过渡瞬间',
+  group_expression_transition: '群像模式：指定人物的非眼面部动作疑似处于过渡瞬间',
+  environment_expression_transition: '环境人像：非眼面部动作疑似处于过渡瞬间',
+  auto_expression_transition: '自动模式：人物的非眼面部动作疑似处于过渡瞬间',
+  expression_transition: '非眼面部动作疑似处于过渡瞬间，建议人工确认',
+  portrait_evidence_interval_review: '人像模式：证据不足产生的保守区间跨越星级，请人工确认',
+  group_key_evidence_interval_review: '群像模式：指定人物证据区间跨越星级，请人工确认',
+  group_scene_evidence_interval_review: '无指定人物群像：光学与构图证据区间跨越星级，请人工确认',
+  environment_evidence_interval_review: '环境人像：固定权重证据区间跨越星级，请人工确认',
+  landscape_evidence_interval_review: '风光模式：光学与构图证据区间跨越星级，请人工确认',
+  auto_evidence_interval_review: '自动模式：固定权重证据区间跨越星级，请人工确认',
+  portrait_partial_evidence_same_tier: '人像模式：部分证据不可用，保守区间仍落在同一星级',
+  group_key_partial_evidence_same_tier: '群像模式：部分指定人物证据不可用，保守区间仍在同一星级',
+  group_scene_partial_evidence_same_tier: '无指定人物群像：部分光学或构图证据不可用，保守区间仍在同一星级',
+  environment_partial_evidence_same_tier: '环境人像：部分证据不可用，保守区间仍落在同一星级',
+  landscape_partial_evidence_same_tier: '风光模式：部分光学或构图证据不可用，保守区间仍在同一星级',
+  auto_partial_evidence_same_tier: '自动模式：部分证据不可用，保守区间仍落在同一星级',
+  portrait_weighted_score: '人像模式：已按眼态、表情、光学与构图的固定权重评估',
+  group_key_weighted_score: '群像模式：已按指定人物眼态、表情、光学与构图的固定权重评估',
+  group_scene_weighted_score: '无指定人物群像：仅按光学 90% 与构图 10% 评估，不读取人脸、眼态或表情',
+  environment_weighted_score: '环境人像：已按固定权重综合画面与人物证据',
+  landscape_weighted_score: '风光模式：已按光学 50% 与构图 50% 评估',
+  auto_weighted_score: '自动模式：已按识别到的有人或无人策略完成固定权重评估',
 };
 
 const enReasons: Record<string, string> = {
@@ -86,6 +123,58 @@ const enReasons: Record<string, string> = {
   environment_people_uncertain:
     'Environmental portrait: weak person evidence was found; high-rating boundaries need manual review',
   key_person_identity_unknown: 'The selected identity cannot be determined reliably; review manually',
+  auto_people_uncertain: 'Auto: weak person evidence prevents a reliable scene-only rating; review manually',
+  environment_subject_unreliable:
+    'Environmental portrait: no reliable person subject was found; kept at 0 stars for manual review',
+  portrait_key_person_unresolved: 'Portrait: not every selected person is confirmed; kept at 0 stars for manual review',
+  group_key_person_unresolved: 'Group: not every selected person is confirmed; kept at 0 stars for manual review',
+  key_person_unresolved: 'Not every selected person can be confirmed reliably; kept at 0 stars for manual review',
+  portrait_person_unclear: 'Portrait: the person-clarity gate confirmed an unclear subject; assigned 1 star',
+  group_key_person_unclear: 'Group: the selected-person clarity gate failed; assigned 1 star',
+  group_image_unclear: 'Group: the image-clarity gate failed; assigned 1 star',
+  environment_image_unclear: 'Environmental portrait: the image-clarity gate failed; assigned 1 star',
+  landscape_image_unclear: 'Landscape: the image-clarity gate failed; assigned 1 star',
+  auto_image_unclear: 'Auto: the image-clarity gate failed; assigned 1 star',
+  clarity_gate_unclear: 'The first-stage clarity gate confirmed the photo is unclear; assigned 1 star',
+  portrait_deliberate_eye_pose: 'Portrait: a deliberate closed-eye pose may be present; rating is capped at 3 stars',
+  group_deliberate_eye_pose:
+    'Group: a selected person may have a deliberate closed-eye pose; rating is capped at 3 stars',
+  portrait_expression_transition: 'Portrait: non-eye facial motion may be in a transitional instant',
+  group_expression_transition: "Group: a selected person's non-eye facial motion may be in a transitional instant",
+  environment_expression_transition: 'Environmental portrait: non-eye facial motion may be in a transitional instant',
+  auto_expression_transition: "Auto: a person's non-eye facial motion may be in a transitional instant",
+  expression_transition: 'Non-eye facial motion may be in a transitional instant; manual review recommended',
+  portrait_evidence_interval_review:
+    'Portrait: missing evidence makes the conservative interval cross a rating boundary; review manually',
+  group_key_evidence_interval_review: 'Group: selected-person evidence crosses a rating boundary; review manually',
+  group_scene_evidence_interval_review:
+    'Group without selected people: optical and composition evidence crosses a rating boundary; review manually',
+  environment_evidence_interval_review:
+    'Environmental portrait: the fixed-weight evidence interval crosses a rating boundary; review manually',
+  landscape_evidence_interval_review:
+    'Landscape: optical and composition evidence crosses a rating boundary; review manually',
+  auto_evidence_interval_review: 'Auto: the fixed-weight evidence interval crosses a rating boundary; review manually',
+  portrait_partial_evidence_same_tier:
+    'Portrait: some evidence is unavailable, but the conservative interval stays in one rating tier',
+  group_key_partial_evidence_same_tier:
+    'Group: some selected-person evidence is unavailable, but the conservative interval stays in one rating tier',
+  group_scene_partial_evidence_same_tier:
+    'Group without selected people: some optical or composition evidence is unavailable, but the interval stays in one rating tier',
+  environment_partial_evidence_same_tier:
+    'Environmental portrait: some evidence is unavailable, but the conservative interval stays in one rating tier',
+  landscape_partial_evidence_same_tier:
+    'Landscape: some optical or composition evidence is unavailable, but the interval stays in one rating tier',
+  auto_partial_evidence_same_tier:
+    'Auto: some evidence is unavailable, but the conservative interval stays in one rating tier',
+  portrait_weighted_score:
+    'Portrait: evaluated with fixed weights for eyes, expression, optical quality, and composition',
+  group_key_weighted_score:
+    'Group: evaluated with fixed weights for selected-person eyes, expression, optical quality, and composition',
+  group_scene_weighted_score:
+    'Group without selected people: evaluated only from 90% optical quality and 10% composition; face, eye, and expression evidence is ignored',
+  environment_weighted_score: 'Environmental portrait: evaluated from image and person evidence with fixed weights',
+  landscape_weighted_score: 'Landscape: evaluated from 50% optical quality and 50% composition',
+  auto_weighted_score: 'Auto: evaluated with the fixed people-present or scene-only strategy selected for this photo',
 };
 
 export function keyPersonIdentityLabel(priority: number) {
@@ -313,7 +402,8 @@ const zh = {
   performanceRank: '组内技术表现排序',
   groupRank: '组内排序',
   rankedByQuality: '按照片质量排序',
-  expressionPending: '表情仅用于判断是否为稳定可用瞬间，不评价情绪；尚未通过双平台验证前不参与自动评分。',
+  expressionPending:
+    '表情仅依据非眼面部动作判断稳定瞬间，不评价情绪，也不读取或改写眼态结论；当前只对 macOS Debug 中身份已确认的指定人物参与。无指定人物、Release 与其他平台保持不可用。',
   identityPending: '身份仍需人工确认，不参与自动打分',
   reviewUpdateFailed: '复核修改保存失败，原结果未改变',
   setAsA: '设为 A',
@@ -581,7 +671,7 @@ const en: Record<keyof typeof zh, string> = {
   groupRank: 'Group rank',
   rankedByQuality: 'Ranked by photo quality',
   expressionPending:
-    'Expression is only used to judge whether the instant is stable and usable, never to rate emotion; it stays out of automatic scoring until dual-platform validation passes.',
+    'Expression uses only non-eye facial motion to judge a stable instant; it never rates emotion or reads or rewrites the eye decision. It currently participates only for confirmed selected people in macOS Debug, and remains unavailable without a selected identity, in Release, and on other platforms.',
   identityPending: 'Identity still needs manual confirmation and does not affect automatic scoring',
   reviewUpdateFailed: 'The review change could not be saved; the previous result was kept',
   setAsA: 'Set as A',

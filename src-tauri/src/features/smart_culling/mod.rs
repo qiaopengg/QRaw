@@ -1,10 +1,13 @@
 mod analysis;
 mod api;
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod arniqa_poc;
 mod coordinator;
 mod coordinator_session;
 mod coordinator_support;
 pub(crate) mod domain;
 mod expression;
+mod expression_grouping;
 mod face_geometry;
 mod face_identity;
 mod face_models;
@@ -14,6 +17,7 @@ mod grouping;
 pub(crate) mod infrastructure;
 mod key_person_policy;
 mod key_person_scoring;
+mod mode_evidence;
 mod mode_policy;
 mod mode_scoring;
 mod models;

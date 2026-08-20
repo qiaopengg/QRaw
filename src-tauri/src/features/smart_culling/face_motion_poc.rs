@@ -27,7 +27,7 @@ use once_cell::sync::OnceCell;
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 
-use super::expression::ExpressionEvidence;
+use super::expression::{ExpressionDescriptor, ExpressionEvidence};
 use super::face_models::DetectedFace;
 use super::models::{gpu_session_with_optimization, validate_session_contract, verify_model};
 use super::types::{EyeDisposition, EyeResult};
@@ -137,14 +137,27 @@ static CALIBRATION_MODELS: OnceCell<FaceMotionPocModels> = OnceCell::new();
 pub(in crate::features::smart_culling) struct FaceMotionAnalysis {
     eye: decision::EyeAssessment,
     expression: ExpressionEvidence,
+    expression_descriptor: Option<ExpressionDescriptor>,
 }
 
 impl FaceMotionAnalysis {
     pub(in crate::features::smart_culling) fn into_legacy_parts(
         self,
-    ) -> (EyeResult, EyeResult, EyeDisposition, ExpressionEvidence) {
+    ) -> (
+        EyeResult,
+        EyeResult,
+        EyeDisposition,
+        ExpressionEvidence,
+        Option<ExpressionDescriptor>,
+    ) {
         let (left_eye, right_eye, disposition) = self.eye.into_legacy_parts();
-        (left_eye, right_eye, disposition, self.expression)
+        (
+            left_eye,
+            right_eye,
+            disposition,
+            self.expression,
+            self.expression_descriptor,
+        )
     }
 }
 
@@ -156,19 +169,55 @@ fn extract_calibration_evidence(
     evidence::extract_face_motion_evidence(image, detection, models)
 }
 
+pub(in crate::features::smart_culling) fn preflight_calibration_models() -> Result<()> {
+    let models = CALIBRATION_MODELS.get_or_try_init(|| load_models(&model_asset_dir()))?;
+    let roi = RgbImage::new(FACE_MESH_INPUT_SIZE as u32, FACE_MESH_INPUT_SIZE as u32);
+    let mesh = run_face_mesh(&roi, &models.face_mesh)?;
+    let image_pixel_landmarks = mesh
+        .landmarks
+        .iter()
+        .map(|point| {
+            [
+                point[0] * FACE_MESH_INPUT_SIZE as f32,
+                point[1] * FACE_MESH_INPUT_SIZE as f32,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let blendshapes = run_blendshapes(&image_pixel_landmarks, &models.face_blendshapes)?;
+    if blendshapes.len() != BLENDSHAPE_NAMES.len() {
+        return Err(anyhow!("BlendshapeV2 preflight output count mismatch"));
+    }
+    Ok(())
+}
+
 pub(super) fn analyze_calibration_face(
     image: &DynamicImage,
     detection: &DetectedFace,
     pose_suppresses_eye_state: bool,
 ) -> Result<FaceMotionAnalysis> {
     let evidence = extract_calibration_evidence(image, detection)?;
-    Ok(FaceMotionAnalysis {
-        eye: decision::assess(&evidence, pose_suppresses_eye_state),
-        // Expression is intentionally kept outside the frozen eye decision.
-        // A single frame cannot prove that an expression is settled rather
-        // than transitional, even when motion coefficients are available.
-        expression: ExpressionEvidence::unavailable("expression_requires_sequence_context"),
-    })
+    Ok(analyze_evidence(&evidence, pose_suppresses_eye_state))
+}
+
+fn analyze_evidence(
+    evidence: &evidence::FaceMotionEvidenceDump,
+    pose_suppresses_eye_state: bool,
+) -> FaceMotionAnalysis {
+    // The frozen eye assessment is completed independently. Invalid future
+    // expression evidence may make expression unavailable, but cannot fail or
+    // replace the eye result.
+    let eye = decision::assess(evidence, pose_suppresses_eye_state);
+    let expression_descriptor = evidence.expression_descriptor().ok();
+    let expression = expression_descriptor
+        .as_ref()
+        .map(ExpressionEvidence::from_single_frame)
+        .unwrap_or_else(|| ExpressionEvidence::unavailable("expression_frame_evidence_invalid"));
+
+    FaceMotionAnalysis {
+        eye,
+        expression,
+        expression_descriptor,
+    }
 }
 
 fn model_asset_dir() -> PathBuf {
