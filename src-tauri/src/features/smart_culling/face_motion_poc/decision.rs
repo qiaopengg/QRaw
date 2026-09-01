@@ -5,7 +5,11 @@ use super::evidence::FaceMotionEvidenceDump;
 use super::eye_policy::EyeUsability;
 use super::{EYE_MODEL_CONTRACT_VERSION, EYE_POLICY_VERSION};
 
-const DELIBERATE_POSE_MAX_PITCH_DEGREES: f32 = -5.0;
+// Three observed residual-aperture samples landed immediately above the old
+// -5 degree boundary. The 1.1 policy keeps the frozen eye classifier untouched
+// and only admits this narrow -4.5 degree band into the existing deliberate
+// pose candidate state instead of forcing an automatic one-star result.
+const DELIBERATE_POSE_MAX_PITCH_DEGREES: f32 = -4.5;
 const DELIBERATE_POSE_MIN_EYE_ASPECT_RATIO: f32 = 0.10;
 const DELIBERATE_POSE_MAX_BLINK_SCORE: f32 = 0.50;
 
@@ -211,6 +215,37 @@ mod tests {
     }
 
     #[test]
+    fn mild_downward_residual_aperture_regression_is_a_pose_candidate() {
+        let mut sample = evidence(EyeUsability::Unusable, EyeUsability::Unusable);
+        sample.left_eye_aspect_ratio = Some(0.1289);
+        sample.right_eye_aspect_ratio = Some(0.1783);
+        sample.head_pitch_degrees = Some(-4.87);
+        sample.blendshapes.insert("eyeBlinkLeft", 0.3890);
+        sample.blendshapes.insert("eyeBlinkRight", 0.3452);
+
+        let result = assess(&sample, false);
+
+        assert_eq!(
+            result.disposition(),
+            EyeDisposition::DeliberatePoseCandidate
+        );
+    }
+
+    #[test]
+    fn pose_boundary_does_not_excuse_a_nearly_frontal_closure() {
+        let mut sample = evidence(EyeUsability::Unusable, EyeUsability::Unusable);
+        sample.left_eye_aspect_ratio = Some(0.13);
+        sample.right_eye_aspect_ratio = Some(0.18);
+        sample.head_pitch_degrees = Some(-4.49);
+        sample.blendshapes.insert("eyeBlinkLeft", 0.39);
+        sample.blendshapes.insert("eyeBlinkRight", 0.35);
+
+        let result = assess(&sample, false);
+
+        assert_eq!(result.disposition(), EyeDisposition::Unusable);
+    }
+
+    #[test]
     fn one_closed_eye_is_unusable_without_boundary_evidence() {
         let result = assess(&evidence(EyeUsability::Open, EyeUsability::Unusable), false);
         assert_eq!(result.disposition(), EyeDisposition::Unusable);
@@ -232,7 +267,7 @@ mod tests {
     fn assessment_exposes_the_frozen_contract_without_mutators() {
         let result = assess(&evidence(EyeUsability::Open, EyeUsability::Open), false);
 
-        assert_eq!(result.policy_version(), "qraw-eye-policy-1.0");
+        assert_eq!(result.policy_version(), "qraw-eye-policy-1.1");
         assert_eq!(
             result.model_contract_version(),
             "qraw-eye-model-contract-1.0"

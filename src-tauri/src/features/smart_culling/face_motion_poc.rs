@@ -12,6 +12,8 @@ mod decision;
 #[cfg(test)]
 mod eval;
 mod evidence;
+#[cfg(test)]
+mod expression_isolation_tests;
 mod eye_policy;
 #[cfg(test)]
 mod paired_eval;
@@ -169,8 +171,10 @@ fn extract_calibration_evidence(
     evidence::extract_face_motion_evidence(image, detection, models)
 }
 
-pub(in crate::features::smart_culling) fn preflight_calibration_models() -> Result<()> {
-    let models = CALIBRATION_MODELS.get_or_try_init(|| load_models(&model_asset_dir()))?;
+pub(in crate::features::smart_culling) fn preflight_calibration_models_from(
+    model_dir: &Path,
+) -> Result<()> {
+    let models = CALIBRATION_MODELS.get_or_try_init(|| load_models(model_dir))?;
     let roi = RgbImage::new(FACE_MESH_INPUT_SIZE as u32, FACE_MESH_INPUT_SIZE as u32);
     let mesh = run_face_mesh(&roi, &models.face_mesh)?;
     let image_pixel_landmarks = mesh
@@ -196,31 +200,37 @@ pub(super) fn analyze_calibration_face(
     pose_suppresses_eye_state: bool,
 ) -> Result<FaceMotionAnalysis> {
     let evidence = extract_calibration_evidence(image, detection)?;
-    Ok(analyze_evidence(&evidence, pose_suppresses_eye_state))
-}
-
-fn analyze_evidence(
-    evidence: &evidence::FaceMotionEvidenceDump,
-    pose_suppresses_eye_state: bool,
-) -> FaceMotionAnalysis {
-    // The frozen eye assessment is completed independently. Invalid future
-    // expression evidence may make expression unavailable, but cannot fail or
-    // replace the eye result.
-    let eye = decision::assess(evidence, pose_suppresses_eye_state);
+    // Complete the frozen eye assessment before invoking either expression
+    // model. A later expression failure becomes unknown evidence and cannot
+    // replace, fail, or mutate this eye result.
+    let eye = decision::assess(&evidence, pose_suppresses_eye_state);
     let expression_descriptor = evidence.expression_descriptor().ok();
-    let expression = expression_descriptor
-        .as_ref()
-        .map(ExpressionEvidence::from_single_frame)
-        .unwrap_or_else(|| ExpressionEvidence::unavailable("expression_frame_evidence_invalid"));
+    let expression = match expression_descriptor.as_ref() {
+        None => ExpressionEvidence::unavailable("expression_frame_evidence_invalid"),
+        Some(descriptor) if !descriptor.is_reliable() => {
+            ExpressionEvidence::unavailable("expression_frame_evidence_unreliable")
+        }
+        Some(descriptor) => {
+            match super::expression_quality_poc::infer_calibration_face(image, detection.bbox) {
+                Ok(model_outputs) => {
+                    ExpressionEvidence::from_single_frame(descriptor, &model_outputs)
+                }
+                Err(error) => {
+                    log::warn!("Expression-quality calibration inference failed: {error}");
+                    ExpressionEvidence::unavailable("expression_quality_model_unavailable")
+                }
+            }
+        }
+    };
 
-    FaceMotionAnalysis {
+    Ok(FaceMotionAnalysis {
         eye,
         expression,
         expression_descriptor,
-    }
+    })
 }
 
-fn model_asset_dir() -> PathBuf {
+pub(super) fn model_asset_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/features/smart_culling/model_assets")
 }
 
@@ -420,7 +430,7 @@ mod tests {
     #[test]
     fn eye_model_contract_identifiers_are_frozen() {
         assert_eq!(EYE_MODEL_CONTRACT_VERSION, "qraw-eye-model-contract-1.0");
-        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.0");
+        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.1");
         assert_eq!(
             FACE_MESH_MODEL_FILENAME,
             "face_landmarks_detector_v2_qraw_poc.onnx"

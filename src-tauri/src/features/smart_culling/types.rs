@@ -58,6 +58,7 @@ pub struct FaceResult {
     pub right_eye: EyeResult,
     pub eye_disposition: EyeDisposition,
     pub expression_state: String,
+    pub expression_score: Option<f32>,
     pub expression_confidence: f32,
     pub expression_reason: String,
     /// Task-only, read-only single-frame evidence used after chronological
@@ -95,6 +96,7 @@ impl FaceResult {
     ) {
         let evidence = assessment.as_evidence();
         self.expression_state = evidence.state.to_string();
+        self.expression_score = evidence.quality_score;
         self.expression_confidence = evidence.confidence;
         self.expression_reason = evidence.reason.to_string();
     }

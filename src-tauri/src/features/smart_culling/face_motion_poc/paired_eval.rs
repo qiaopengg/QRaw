@@ -1,19 +1,24 @@
 //! Explicit paired replay of manual truth, persisted AI output, current
 //! production scoring, and isolated face-motion evidence.
 
+mod blind_expression_snapshot;
 mod blind_snapshot;
 mod dataset;
+mod metrics;
+mod report_writer;
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 
 use self::dataset::PairedDataset;
+use self::metrics::{AgreementMetrics, ExpressionComponentMetrics};
+use self::report_writer::write_report;
 use super::super::analysis::analyze_image_quality;
+use super::super::expression_quality_poc::infer_calibration_face;
 use super::super::face_models::DetectedFace;
 use super::super::infrastructure::scan_catalog;
 use super::super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
@@ -27,19 +32,31 @@ const CHILD_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_CHILD";
 const ROOT_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_ROOT";
 const OUTPUT_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_OUTPUT";
 const REQUIRE_PERSISTENCE_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_REQUIRE_PERSISTENCE";
+const MANUAL_TARGET_ENV: &str = "QRAW_PAIRED_CULLING_EVAL_MANUAL_TARGET";
 const SNAPSHOT_OUTPUT_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT_OUTPUT";
 const SNAPSHOT_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT";
 const SNAPSHOT_SHA256_ENV: &str = "QRAW_BLIND_CULLING_SNAPSHOT_SHA256";
+const EXPRESSION_PREDICTIONS_ENV: &str = "QRAW_BLIND_EXPRESSION_PREDICTIONS";
+const EXPRESSION_PREDICTIONS_SHA256_ENV: &str = "QRAW_BLIND_EXPRESSION_PREDICTIONS_SHA256";
 const REPLAY_TEST_NAME: &str =
     "features::smart_culling::face_motion_poc::paired_eval::paired_manual_ai_replay";
+const FREEZE_EXPRESSION_TEST_NAME: &str =
+    "features::smart_culling::face_motion_poc::paired_eval::freeze_blind_expression_predictions";
 const BLIND_REVEAL_TEST_NAME: &str =
     "features::smart_culling::face_motion_poc::paired_eval::blind_manual_ai_reveal";
 const PASS_MARKER: &str = "QRAW_PAIRED_CULLING_EVAL_PASS";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReplayMode {
+    Calibration,
+    FreezeExpression,
+    BlindReveal,
+}
+
 #[test]
 #[ignore = "explicit local paired-dataset calibration; never part of production analysis"]
 fn paired_manual_ai_replay() {
-    run_replay_test(REPLAY_TEST_NAME, false);
+    run_replay_test(REPLAY_TEST_NAME, ReplayMode::Calibration);
 }
 
 #[test]
@@ -56,18 +73,24 @@ fn freeze_blind_ai_snapshot() {
 }
 
 #[test]
-#[ignore = "strict blind reveal; requires a previously frozen AI snapshot"]
-fn blind_manual_ai_reveal() {
-    run_replay_test(BLIND_REVEAL_TEST_NAME, true);
+#[ignore = "freezes source-based expression predictions before manual labels are visible"]
+fn freeze_blind_expression_predictions() {
+    run_replay_test(FREEZE_EXPRESSION_TEST_NAME, ReplayMode::FreezeExpression);
 }
 
-fn run_replay_test(test_name: &str, blind_reveal: bool) {
+#[test]
+#[ignore = "strict blind reveal; requires a previously frozen AI snapshot"]
+fn blind_manual_ai_reveal() {
+    run_replay_test(BLIND_REVEAL_TEST_NAME, ReplayMode::BlindReveal);
+}
+
+fn run_replay_test(test_name: &str, mode: ReplayMode) {
     if std::env::var_os(CHILD_ENV).is_none() {
-        run_isolated_parent(test_name, blind_reveal);
+        run_isolated_parent(test_name, mode);
         return;
     }
 
-    run_dataset(blind_reveal).unwrap();
+    run_dataset(mode).unwrap();
     println!("{PASS_MARKER}");
     std::io::stdout().flush().unwrap();
     std::io::stderr().flush().unwrap();
@@ -82,10 +105,16 @@ fn run_replay_test(test_name: &str, blind_reveal: bool) {
     std::process::exit(0);
 }
 
-fn run_isolated_parent(test_name: &str, blind_reveal: bool) {
+fn run_isolated_parent(test_name: &str, mode: ReplayMode) {
     let mut required_envs = vec![ROOT_ENV, OUTPUT_ENV];
-    if blind_reveal {
+    if matches!(mode, ReplayMode::FreezeExpression | ReplayMode::BlindReveal) {
         required_envs.extend([SNAPSHOT_ENV, SNAPSHOT_SHA256_ENV]);
+    }
+    if mode == ReplayMode::BlindReveal && expression_only_labels().unwrap() {
+        required_envs.extend([
+            EXPRESSION_PREDICTIONS_ENV,
+            EXPRESSION_PREDICTIONS_SHA256_ENV,
+        ]);
     }
     for required in required_envs {
         assert!(
@@ -108,8 +137,9 @@ fn run_isolated_parent(test_name: &str, blind_reveal: bool) {
     );
 }
 
-fn run_dataset(blind_reveal: bool) -> Result<()> {
-    if blind_reveal {
+fn run_dataset(mode: ReplayMode) -> Result<()> {
+    let expression_only_labels = mode == ReplayMode::FreezeExpression || expression_only_labels()?;
+    if matches!(mode, ReplayMode::FreezeExpression | ReplayMode::BlindReveal) {
         blind_snapshot::verify_from_environment(
             ROOT_ENV,
             SNAPSHOT_ENV,
@@ -118,7 +148,28 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
             MODEL_VERSION,
         )?;
     }
-    let dataset = PairedDataset::from_environment(ROOT_ENV, OUTPUT_ENV)?;
+    let frozen_expression = if mode == ReplayMode::BlindReveal && expression_only_labels {
+        Some(blind_expression_snapshot::verify_from_environment(
+            ROOT_ENV,
+            EXPRESSION_PREDICTIONS_ENV,
+            EXPRESSION_PREDICTIONS_SHA256_ENV,
+            POLICY_VERSION,
+            MODEL_VERSION,
+        )?)
+    } else {
+        None
+    };
+    let dataset = if mode == ReplayMode::FreezeExpression {
+        PairedDataset::prelabel_from_environment(ROOT_ENV, OUTPUT_ENV)?
+    } else {
+        PairedDataset::from_environment(ROOT_ENV, OUTPUT_ENV)?
+    };
+    if mode != ReplayMode::Calibration && dataset.output_path.exists() {
+        return Err(anyhow!(
+            "blind report output already exists and cannot be overwritten: {}",
+            dataset.output_path.display()
+        ));
+    }
     let resource_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/smart_culling_models");
     let production_models = load_face_models_for_test(&resource_dir)?;
     let catalog = scan_catalog(&dataset.source_dir).map_err(anyhow::Error::msg)?;
@@ -146,6 +197,9 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
             .with_context(|| format!("failed to decode {}", item.source_path.display()))?;
         let quality = analyze_image_quality(&image, true, false, Some(&production_models), None)?;
         let motion = face_motion_json(&image, &quality.faces);
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        let vision_quality =
+            super::super::vision_quality_poc::observe_calibration_image(&image, &quality.faces);
         let candidate = AnalysisCandidate {
             result_id: file_name.clone(),
             path: asset.display_path,
@@ -160,9 +214,22 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
             width: quality.width,
             height: quality.height,
             faces: quality.faces,
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            vision_quality,
             key_person_evidence: Vec::new(),
         };
         let evaluation = evaluate_mode("portrait", &candidate);
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        let vision_quality = json!({
+            "aestheticsScore": candidate.vision_quality.aesthetics_score,
+            "isUtility": candidate.vision_quality.is_utility,
+            "faceCaptureQualities": candidate.vision_quality.face_capture_qualities,
+            "humanCount": candidate.vision_quality.human_count,
+            "maxHumanConfidence": candidate.vision_quality.max_human_confidence,
+            "unavailableReason": candidate.vision_quality.unavailable_reason,
+        });
+        #[cfg(not(all(debug_assertions, target_os = "macos")))]
+        let vision_quality = Value::Null;
         raw_by_file.insert(
             file_name,
             json!({
@@ -175,6 +242,7 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
                 "height": candidate.height,
                 "faceCount": candidate.faces.len(),
                 "faces": candidate.faces.iter().map(face_json).collect::<Vec<_>>(),
+                "visionQuality": vision_quality,
                 "modeScore": evaluation.score,
                 "modeConfidence": evaluation.confidence,
                 "baseRating": rating_for_mode(&evaluation.resolved_mode, evaluation.score),
@@ -197,14 +265,15 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
 
-    let mut writer = BufWriter::new(File::create(&dataset.output_path)?);
+    let mut report_rows = Vec::with_capacity(dataset.items.len());
     let mut replay_counts = BTreeMap::<u8, usize>::new();
     let mut persistence_mismatches = Vec::new();
-    let mut labeled_count = 0usize;
-    let mut exact_count = 0usize;
-    let mut within_one_count = 0usize;
-    let mut usable_match_count = 0usize;
-    let mut absolute_error = 0usize;
+    let mut persisted_count = 0usize;
+    let mut review_count = 0usize;
+    let mut decided_count = 0usize;
+    let mut persisted_agreement = AgreementMetrics::default();
+    let mut decided_agreement = AgreementMetrics::default();
+    let mut expression_metrics = ExpressionComponentMetrics::default();
     for (file_name, item) in &dataset.items {
         let result = replay
             .get(file_name)
@@ -217,47 +286,88 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
         if !persistence_equivalent {
             persistence_mismatches.push(file_name.clone());
         }
-        if item.manual_rating > 0 {
-            let saved_ai_rating = item.saved_ai_rating.unwrap_or(0);
-            let difference = item.manual_rating.abs_diff(saved_ai_rating) as usize;
-            labeled_count += 1;
-            exact_count += usize::from(difference == 0);
-            within_one_count += usize::from(difference <= 1);
-            usable_match_count += usize::from((item.manual_rating >= 3) == (saved_ai_rating >= 3));
-            absolute_error += difference;
+        if let Some(saved_ai_rating) = item.saved_ai_rating {
+            persisted_count += 1;
+            if !expression_only_labels {
+                persisted_agreement.observe(item.manual_rating, saved_ai_rating);
+            }
         }
-        serde_json::to_writer(
-            &mut writer,
-            &json!({
-                "file": item.file_name,
-                "imageSha256": item.image_sha256,
-                "manual": {"rating": item.manual_rating, "source": item.manual_source},
-                "savedAi": {"rating": item.saved_ai_rating},
-                "currentReplay": {
-                    "rating": result.rating,
-                    "confidence": result.confidence,
-                    "requiresHumanReview": result.requires_human_review,
-                    "reasonCodes": result.reason_codes,
-                    "groupKind": result.group_kind,
-                    "groupIndex": result.group_index,
-                    "groupRank": result.group_rank,
-                    "groupSize": result.group_size,
-                },
-                "rawEvidence": raw_by_file.get(file_name),
-            }),
-        )?;
-        writeln!(writer)?;
+        if result.requires_human_review {
+            review_count += 1;
+        } else if (1..=5).contains(&result.rating) {
+            decided_count += 1;
+            if !expression_only_labels {
+                decided_agreement.observe(item.manual_rating, result.rating);
+            }
+        }
+        let current_expression_component = raw_by_file
+            .get(file_name)
+            .and_then(|raw| raw.pointer("/faceMotion/expression"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let expression_component = match &frozen_expression {
+            Some(frozen) => frozen.expression_for(file_name)?.clone(),
+            None => current_expression_component.clone(),
+        };
+        if expression_only_labels {
+            let score = expression_component.get("score").and_then(Value::as_f64);
+            expression_metrics.observe(item.manual_rating, score);
+        }
+        report_rows.push(json!({
+            "file": item.file_name,
+            "imageSha256": item.image_sha256,
+            "contract": {
+                "policyVersion": POLICY_VERSION,
+                "modelVersion": MODEL_VERSION,
+            },
+            "manual": {"rating": item.manual_rating, "source": item.manual_source},
+            "savedAi": {"rating": item.saved_ai_rating},
+            "currentReplay": {
+                "rating": result.rating,
+                "confidence": result.confidence,
+                "requiresHumanReview": result.requires_human_review,
+                "reasonCodes": result.reason_codes,
+                "groupKind": result.group_kind,
+                "groupIndex": result.group_index,
+                "groupRank": result.group_rank,
+                "groupSize": result.group_size,
+            },
+            "expressionComponent": expression_component,
+            "currentExpressionComponent": frozen_expression
+                .as_ref()
+                .map(|_| current_expression_component),
+            "rawEvidence": raw_by_file.get(file_name),
+        }));
     }
-    writer.flush()?;
     let require_persistence = std::env::var(REQUIRE_PERSISTENCE_ENV)
         .map(|value| value != "0")
         .unwrap_or(true);
-    if !persistence_mismatches.is_empty() && require_persistence {
+    let frozen_expression_supersedes_final_replay =
+        mode == ReplayMode::BlindReveal && frozen_expression.is_some();
+    if !persistence_mismatches.is_empty()
+        && require_persistence
+        && mode != ReplayMode::FreezeExpression
+        && !frozen_expression_supersedes_final_replay
+    {
         return Err(anyhow!(
             "current replay differs from persisted {} for: {}",
             dataset.ai_run,
             persistence_mismatches.join(", ")
         ));
+    }
+    write_report(
+        &dataset.output_path,
+        &report_rows,
+        mode != ReplayMode::Calibration,
+    )?;
+    if mode == ReplayMode::FreezeExpression {
+        let digest = blind_expression_snapshot::freeze_from_environment(
+            ROOT_ENV,
+            OUTPUT_ENV,
+            POLICY_VERSION,
+            MODEL_VERSION,
+        )?;
+        println!("{EXPRESSION_PREDICTIONS_SHA256_ENV}={digest}");
     }
 
     println!(
@@ -266,26 +376,43 @@ fn run_dataset(blind_reveal: bool) -> Result<()> {
         dataset.output_path.display(),
         replay_counts
     );
-    if labeled_count > 0 {
-        println!(
-            "frozen AI vs manual (manual 0 excluded): n={labeled_count}, exact={:.1}%, within1={:.1}%, mae={:.3}, usable={:.1}%",
-            percentage(exact_count, labeled_count),
-            percentage(within_one_count, labeled_count),
-            absolute_error as f64 / labeled_count as f64,
-            percentage(usable_match_count, labeled_count),
-        );
+    println!(
+        "coverage: persisted={persisted_count}/{}, current_decided={decided_count}/{}, current_review={review_count}/{}",
+        dataset.items.len(),
+        dataset.items.len(),
+        dataset.items.len(),
+    );
+    if expression_only_labels {
+        println!("final-rating agreement skipped: manual labels target the expression component");
+        expression_metrics.print();
+    } else {
+        persisted_agreement.print("persisted AI vs manual");
+        decided_agreement.print("current decided AI vs manual");
     }
     if !persistence_mismatches.is_empty() {
         println!(
             "candidate replay differs from persisted AI output for {} rows",
             persistence_mismatches.len()
         );
+        if frozen_expression_supersedes_final_replay {
+            println!("expression metrics remain authenticated by the pre-label prediction freeze");
+        }
     }
     Ok(())
 }
 
-fn percentage(count: usize, total: usize) -> f64 {
-    count as f64 * 100.0 / total as f64
+fn expression_only_labels() -> Result<bool> {
+    match std::env::var(MANUAL_TARGET_ENV) {
+        Ok(target) if target == "expression" => Ok(true),
+        Ok(target) if target == "final" => Ok(false),
+        Ok(target) => Err(anyhow!(
+            "unsupported {MANUAL_TARGET_ENV}={target}; expected expression or final"
+        )),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(anyhow!("{MANUAL_TARGET_ENV} is not valid UTF-8"))
+        }
+    }
 }
 
 fn face_motion_json(image: &image::DynamicImage, faces: &[FaceResult]) -> Value {
@@ -299,6 +426,10 @@ fn face_motion_json(image: &image::DynamicImage, faces: &[FaceResult]) -> Value 
         bbox: face.bbox,
         score: face.detection_score,
         landmarks: face.landmarks,
+    };
+    let expression_quality_model = match infer_calibration_face(image, detection.bbox) {
+        Ok(outputs) => json!({"status": "ok", "mtl": outputs.mtl, "vgaf": outputs.vgaf}),
+        Err(error) => json!({"status": "error", "detail": error.to_string()}),
     };
     match extract_calibration_evidence(image, &detection) {
         Ok(evidence) => json!({
@@ -314,6 +445,13 @@ fn face_motion_json(image: &image::DynamicImage, faces: &[FaceResult]) -> Value 
                 "left": evidence.left_eye.as_str(),
                 "right": evidence.right_eye.as_str(),
             },
+            "expression": {
+                "state": face.expression_state,
+                "score": face.expression_score,
+                "confidence": face.expression_confidence,
+                "reason": face.expression_reason,
+            },
+            "expressionQualityModel": expression_quality_model,
             "blendshapes": evidence.blendshapes,
         }),
         Err(error) => json!({"status": "error", "detail": error.to_string()}),
@@ -331,6 +469,10 @@ fn face_json(face: &FaceResult) -> Value {
         "exposureConfidence": face.exposure_confidence,
         "leftEye": {"state": face.left_eye.state, "reason": face.left_eye.reason},
         "rightEye": {"state": face.right_eye.state, "reason": face.right_eye.reason},
+        "expressionState": face.expression_state,
+        "expressionScore": face.expression_score,
+        "expressionConfidence": face.expression_confidence,
+        "expressionReason": face.expression_reason,
     })
 }
 

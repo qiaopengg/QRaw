@@ -35,6 +35,17 @@ pub(super) struct TaskSession {
 }
 
 impl TaskSession {
+    pub(super) fn transition_to(&mut self, next: TaskState) -> Result<(), String> {
+        if !self.state.can_transition_to(next) {
+            return Err(format!(
+                "Invalid smart-culling task transition: {:?} -> {:?}",
+                self.state, next
+            ));
+        }
+        self.state = next;
+        Ok(())
+    }
+
     pub(super) fn snapshot(&self) -> SmartCullingSnapshot {
         SmartCullingSnapshot {
             task_id: Some(self.task_id.clone()),
@@ -57,7 +68,7 @@ impl TaskSession {
         &mut self,
         report: ApplyReport,
         attempted: usize,
-    ) -> SmartCullingSnapshot {
+    ) -> Result<SmartCullingSnapshot, String> {
         self.failures.retain(|failure| failure.stage != "write");
         for succeeded in &report.succeeded {
             self.pending_write.remove(succeeded);
@@ -117,7 +128,7 @@ impl TaskSession {
             skipped: self.inventory.skipped_assets,
             succeeded_paths,
         });
-        self.state = TaskState::Completed;
+        self.transition_to(TaskState::Completed)?;
         if attempted == 0 {
             self.failures.push(FailureItem {
                 path: self.root_path.to_string_lossy().to_string(),
@@ -128,6 +139,6 @@ impl TaskSession {
                 retryable: false,
             });
         }
-        self.snapshot()
+        Ok(self.snapshot())
     }
 }

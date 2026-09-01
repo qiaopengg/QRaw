@@ -34,7 +34,7 @@ pub struct SmartCullingFaceModels {
     pub ocec: Mutex<Session>,
     pub sface: Mutex<Session>,
     // FER+ is intentionally not loaded: class-distribution confidence is not
-    // validated expression-usability evidence. Its bundled resource remains
+    // validated expression-quality evidence. Its bundled resource remains
     // only for rollback until a replacement face-motion model is accepted.
 }
 

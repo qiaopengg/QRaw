@@ -1,4 +1,5 @@
 import { AlertCircle, Check, FileCheck2, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
 import { useSmartCullingText } from '../i18n';
 import { reviewResultIsWritable, reviewResultNeedsAttention } from '../reviewPolicy';
 import type { SmartCullingSnapshot } from '../types';
@@ -10,11 +11,14 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
   const { busy, manualSyncPending, setState } = useSmartCullingStore();
   const writable = snapshot.results.filter(reviewResultIsWritable);
   const manual = writable.filter((result) => result.source === 'manual').length;
+  const ai = writable.length - manual;
   const needsAttention = snapshot.results.filter(reviewResultNeedsAttention).length;
+  const requiresCalibrationAcknowledgement = !snapshot.device.capabilities.releaseReady && ai > 0;
+  const [calibrationAcknowledged, setCalibrationAcknowledged] = useState(false);
   const confirm = async () => {
     if (manualSyncPending) return;
     try {
-      const next = await runSmartCullingCommand({ action: 'confirm' });
+      const next = await runSmartCullingCommand({ action: 'confirm', calibrationAcknowledged });
       setState({ confirmOpen: false, screen: next.state === 'idle' ? 'setup' : 'write' });
     } catch {
       // Keep the confirmation context open; the global banner explains the failure.
@@ -81,7 +85,19 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
       </div>
       <div className="sc-warning">
         <AlertCircle size={15} />
-        <p>{tx('partialWriteHint')}</p>
+        <div>
+          <p>{tx('partialWriteHint')}</p>
+          {requiresCalibrationAcknowledgement ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={calibrationAcknowledged}
+                onChange={(event) => setCalibrationAcknowledged(event.target.checked)}
+              />
+              <span>{tx('calibrationConfirmAcknowledgement')}</span>
+            </label>
+          ) : null}
+        </div>
       </div>
       <footer>
         <button className="sc-secondary" onClick={() => setState({ confirmOpen: false })}>
@@ -89,7 +105,12 @@ export function ConfirmModal({ snapshot }: { snapshot: SmartCullingSnapshot }) {
         </button>
         <button
           className="sc-primary"
-          disabled={busy || manualSyncPending || writable.length === 0}
+          disabled={
+            busy ||
+            manualSyncPending ||
+            writable.length === 0 ||
+            (requiresCalibrationAcknowledgement && !calibrationAcknowledged)
+          }
           onClick={() => void confirm()}
         >
           {tx('confirmAndWrite')} {writable.length}

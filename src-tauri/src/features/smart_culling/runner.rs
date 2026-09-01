@@ -7,7 +7,7 @@ use image_hasher::{HashAlg, Hasher, HasherConfig};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-use super::analysis::analyze_image_quality;
+use super::analysis::{analyze_image_quality, apply_source_clarity_metrics};
 use super::api::{DetectedFaceDto, FailureItem, KeyPersonSelection, ReviewResult};
 use super::face_identity::{KeyPersonReference, aggregate_reference_embeddings, match_key_people};
 use super::infrastructure::{CatalogAsset, render_current_state};
@@ -15,6 +15,7 @@ use super::models::SmartCullingFaceModels;
 use super::scoring::{AnalysisCandidate, organize_results};
 use super::types::{KeyPersonEvidence, MIN_RELIABLE_FACE_DETECTION_SCORE};
 use crate::AppState;
+use crate::formats::is_raw_file;
 
 pub(crate) struct RunOutcome {
     pub results: Vec<ReviewResult>,
@@ -66,7 +67,20 @@ pub(crate) fn run_analysis(
                     Some(models),
                     Some(cancellation),
                 ) {
-                    Ok(quality) => {
+                    Ok(mut quality) => {
+                        if cancellation.load(Ordering::Acquire) {
+                            break;
+                        }
+                        if !is_raw_file(&path)
+                            && let Ok(source) = image::open(&asset.display_path)
+                        {
+                            apply_source_clarity_metrics(&source, &mut quality);
+                        }
+                        #[cfg(all(debug_assertions, target_os = "macos"))]
+                        let vision_quality = super::vision_quality_poc::observe_calibration_image(
+                            &image,
+                            &quality.faces,
+                        );
                         if cancellation.load(Ordering::Acquire) {
                             break;
                         }
@@ -86,6 +100,8 @@ pub(crate) fn run_analysis(
                             width: quality.width,
                             height: quality.height,
                             faces: quality.faces,
+                            #[cfg(all(debug_assertions, target_os = "macos"))]
+                            vision_quality,
                             key_person_evidence: Vec::new(),
                         });
                         asset_map.insert(result_id, asset);
@@ -190,6 +206,7 @@ pub(crate) fn detect_people(
             left_eye: None,
             right_eye: None,
             expression_state: None,
+            expression_score: None,
             expression_confidence: None,
             expression_reason: None,
             sharpness_metric: None,

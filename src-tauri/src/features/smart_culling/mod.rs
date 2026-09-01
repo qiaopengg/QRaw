@@ -2,12 +2,16 @@ mod analysis;
 mod api;
 #[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
 mod arniqa_poc;
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+mod calibration_model_assets;
 mod coordinator;
 mod coordinator_session;
 mod coordinator_support;
 pub(crate) mod domain;
 mod expression;
 mod expression_grouping;
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+mod expression_quality_poc;
 mod face_geometry;
 mod face_identity;
 mod face_models;
@@ -28,6 +32,8 @@ mod runner;
 mod scoring;
 mod task_recovery;
 mod types;
+#[cfg(all(debug_assertions, target_os = "macos"))]
+mod vision_quality_poc;
 
 use tauri::AppHandle;
 

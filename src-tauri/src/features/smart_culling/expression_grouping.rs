@@ -96,6 +96,7 @@ mod tests {
             right_eye: EyeResult::unavailable("test", 0, None),
             eye_disposition: EyeDisposition::Unknown,
             expression_state: "sentinel".to_string(),
+            expression_score: None,
             expression_confidence: 0.0,
             expression_reason: "sentinel".to_string(),
             expression_descriptor: None,
@@ -122,6 +123,8 @@ mod tests {
             width: 100,
             height: 100,
             faces,
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            vision_quality: Default::default(),
             key_person_evidence: Vec::new(),
         }
     }

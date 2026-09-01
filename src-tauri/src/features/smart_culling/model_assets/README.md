@@ -1,8 +1,33 @@
 # Face-motion model POC assets
 
-Status: isolated engineering POC only. These files are not under
-`src-tauri/resources`, are not loaded by the application, and do not affect eye
-state, expression state, photo score, star rating, or automatic selection.
+Status: isolated engineering POC/calibration only. These files are not under
+`src-tauri/resources`. macOS Debug calibration builds load the audited
+FaceMesh/Blendshape assets for frozen eye evidence and experimental expression
+scoring; Release and other platforms keep the safe unavailable path.
+
+The separate HSEmotion expression-quality model, graph rewrite, calibration
+manifest, licensing caveat, and verification evidence are documented in
+[`hsemotion_poc/README.md`](hsemotion_poc/README.md).
+
+The system-provided Apple Vision aesthetics, face-capture-quality and human
+observation audit is documented in
+[`vision_quality_poc/README.md`](vision_quality_poc/README.md). It adds no model
+asset and remains a macOS Debug calibration path.
+
+## Local calibration loading
+
+The application does not redistribute these calibration weights. Debug builds
+resolve an audited model directory in this order:
+
+1. absolute `QRAW_SMART_CULLING_CALIBRATION_MODEL_DIR` override;
+2. `resources/smart_culling_calibration_models` when a separately approved
+   local build provides it;
+3. the application-data `smart_culling_calibration_models` directory;
+4. this source directory for development runs.
+
+Every resolved model still has to match the frozen SHA-256 value before a
+session is created. A missing directory or mismatched model fails preflight;
+there is no network download or silent CPU/model fallback.
 
 ## Sources and contracts
 

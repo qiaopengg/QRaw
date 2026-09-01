@@ -28,6 +28,7 @@ export interface DetectedFace {
   leftEye?: EyeEvidence | null;
   rightEye?: EyeEvidence | null;
   expressionState?: string | null;
+  expressionScore?: number | null;
   expressionConfidence?: number | null;
   expressionReason?: string | null;
   sharpnessMetric?: number | null;
@@ -60,7 +61,26 @@ export interface DevicePreflight {
   platform: string;
   provider: string;
   modelVersion: string;
+  policyVersion: string;
+  capabilities: SmartCullingCapabilities;
   reason: string | null;
+}
+
+export type SmartCullingCapabilityLevel =
+  | 'unavailable'
+  | 'observationOnly'
+  | 'manualOnly'
+  | 'conservative'
+  | 'calibration';
+
+export interface SmartCullingCapabilities {
+  eyeState: SmartCullingCapabilityLevel;
+  expression: SmartCullingCapabilityLevel;
+  personClarity: SmartCullingCapabilityLevel;
+  opticalQuality: SmartCullingCapabilityLevel;
+  composition: SmartCullingCapabilityLevel;
+  keyPersonIdentity: SmartCullingCapabilityLevel;
+  releaseReady: boolean;
 }
 
 export interface InventorySummary {
@@ -165,7 +185,7 @@ export type SmartCullingRequest =
   | { action: 'start'; rootPath: string; mode: SmartCullingMode; keyPeople: KeyPersonSelection[] }
   | { action: 'cancel' }
   | { action: 'updateReview'; changes: ReviewChange[] }
-  | { action: 'confirm' }
+  | { action: 'confirm'; calibrationAcknowledged: boolean }
   | { action: 'retryFailures' }
   | { action: 'reconcileManual'; paths: string[] }
   | { action: 'setLock'; paths: string[]; locked: boolean }

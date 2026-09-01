@@ -5,7 +5,7 @@
 //! of being forced into open or unusable. Any threshold or semantic change
 //! requires a policy-version bump and a fresh blind regression run.
 
-pub(super) const EYE_POLICY_VERSION: &str = "qraw-eye-policy-1.0";
+pub(super) const EYE_POLICY_VERSION: &str = "qraw-eye-policy-1.1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EyeUsability {
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn policy_version_and_threshold_boundaries_are_frozen() {
-        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.0");
+        assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.1");
         assert_eq!(UNUSABLE_MAX_ASPECT_RATIO, 0.18);
         assert_eq!(UNUSABLE_MIN_BLINK_SCORE, 0.30);
         assert_eq!(OPEN_MIN_ASPECT_RATIO, 0.20);

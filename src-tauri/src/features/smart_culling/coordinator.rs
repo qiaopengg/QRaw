@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,7 @@ use super::api::{
 use super::coordinator_session::TaskSession;
 use super::coordinator_support::{
     apply_failure_code, catalog_failures, confirmed_result, eta_seconds, inventory_summary,
-    mode_supports_key_people, valid_color, valid_key_people, valid_mode,
+    mode_supports_key_people, valid_key_people, valid_mode,
 };
 use super::domain::TaskState;
 use super::infrastructure::{
@@ -23,7 +23,9 @@ use super::infrastructure::{
     capture_sidecar_baseline, change_asset_lock_state, reconcile_manual_ownership, scan_catalog,
 };
 use super::preflight::run_preflight;
-use super::review_policy::result_is_writable;
+use super::review_policy::{
+    apply_review_changes, requires_calibration_acknowledgement, result_is_writable,
+};
 use super::runner::{detect_people, run_analysis};
 use super::task_recovery;
 
@@ -52,7 +54,9 @@ pub(crate) fn handle(
         } => start(root_path, mode, key_people, app_handle),
         SmartCullingRequest::Cancel => cancel(&app_handle),
         SmartCullingRequest::UpdateReview { changes } => update_review(changes, &app_handle),
-        SmartCullingRequest::Confirm => confirm(&app_handle),
+        SmartCullingRequest::Confirm {
+            calibration_acknowledged,
+        } => confirm(calibration_acknowledged, &app_handle),
         SmartCullingRequest::RetryFailures => retry_failures(&app_handle),
         SmartCullingRequest::ReconcileManual { paths } => reconcile_manual(paths, &app_handle),
         SmartCullingRequest::SetLock { paths, locked } => set_lock(paths, locked, &app_handle),
@@ -217,8 +221,11 @@ fn start(
         if !valid_key_people(&key_people, &session.catalog) {
             return Err("Key-person selections are invalid or outside this task".to_string());
         }
+        if session.inventory.eligible_assets == 0 {
+            return Err("There are no eligible photo assets to analyze".to_string());
+        }
         session.mode = mode.clone();
-        session.state = TaskState::Indexing;
+        session.transition_to(TaskState::Indexing)?;
         session.started_at = Some(Instant::now());
         session.detected_image_path = None;
         session.detected_faces.clear();
@@ -298,7 +305,7 @@ fn cancel(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
         ) {
             return Err("The current task is not running".to_string());
         }
-        session.state = TaskState::Cancelling;
+        session.transition_to(TaskState::Cancelling)?;
         session.cancellation.store(true, Ordering::Release);
         session.progress.stage = "cancelling".to_string();
         session.snapshot()
@@ -321,32 +328,17 @@ fn update_review(
         if session.state != TaskState::ReadyForReview {
             return Err("Review changes are accepted only on the review page".to_string());
         }
-        for change in changes {
-            if change.rating > 5 || !valid_color(change.color_label.as_deref()) {
-                return Err("Review rating or color label is invalid".to_string());
-            }
-            let Some(result) = session
-                .results
-                .iter_mut()
-                .find(|result| result.result_id == change.result_id)
-            else {
-                continue;
-            };
-            result.rating = change.rating;
-            result.color_label = change.color_label;
-            result.source = "manual".to_string();
-            result.reason_codes.clear();
-            result.confidence = 0.0;
-            result.protected = true;
-            result.requires_human_review = false;
-        }
+        apply_review_changes(&mut session.results, changes)?;
         session.snapshot()
     };
     save_and_emit(app_handle, snapshot.clone());
     Ok(snapshot)
 }
 
-fn confirm(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
+fn confirm(
+    calibration_acknowledged: bool,
+    app_handle: &AppHandle,
+) -> Result<SmartCullingSnapshot, String> {
     let (items, attempted_count) = {
         let mut coordinator = COORDINATOR.lock().unwrap();
         let session = coordinator
@@ -368,18 +360,28 @@ fn confirm(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
                     .to_string(),
             );
         }
-        session.state = TaskState::Confirming;
+        if requires_calibration_acknowledgement(&session.device.capabilities, &writable)
+            && !calibration_acknowledged
+        {
+            return Err(
+                "Calibration-only AI results require explicit review acknowledgement before writing"
+                    .to_string(),
+            );
+        }
         let confirmed_at = Utc::now().to_rfc3339();
-        session.pending_write.clear();
         let mut items = Vec::with_capacity(writable.len());
+        let mut sidecar_paths = HashSet::with_capacity(writable.len());
         for result in writable {
-            let Some(asset) = session.assets.get(&result.result_id) else {
-                continue;
-            };
+            let asset = session.assets.get(&result.result_id).ok_or_else(|| {
+                format!("Reviewed result has no catalog asset: {}", result.result_id)
+            })?;
+            if !sidecar_paths.insert(asset.sidecar_path.clone()) {
+                return Err(format!(
+                    "Multiple reviewed results target the same sidecar: {}",
+                    asset.sidecar_path.display()
+                ));
+            }
             let confirmed = confirmed_result(&result, &confirmed_at)?;
-            session
-                .pending_write
-                .insert(asset.sidecar_path.clone(), confirmed.clone());
             items.push(ConfirmedWrite {
                 sidecar_path: asset.sidecar_path.clone(),
                 member_sidecar_baselines: asset.member_sidecar_baselines.clone(),
@@ -387,7 +389,13 @@ fn confirm(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
                 result: confirmed,
             });
         }
-        (items, session.pending_write.len())
+        session.transition_to(TaskState::Confirming)?;
+        session.pending_write = items
+            .iter()
+            .map(|item| (item.sidecar_path.clone(), item.result.clone()))
+            .collect();
+        let attempted_count = items.len();
+        (items, attempted_count)
     };
 
     task_recovery::remember(&current_snapshot(), app_handle);
@@ -408,32 +416,35 @@ fn retry_failures(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String
         session
             .pending_write
             .iter()
-            .filter_map(|(sidecar, result)| {
-                session
+            .map(|(sidecar, result)| {
+                let asset = session
                     .assets
                     .values()
                     .find(|asset| asset.sidecar_path == *sidecar)
-                    .map(|asset| {
-                        let member_sidecar_baselines = asset
-                            .member_sidecar_baselines
-                            .iter()
-                            .map(|(path, baseline)| {
-                                (
-                                    path.clone(),
-                                    capture_sidecar_baseline(path)
-                                        .unwrap_or_else(|_| baseline.clone()),
-                                )
-                            })
-                            .collect();
-                        ConfirmedWrite {
-                            sidecar_path: sidecar.clone(),
-                            member_sidecar_baselines,
-                            file_baselines: asset.file_baselines.clone(),
-                            result: result.clone(),
-                        }
+                    .ok_or_else(|| {
+                        format!(
+                            "Retryable write has no catalog asset: {}",
+                            sidecar.display()
+                        )
+                    })?;
+                let member_sidecar_baselines = asset
+                    .member_sidecar_baselines
+                    .iter()
+                    .map(|(path, baseline)| {
+                        (
+                            path.clone(),
+                            capture_sidecar_baseline(path).unwrap_or_else(|_| baseline.clone()),
+                        )
                     })
+                    .collect();
+                Ok(ConfirmedWrite {
+                    sidecar_path: sidecar.clone(),
+                    member_sidecar_baselines,
+                    file_baselines: asset.file_baselines.clone(),
+                    result: result.clone(),
+                })
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, String>>()?
     };
     let pending = items.len();
     let report = apply_confirmed_results(items);
@@ -470,7 +481,9 @@ fn restore_configuring_after_start_failure() -> SmartCullingSnapshot {
     let Some(session) = coordinator.session.as_mut() else {
         return coordinator.last_snapshot.clone();
     };
-    session.state = TaskState::Configuring;
+    session
+        .transition_to(TaskState::Configuring)
+        .expect("thread creation failure must recover from indexing");
     session.started_at = None;
     session.cancellation.store(false, Ordering::Release);
     session.progress = TaskProgress::default();
@@ -549,7 +562,7 @@ fn finish_write(
             .session
             .as_mut()
             .ok_or_else(|| "Smart-culling task disappeared while writing".to_string())?;
-        session.apply_write_report(report, attempted)
+        session.apply_write_report(report, attempted)?
     };
     task_recovery::forget(app_handle);
     save_and_emit(app_handle, snapshot.clone());
@@ -565,7 +578,10 @@ fn update_running_state(task_id: &str, state: TaskState, stage: &str, app_handle
         if session.task_id != task_id || session.cancellation.load(Ordering::Acquire) {
             return;
         }
-        session.state = state;
+        if let Err(error) = session.transition_to(state) {
+            log::warn!("{error}");
+            return;
+        }
         session.progress.stage = stage.to_string();
         session.snapshot()
     };
@@ -588,11 +604,15 @@ fn update_progress(
             return;
         }
         if session.state != TaskState::Cancelling {
-            session.state = if stage == "organizing" {
+            let next = if stage == "organizing" {
                 TaskState::Organizing
             } else {
                 TaskState::Analyzing
             };
+            if let Err(error) = session.transition_to(next) {
+                log::warn!("{error}");
+                return;
+            }
         }
         session.progress.completed = completed;
         session.progress.total = total;
@@ -617,6 +637,10 @@ fn finish_analysis(task_id: &str, outcome: super::runner::RunOutcome, app_handle
         if session.task_id != task_id {
             return;
         }
+        if let Err(error) = session.transition_to(TaskState::ReadyForReview) {
+            log::warn!("{error}");
+            return;
+        }
         session.results = outcome.results;
         session.assets = outcome.assets;
         session.failures.extend(outcome.failures);
@@ -630,7 +654,6 @@ fn finish_analysis(task_id: &str, outcome: super::runner::RunOutcome, app_handle
         session.progress.stage = "readyForReview".to_string();
         session.progress.eta_seconds = None;
         session.progress.partial = outcome.partial;
-        session.state = TaskState::ReadyForReview;
         session.snapshot()
     };
     task_recovery::remember(&snapshot, app_handle);

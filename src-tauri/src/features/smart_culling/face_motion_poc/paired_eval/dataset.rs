@@ -29,8 +29,22 @@ pub(super) struct PairedItem {
 impl PairedDataset {
     pub(super) fn from_environment(root_env: &str, output_env: &str) -> Result<Self> {
         let root = required_dir(root_env)?;
-        let source_dir = required_child_dir(&root, "source")?;
         let manual_dir = required_child_dir(&root, "manual-reference")?;
+        Self::load(root, output_env, Some(&manual_dir))
+    }
+
+    pub(super) fn prelabel_from_environment(root_env: &str, output_env: &str) -> Result<Self> {
+        let root = required_dir(root_env)?;
+        if root.join("manual-reference").exists() {
+            return Err(anyhow!(
+                "manual-reference must remain absent while expression predictions are frozen"
+            ));
+        }
+        Self::load(root, output_env, None)
+    }
+
+    fn load(root: PathBuf, output_env: &str, manual_dir: Option<&Path>) -> Result<Self> {
+        let source_dir = required_child_dir(&root, "source")?;
         let ai_run = ai_run_name()?;
         let ai_dir = required_child_dir(&root, &ai_run)?;
         let output_path = PathBuf::from(required_value(output_env)?);
@@ -41,30 +55,39 @@ impl PairedDataset {
                 "paired dataset source contains no supported images"
             ));
         }
-        ensure_same_image_names(&source_names, &manual_dir, "manual-reference")?;
+        if let Some(manual_dir) = manual_dir {
+            ensure_same_image_names(&source_names, manual_dir, "manual-reference")?;
+        }
         ensure_same_image_names(&source_names, &ai_dir, &ai_run)?;
         ensure_source_has_no_sidecars(&source_dir)?;
 
         let mut items = BTreeMap::new();
         for file_name in source_names {
             let source_path = source_dir.join(&file_name);
-            let manual_image = manual_dir.join(&file_name);
             let ai_image = ai_dir.join(&file_name);
             let source_bytes = fs::read(&source_path)?;
-            if source_bytes != fs::read(&manual_image)? || source_bytes != fs::read(&ai_image)? {
+            if source_bytes != fs::read(&ai_image)? {
                 return Err(anyhow!("paired dataset image bytes differ for {file_name}"));
             }
 
-            let manual = read_rating(&manual_dir.join(format!("{file_name}.rrdata")), true)?
-                .ok_or_else(|| anyhow!("manual sidecar is missing for {file_name}"))?;
-            if manual.source.as_deref() != Some("manual")
-                && !(manual.rating == 0 && manual.source.is_none())
-            {
-                return Err(anyhow!(
-                    "manual label source is invalid for {file_name}: {:?}",
-                    manual.source
-                ));
-            }
+            let (manual_rating, manual_source) = if let Some(manual_dir) = manual_dir {
+                if source_bytes != fs::read(manual_dir.join(&file_name))? {
+                    return Err(anyhow!("paired dataset image bytes differ for {file_name}"));
+                }
+                let manual = read_rating(&manual_dir.join(format!("{file_name}.rrdata")), true)?
+                    .ok_or_else(|| anyhow!("manual sidecar is missing for {file_name}"))?;
+                if manual.source.as_deref() != Some("manual")
+                    && !(manual.rating == 0 && manual.source.is_none())
+                {
+                    return Err(anyhow!(
+                        "manual label source is invalid for {file_name}: {:?}",
+                        manual.source
+                    ));
+                }
+                (manual.rating, manual.source)
+            } else {
+                (0, None)
+            };
             let saved_ai = read_rating(&ai_dir.join(format!("{file_name}.rrdata")), false)?;
             if saved_ai
                 .as_ref()
@@ -79,8 +102,8 @@ impl PairedDataset {
                     file_name,
                     source_path,
                     image_sha256: hex::encode(Sha256::digest(&source_bytes)),
-                    manual_rating: manual.rating,
-                    manual_source: manual.source,
+                    manual_rating,
+                    manual_source,
                     saved_ai_rating: saved_ai.map(|rating| rating.rating),
                 },
             );

@@ -239,7 +239,7 @@ fn ensure_snapshot_unchanged(frozen: &BlindSnapshot, current: &BlindSnapshot) ->
     Ok(())
 }
 
-fn normalize_digest(value: &str) -> Result<String> {
+pub(super) fn normalize_digest(value: &str) -> Result<String> {
     let value = value.trim().to_ascii_lowercase();
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(anyhow!("blind snapshot SHA-256 must contain 64 hex digits"));
@@ -247,7 +247,7 @@ fn normalize_digest(value: &str) -> Result<String> {
     Ok(value)
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 

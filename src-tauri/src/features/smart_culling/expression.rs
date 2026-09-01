@@ -1,24 +1,31 @@
-//! Expression *technical-state* evidence for burst-photo culling.
+//! Expression evidence for burst-photo culling.
 //!
 //! This module deliberately does not infer an emotion and does not assign a
-//! rating. A single frame only produces a read-only descriptor. A stable or
-//! transitional decision requires chronological descriptors for the same
-//! tracked subject in one similar-shot group.
+//! rating. A single frame produces a read-only descriptor and may enter the
+//! conservative quality calibration. A stable or transitional technical state
+//! still requires chronological descriptors for the same tracked subject in
+//! one similar-shot group.
 
 mod sequence;
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+mod usability;
 
 use std::collections::BTreeMap;
 
+use super::types::FaceResult;
 pub(in crate::features::smart_culling) use sequence::{
     ExpressionSequenceAssessment, ExpressionTechnicalState, assess_sequence, assess_sequence_slots,
 };
-
-use super::types::FaceResult;
 
 pub(in crate::features::smart_culling) const EXPRESSION_DESCRIPTOR_VERSION: &str =
     "qraw-expression-descriptor-1.0";
 pub(in crate::features::smart_culling) const EXPRESSION_SEQUENCE_POLICY_VERSION: &str =
     "qraw-expression-sequence-policy-1.0";
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+pub(in crate::features::smart_culling) const EXPRESSION_QUALITY_REASON: &str =
+    "expression_single_frame_quality_hsemotion_fusion_calibration";
+pub(in crate::features::smart_culling) const EXPRESSION_QUALITY_GATE_ENABLED: bool =
+    cfg!(any(test, all(debug_assertions, target_os = "macos")));
 
 const MIN_RELIABLE_FACE_PRESENCE: f32 = 0.75;
 const MAX_RELIABLE_LANDMARK_ERROR: f32 = 0.18;
@@ -214,6 +221,7 @@ impl std::error::Error for ExpressionDescriptorError {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExpressionEvidence {
     pub state: &'static str,
+    pub quality_score: Option<f32>,
     pub confidence: f32,
     pub reason: &'static str,
 }
@@ -222,19 +230,18 @@ impl ExpressionEvidence {
     pub fn unavailable(reason: &'static str) -> Self {
         Self {
             state: "unknown",
+            quality_score: None,
             confidence: 0.0,
             reason,
         }
     }
 
+    #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
     pub(in crate::features::smart_culling) fn from_single_frame(
         descriptor: &ExpressionDescriptor,
+        model_outputs: &super::expression_quality_poc::ExpressionQualityModelOutputs,
     ) -> Self {
-        if descriptor.is_reliable() {
-            Self::unavailable("expression_requires_sequence_context")
-        } else {
-            Self::unavailable("expression_frame_evidence_unreliable")
-        }
+        usability::assess_single_frame(descriptor, model_outputs)
     }
 
     pub(in crate::features::smart_culling) fn from_sequence(
@@ -242,6 +249,7 @@ impl ExpressionEvidence {
     ) -> Self {
         Self {
             state: assessment.state().as_str(),
+            quality_score: None,
             confidence: assessment.confidence(),
             reason: assessment.reason(),
         }
@@ -266,7 +274,9 @@ pub(in crate::features::smart_culling) fn apply_same_subject_sequence(
 
     for (frame, assessment) in frames.iter_mut().zip(&assessments) {
         if let Some(face) = frame.as_deref_mut() {
-            face.apply_expression_sequence_assessment(assessment);
+            if face.expression_score.is_none() {
+                face.apply_expression_sequence_assessment(assessment);
+            }
         }
     }
 }
@@ -317,6 +327,7 @@ mod tests {
             right_eye: EyeResult::unavailable("test", 0, None),
             eye_disposition: EyeDisposition::Unknown,
             expression_state: "unknown".to_string(),
+            expression_score: None,
             expression_confidence: 0.0,
             expression_reason: "expression_requires_sequence_context".to_string(),
             expression_descriptor,
@@ -333,6 +344,7 @@ mod tests {
         let evidence = ExpressionEvidence::unavailable("expression_model_unvalidated");
 
         assert_eq!(evidence.state, "unknown");
+        assert_eq!(evidence.quality_score, None);
         assert_eq!(evidence.confidence, 0.0);
         assert_eq!(evidence.reason, "expression_model_unvalidated");
     }
@@ -393,11 +405,17 @@ mod tests {
     }
 
     #[test]
-    fn one_reliable_frame_still_cannot_decide_expression_state() {
-        let evidence = ExpressionEvidence::from_single_frame(&descriptor(&scores()));
+    fn one_reliable_frame_emits_a_calibrated_quality_score() {
+        let model_outputs = super::super::expression_quality_poc::ExpressionQualityModelOutputs {
+            mtl: [0.0; 10],
+            vgaf: [0.0; 8],
+        };
+        let evidence =
+            ExpressionEvidence::from_single_frame(&descriptor(&scores()), &model_outputs);
 
-        assert_eq!(evidence.state, "unknown");
-        assert_eq!(evidence.reason, "expression_requires_sequence_context");
+        assert_eq!(evidence.state, "scored");
+        assert!(evidence.quality_score.is_some());
+        assert_eq!(evidence.reason, EXPRESSION_QUALITY_REASON);
     }
 
     #[test]
@@ -445,5 +463,35 @@ mod tests {
         assert_eq!(only.expression_state, "unknown");
         assert_eq!(only.expression_confidence, 0.0);
         assert_eq!(only.expression_reason, "expression_sequence_too_short");
+    }
+
+    #[test]
+    fn sequence_motion_state_cannot_overwrite_single_frame_quality_scores() {
+        let baseline = descriptor(&scores());
+        let mut first = face(Some(baseline.clone()));
+        let mut middle = face(Some(baseline.clone()));
+        let mut last = face(Some(baseline));
+        first.expression_state = "scored".to_string();
+        first.expression_score = Some(0.9);
+        first.expression_confidence = 0.4;
+        first.expression_reason = EXPRESSION_QUALITY_REASON.to_string();
+        for face in [&mut middle, &mut last] {
+            face.expression_state = "scored".to_string();
+            face.expression_score = Some(0.1);
+            face.expression_confidence = 0.4;
+            face.expression_reason = EXPRESSION_QUALITY_REASON.to_string();
+        }
+
+        apply_same_subject_sequence(&mut [Some(&mut first), Some(&mut middle), Some(&mut last)]);
+
+        assert_eq!(first.expression_state, "scored");
+        assert_eq!(first.expression_score, Some(0.9));
+        assert_eq!(first.expression_reason, EXPRESSION_QUALITY_REASON);
+        assert!(
+            [&middle, &last]
+                .into_iter()
+                .all(|face| face.expression_state == "scored" && face.expression_score == Some(0.1))
+        );
+        assert_eq!(middle.expression_reason, EXPRESSION_QUALITY_REASON);
     }
 }

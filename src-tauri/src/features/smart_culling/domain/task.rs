@@ -20,11 +20,15 @@ impl TaskState {
     pub(crate) fn can_transition_to(self, next: Self) -> bool {
         use TaskState::*;
 
+        if self == next {
+            return true;
+        }
         matches!(
             (self, next),
             (Idle, Preflighting)
                 | (Preflighting, Configuring | Unsupported | Failed)
                 | (Configuring, Indexing | Abandoning)
+                | (Indexing, Configuring)
                 | (Indexing, Rendering | Cancelling | Failed)
                 | (Rendering, Analyzing | Cancelling | Failed)
                 | (Analyzing, Organizing | Cancelling | Failed)
@@ -60,5 +64,11 @@ mod tests {
         assert!(TaskState::ReadyForReview.can_transition_to(TaskState::Abandoning));
         assert!(TaskState::Abandoning.can_transition_to(TaskState::Idle));
         assert!(!TaskState::Abandoning.can_transition_to(TaskState::Confirming));
+    }
+
+    #[test]
+    fn repeated_progress_and_start_failure_recovery_are_valid() {
+        assert!(TaskState::Analyzing.can_transition_to(TaskState::Analyzing));
+        assert!(TaskState::Indexing.can_transition_to(TaskState::Configuring));
     }
 }

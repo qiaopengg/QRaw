@@ -1,7 +1,9 @@
+use super::expression::EXPRESSION_QUALITY_GATE_ENABLED;
 pub(crate) use super::mode_evidence::normalize_focus;
 use super::mode_evidence::{
-    LEGACY_CLARITY_CONFIDENCE_CAP, adapt_mode_evidence, clarity_evidence, face_area,
-    has_weak_person_evidence, important_faces, weakest_eye_disposition,
+    ExpressionAssessment, LEGACY_CLARITY_CONFIDENCE_CAP, adapt_mode_evidence, clarity_evidence,
+    expression_assessment, face_area, has_weak_person_evidence, important_faces,
+    weakest_eye_disposition,
 };
 use super::mode_policy::{
     ClarityGateTarget, ModePolicy, ModeStrategy, policy_for, resolve_strategy,
@@ -60,6 +62,26 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
         return one_star_evaluation(
             policy.resolved_mode(),
             clarity_gate_reason(strategy, policy.clarity_gate),
+        );
+    }
+
+    // Preserve the independently frozen eye contract before the expression
+    // calibration gate. This is a hard defect decision, not combined scoring.
+    if policy.closed_eye_hard_cap
+        && weakest_eye_disposition(&subjects) == Some(EyeDisposition::Unusable)
+    {
+        return one_star_evaluation(policy.resolved_mode(), closed_eye_reason(strategy));
+    }
+
+    // Expression must be assessed before weighted combination, but a low
+    // expression score is valid evidence rather than a reason to skip rating.
+    if EXPRESSION_QUALITY_GATE_ENABLED
+        && policy.weights.expression > f64::EPSILON
+        && expression_assessment(&subjects) == ExpressionAssessment::Unknown
+    {
+        return manual_evaluation(
+            policy.resolved_mode(),
+            expression_unresolved_reason(strategy),
         );
     }
 
@@ -234,6 +256,24 @@ fn clarity_gate_reason(strategy: ModeStrategy, target: ClarityGateTarget) -> &'s
     }
 }
 
+fn closed_eye_reason(strategy: ModeStrategy) -> &'static str {
+    if strategy == ModeStrategy::Portrait {
+        "portrait_closed_eyes"
+    } else {
+        "group_closed_eyes"
+    }
+}
+
+fn expression_unresolved_reason(strategy: ModeStrategy) -> &'static str {
+    match strategy {
+        ModeStrategy::Portrait => "portrait_expression_unresolved",
+        ModeStrategy::GroupWithKeyPeople => "group_expression_unresolved",
+        ModeStrategy::Environment => "environment_expression_unresolved",
+        ModeStrategy::AutoPeople => "auto_expression_unresolved",
+        _ => "expression_unresolved",
+    }
+}
+
 fn strategy_reason(
     strategy: ModeStrategy,
     eye_disposition: Option<EyeDisposition>,
@@ -246,11 +286,7 @@ fn strategy_reason(
         ModeStrategy::Portrait | ModeStrategy::GroupWithKeyPeople
     ) {
         if eye_disposition == Some(EyeDisposition::Unusable) {
-            return if strategy == ModeStrategy::Portrait {
-                "portrait_closed_eyes"
-            } else {
-                "group_closed_eyes"
-            };
+            return closed_eye_reason(strategy);
         }
         if eye_disposition == Some(EyeDisposition::DeliberatePoseCandidate) {
             return if strategy == ModeStrategy::Portrait {

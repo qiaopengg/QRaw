@@ -24,7 +24,10 @@ pub enum SmartCullingRequest {
     UpdateReview {
         changes: Vec<ReviewChange>,
     },
-    Confirm,
+    Confirm {
+        #[serde(default)]
+        calibration_acknowledged: bool,
+    },
     RetryFailures,
     ReconcileManual {
         paths: Vec<String>,
@@ -45,7 +48,7 @@ impl SmartCullingRequest {
             Self::Start { .. } => "start",
             Self::Cancel => "cancel",
             Self::UpdateReview { .. } => "update_review",
-            Self::Confirm => "confirm",
+            Self::Confirm { .. } => "confirm",
             Self::RetryFailures => "retry_failures",
             Self::ReconcileManual { .. } => "reconcile_manual",
             Self::SetLock { .. } => "set_lock",
@@ -134,6 +137,29 @@ pub struct LockChangeSummary {
     pub failures: Vec<FailureItem>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CapabilityLevel {
+    #[default]
+    Unavailable,
+    ObservationOnly,
+    ManualOnly,
+    Conservative,
+    Calibration,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartCullingCapabilities {
+    pub eye_state: CapabilityLevel,
+    pub expression: CapabilityLevel,
+    pub person_clarity: CapabilityLevel,
+    pub optical_quality: CapabilityLevel,
+    pub composition: CapabilityLevel,
+    pub key_person_identity: CapabilityLevel,
+    pub release_ready: bool,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicePreflight {
@@ -142,6 +168,8 @@ pub struct DevicePreflight {
     pub platform: String,
     pub provider: String,
     pub model_version: String,
+    pub policy_version: String,
+    pub capabilities: SmartCullingCapabilities,
     pub reason: Option<String>,
 }
 
@@ -204,6 +232,7 @@ pub struct DetectedFaceDto {
     pub left_eye: Option<EyeEvidenceDto>,
     pub right_eye: Option<EyeEvidenceDto>,
     pub expression_state: Option<String>,
+    pub expression_score: Option<f32>,
     pub expression_confidence: Option<f32>,
     pub expression_reason: Option<String>,
     pub sharpness_metric: Option<f64>,
@@ -257,7 +286,9 @@ pub struct WriteSummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{SmartCullingCommandError, SmartCullingRequest};
+    use super::{
+        CapabilityLevel, SmartCullingCapabilities, SmartCullingCommandError, SmartCullingRequest,
+    };
 
     #[test]
     fn gateway_accepts_frontend_camel_case_fields() {
@@ -273,6 +304,32 @@ mod tests {
     }
 
     #[test]
+    fn confirm_acknowledgement_is_explicit_and_defaults_to_false() {
+        let legacy = serde_json::from_value::<SmartCullingRequest>(serde_json::json!({
+            "action": "confirm"
+        }))
+        .unwrap();
+        let acknowledged = serde_json::from_value::<SmartCullingRequest>(serde_json::json!({
+            "action": "confirm",
+            "calibrationAcknowledged": true
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            legacy,
+            SmartCullingRequest::Confirm {
+                calibration_acknowledged: false
+            }
+        ));
+        assert!(matches!(
+            acknowledged,
+            SmartCullingRequest::Confirm {
+                calibration_acknowledged: true
+            }
+        ));
+    }
+
+    #[test]
     fn command_error_has_a_stable_frontend_envelope() {
         let value = serde_json::to_value(SmartCullingCommandError::new(
             "inspect_failed",
@@ -282,5 +339,27 @@ mod tests {
 
         assert_eq!(value["code"], "inspect_failed");
         assert_eq!(value["detail"], "folder is unavailable");
+    }
+
+    #[test]
+    fn capability_levels_use_stable_frontend_values() {
+        let value = serde_json::to_value(SmartCullingCapabilities {
+            eye_state: CapabilityLevel::Calibration,
+            expression: CapabilityLevel::ManualOnly,
+            person_clarity: CapabilityLevel::Conservative,
+            optical_quality: CapabilityLevel::ObservationOnly,
+            composition: CapabilityLevel::ObservationOnly,
+            key_person_identity: CapabilityLevel::Unavailable,
+            release_ready: false,
+        })
+        .unwrap();
+
+        assert_eq!(value["eyeState"], "calibration");
+        assert_eq!(value["expression"], "manualOnly");
+        assert_eq!(value["personClarity"], "conservative");
+        assert_eq!(value["opticalQuality"], "observationOnly");
+        assert_eq!(value["composition"], "observationOnly");
+        assert_eq!(value["keyPersonIdentity"], "unavailable");
+        assert_eq!(value["releaseReady"], false);
     }
 }

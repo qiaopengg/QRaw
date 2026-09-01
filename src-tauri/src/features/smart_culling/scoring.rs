@@ -12,11 +12,12 @@ use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.0-macos-calibration";
+pub(crate) const POLICY_VERSION: &str =
+    "qraw-smart-culling-policy-4.9-macos-expression-incremental-calibration";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.0-safe-evidence";
+pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.2-safe-evidence";
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.0+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.1+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0+qraw-expression-quality-hsemotion-fusion-0.5+apple-vision-face-capture-quality-calibration-0.1+apple-vision-aesthetics-observation-0.1";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
 pub(crate) const MODEL_VERSION: &str =
     "yunet-2023mar+ocec-loaded-unscored+sface-2021dec+eye-expression-unavailable-v1";
@@ -34,6 +35,8 @@ pub(crate) struct AnalysisCandidate {
     pub width: u32,
     pub height: u32,
     pub faces: Vec<FaceResult>,
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    pub vision_quality: super::vision_quality_poc::VisionQualitySignals,
     pub key_person_evidence: Vec<KeyPersonEvidence>,
 }
 
@@ -190,6 +193,7 @@ pub(crate) fn organize_results(
                             left_eye: Some(eye_dto(&face.left_eye)),
                             right_eye: Some(eye_dto(&face.right_eye)),
                             expression_state: Some(face.expression_state.clone()),
+                            expression_score: face.expression_score,
                             expression_confidence: Some(face.expression_confidence),
                             expression_reason: Some(face.expression_reason.clone()),
                             sharpness_metric: Some(face.sharpness_metric),
@@ -395,6 +399,7 @@ mod tests {
             },
             eye_disposition: super::super::types::EyeDisposition::Open,
             expression_state: "unknown".to_string(),
+            expression_score: None,
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
             expression_descriptor: None,
@@ -408,9 +413,19 @@ mod tests {
 
     #[test]
     fn result_versions_identify_the_seven_strategy_contract() {
-        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.0-"));
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.9-"));
+        #[cfg(not(all(debug_assertions, target_os = "macos")))]
+        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.2-"));
         assert!(MODEL_VERSION.contains("yunet-2023mar"));
         assert!(MODEL_VERSION.contains("sface-2021dec"));
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        {
+            assert!(MODEL_VERSION.contains("qraw-eye-policy-1.1"));
+            assert!(MODEL_VERSION.contains("qraw-expression-quality-hsemotion-fusion-0.5"));
+            assert!(MODEL_VERSION.contains("apple-vision-face-capture-quality-calibration-0.1"));
+            assert!(MODEL_VERSION.contains("apple-vision-aesthetics-observation-0.1"));
+        }
     }
 
     fn candidate(path: &str, capture_time_millis: i64, sequence_number: u64) -> AnalysisCandidate {
@@ -428,6 +443,8 @@ mod tests {
             width: 100,
             height: 100,
             faces: Vec::new(),
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            vision_quality: Default::default(),
             key_person_evidence: Vec::new(),
         }
     }

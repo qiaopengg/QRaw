@@ -69,6 +69,11 @@ const zhReasons: Record<string, string> = {
   environment_expression_transition: '环境人像：非眼面部动作疑似处于过渡瞬间',
   auto_expression_transition: '自动模式：人物的非眼面部动作疑似处于过渡瞬间',
   expression_transition: '非眼面部动作疑似处于过渡瞬间，建议人工确认',
+  portrait_expression_unresolved: '人像模式：无法可靠完成表情质量评估，保持 0 星并请人工确认',
+  group_expression_unresolved: '群像模式：至少一名指定人物无法可靠完成表情质量评估，保持 0 星并请人工确认',
+  environment_expression_unresolved: '环境人像：无法可靠完成人物表情质量评估，保持 0 星并请人工确认',
+  auto_expression_unresolved: '自动模式：无法可靠完成人物表情质量评估，保持 0 星并请人工确认',
+  expression_unresolved: '无法可靠完成人物表情质量评估，保持 0 星并请人工确认',
   portrait_evidence_interval_review: '人像模式：证据不足产生的保守区间跨越星级，请人工确认',
   group_key_evidence_interval_review: '群像模式：指定人物证据区间跨越星级，请人工确认',
   group_scene_evidence_interval_review: '无指定人物群像：光学与构图证据区间跨越星级，请人工确认',
@@ -144,6 +149,14 @@ const enReasons: Record<string, string> = {
   environment_expression_transition: 'Environmental portrait: non-eye facial motion may be in a transitional instant',
   auto_expression_transition: "Auto: a person's non-eye facial motion may be in a transitional instant",
   expression_transition: 'Non-eye facial motion may be in a transitional instant; manual review recommended',
+  portrait_expression_unresolved:
+    'Portrait: expression quality cannot be assessed reliably; kept at 0 stars for manual review',
+  group_expression_unresolved:
+    'Group: expression quality cannot be assessed reliably for every selected person; kept at 0 stars for manual review',
+  environment_expression_unresolved:
+    'Environmental portrait: expression quality cannot be assessed reliably; kept at 0 stars for manual review',
+  auto_expression_unresolved: 'Auto: expression quality cannot be assessed reliably; kept at 0 stars for manual review',
+  expression_unresolved: 'Expression quality cannot be assessed reliably; kept at 0 stars for manual review',
   portrait_evidence_interval_review:
     'Portrait: missing evidence makes the conservative interval cross a rating boundary; review manually',
   group_key_evidence_interval_review: 'Group: selected-person evidence crosses a rating boundary; review manually',
@@ -210,6 +223,9 @@ const zh = {
   title: '智能选图',
   setupTitle: '设置本次筛选',
   setupDescription: '仅分析当前文件夹中的照片，不进入子文件夹。确认前不会写入任何星级或标签。',
+  calibrationBuildTitle: '当前为校准与人工辅助版本',
+  calibrationBuildHint:
+    '眼态、表情、光学、构图和关键人物尚未全部通过发布准入。请逐张复核 AI 结果，不要将本版本用于无人值守批量确认。',
   previousTaskInterrupted: '上次智能选图未正常完成',
   previousTaskInterruptedHint: '未确认的临时结果已安全作废，照片和人工评分均未被修改。',
   taskFolder: '本次任务文件夹',
@@ -271,6 +287,7 @@ const zh = {
   saveAsManual: '保存为人工结果',
   confirmTitle: '确认应用智能选图结果',
   confirmBody: '系统将在再次检查文件状态后写入对应 .rrdata。',
+  calibrationConfirmAcknowledgement: '我已逐张检查本次 AI 星级，并确认应用校准版本的结果。',
   applyCount: '将应用结果',
   manualCount: '人工修改并保护',
   humanReviewNotWritten: '待人工确认，不写入',
@@ -452,6 +469,7 @@ const zh = {
   gpuInferenceUnavailable: '离线模型无法使用已验证的 GPU 加速路径',
   bundledModelsMissing: '安装包中的离线模型缺失',
   bundledModelsInvalid: '安装包中的离线模型校验失败',
+  calibrationModelsMissing: '校准模型目录缺失；请安装受审模型或配置绝对路径',
   deviceCheck: '设备检测',
   bundledModels: '本地模型',
   bundledModelsReady: '安装包内模型完整且校验通过',
@@ -470,6 +488,9 @@ const en: Record<keyof typeof zh, string> = {
   setupTitle: 'Set up this cull',
   setupDescription:
     'Analyze photos directly in this folder without entering subfolders. Nothing is written before confirmation.',
+  calibrationBuildTitle: 'Calibration and review-assist build',
+  calibrationBuildHint:
+    'Eye, expression, optical, composition, and key-person capabilities have not all passed release gates. Review every AI result; do not use this build for unattended bulk confirmation.',
   previousTaskInterrupted: 'The previous smart-culling task did not finish normally',
   previousTaskInterruptedHint:
     'Its unconfirmed temporary results were safely discarded; photos and manual ratings were unchanged.',
@@ -533,6 +554,8 @@ const en: Record<keyof typeof zh, string> = {
   saveAsManual: 'Save as manual result',
   confirmTitle: 'Confirm smart-culling results',
   confirmBody: 'File state is checked again before matching .rrdata files are written.',
+  calibrationConfirmAcknowledgement:
+    'I reviewed every AI rating in this task and choose to apply the calibration-build results.',
   applyCount: 'Results to apply',
   manualCount: 'Manual edits protected',
   humanReviewNotWritten: 'Needs human review; not written',
@@ -720,6 +743,7 @@ const en: Record<keyof typeof zh, string> = {
   gpuInferenceUnavailable: 'The offline models cannot use a validated GPU-accelerated path',
   bundledModelsMissing: 'Bundled offline models are missing',
   bundledModelsInvalid: 'Bundled offline model verification failed',
+  calibrationModelsMissing: 'Calibration models are missing; install the audited assets or configure an absolute path',
   deviceCheck: 'Device check',
   bundledModels: 'Local models',
   bundledModelsReady: 'Bundled models are present and verified',

@@ -159,6 +159,7 @@ mod tests {
             right_eye: eye("open"),
             eye_disposition: EyeDisposition::Open,
             expression_state: "unknown".to_string(),
+            expression_score: None,
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
             expression_descriptor: None,
@@ -186,6 +187,7 @@ mod tests {
             right_eye: eye("open"),
             eye_disposition: EyeDisposition::Open,
             expression_state: "unknown".to_string(),
+            expression_score: None,
             expression_confidence: 0.0,
             expression_reason: "model_unavailable".to_string(),
             expression_descriptor: None,
@@ -214,17 +216,18 @@ mod tests {
     }
 
     #[test]
-    fn stable_expression_outranks_a_transition_when_eyes_match() {
-        let mut stable = FaceResult {
+    fn scored_expression_outranks_unscored_technical_states_when_eyes_match() {
+        let mut scored = FaceResult {
             bbox: [0.0; 4],
             landmarks: [(0.0, 0.0); 5],
             detection_score: 1.0,
             left_eye: eye("open"),
             right_eye: eye("open"),
             eye_disposition: EyeDisposition::Open,
-            expression_state: "stable".to_string(),
+            expression_state: "scored".to_string(),
+            expression_score: Some(1.0),
             expression_confidence: 0.9,
-            expression_reason: "expression_sequence_locally_stable".to_string(),
+            expression_reason: "expression_single_frame_usable_test".to_string(),
             expression_descriptor: None,
             sharpness_metric: 100.0,
             sharpness_confidence: 1.0,
@@ -232,19 +235,21 @@ mod tests {
             exposure_confidence: 1.0,
             identity_embedding: None,
         };
-        let mut transitional = stable.clone();
+        let mut transitional = scored.clone();
         transitional.expression_state = "transitional".to_string();
+        transitional.expression_score = None;
         transitional.expression_reason = "expression_sequence_isolated_transition".to_string();
 
-        let stable_score = face_performance(&stable, &optical()).score;
+        let scored_score = face_performance(&scored, &optical()).score;
         let transitional_score = face_performance(&transitional, &optical()).score;
-        assert!(stable_score > transitional_score);
+        assert!(scored_score > transitional_score);
 
-        stable.expression_state = "unknown".to_string();
-        stable.expression_confidence = 0.0;
-        let unknown_score = face_performance(&stable, &optical()).score;
-        assert!(transitional_score < unknown_score);
-        assert!(unknown_score < stable_score);
+        scored.expression_state = "unknown".to_string();
+        scored.expression_score = None;
+        scored.expression_confidence = 0.0;
+        let unknown_score = face_performance(&scored, &optical()).score;
+        assert!((transitional_score - unknown_score).abs() < f64::EPSILON);
+        assert!(unknown_score < scored_score);
     }
 
     #[test]
@@ -257,6 +262,7 @@ mod tests {
             right_eye: eye("open"),
             eye_disposition: EyeDisposition::Open,
             expression_state: "stable".to_string(),
+            expression_score: None,
             expression_confidence: 0.9,
             expression_reason: "expression_sequence_locally_stable".to_string(),
             expression_descriptor: None,
@@ -280,6 +286,8 @@ mod tests {
             width: 100,
             height: 100,
             faces: vec![face],
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            vision_quality: Default::default(),
             key_person_evidence: vec![KeyPersonEvidence {
                 priority: 1,
                 face_index: Some(0),

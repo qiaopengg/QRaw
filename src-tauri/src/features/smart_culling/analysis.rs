@@ -95,22 +95,8 @@ pub fn analyze_image_quality(
 ) -> Result<AnalyzedImage> {
     ensure_not_cancelled(cancellation)?;
     let (width, height) = img.dimensions();
-    let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
-    let gray_thumbnail = thumbnail.to_luma8();
-
-    let sharpness_metric = calculate_laplacian_variance(&gray_thumbnail);
-    let exposure_metric = calculate_exposure_metric(&gray_thumbnail);
-
-    let (thumb_w, thumb_h) = gray_thumbnail.dimensions();
-    let center_crop = imageops::crop_imm(
-        &gray_thumbnail,
-        thumb_w / 4,
-        thumb_h / 4,
-        thumb_w / 2,
-        thumb_h / 2,
-    )
-    .to_image();
-    let center_focus_metric = calculate_laplacian_variance(&center_crop);
+    let (sharpness_metric, center_focus_metric, exposure_metric) =
+        calculate_global_quality_metrics(img);
 
     ensure_not_cancelled(cancellation)?;
     let faces = if detect_faces {
@@ -132,6 +118,50 @@ pub fn analyze_image_quality(
         height,
         faces,
     })
+}
+
+/// Replaces only blur-sensitive metrics with measurements from the unchanged
+/// source pixels. The rendered image remains authoritative for geometry, face
+/// detection, eye state, expression and exposure. This prevents sharpening or
+/// resampling in the host renderer from hiding capture blur without trying to
+/// map face boxes across crops, rotations or other geometry changes.
+pub(crate) fn apply_source_clarity_metrics(
+    source: &DynamicImage,
+    analyzed: &mut AnalyzedImage,
+) -> bool {
+    if source.dimensions() != (analyzed.width, analyzed.height) {
+        return false;
+    }
+
+    let (sharpness_metric, center_focus_metric, _) = calculate_global_quality_metrics(source);
+    analyzed.sharpness_metric = sharpness_metric;
+    analyzed.center_focus_metric = center_focus_metric;
+    for face in &mut analyzed.faces {
+        if let Some(crop) = crop_pixel_bbox(source, face.bbox) {
+            face.sharpness_metric = calculate_laplacian_variance(&crop.to_luma8());
+        }
+    }
+    true
+}
+
+fn calculate_global_quality_metrics(img: &DynamicImage) -> (f64, f64, f64) {
+    let thumbnail = img.thumbnail(ANALYSIS_DIM, ANALYSIS_DIM);
+    let gray_thumbnail = thumbnail.to_luma8();
+
+    let sharpness_metric = calculate_laplacian_variance(&gray_thumbnail);
+    let exposure_metric = calculate_exposure_metric(&gray_thumbnail);
+
+    let (thumb_w, thumb_h) = gray_thumbnail.dimensions();
+    let center_crop = imageops::crop_imm(
+        &gray_thumbnail,
+        thumb_w / 4,
+        thumb_h / 4,
+        thumb_w / 2,
+        thumb_h / 2,
+    )
+    .to_image();
+    let center_focus_metric = calculate_laplacian_variance(&center_crop);
+    (sharpness_metric, center_focus_metric, exposure_metric)
 }
 
 fn detect_faces_in_image(
@@ -226,6 +256,7 @@ fn detect_faces_in_image(
                 right_eye: right_eye_result,
                 eye_disposition,
                 expression_state: expression.state.to_string(),
+                expression_score: expression.quality_score,
                 expression_confidence: expression.confidence,
                 expression_reason: expression.reason.to_string(),
                 expression_descriptor,
@@ -263,6 +294,35 @@ mod tests {
     use image::Luma;
 
     use super::*;
+    use crate::features::smart_culling::types::{EyeDisposition, EyeResult};
+
+    fn analyzed_with_face(width: u32, height: u32) -> AnalyzedImage {
+        AnalyzedImage {
+            sharpness_metric: 0.0,
+            center_focus_metric: 0.0,
+            exposure_metric: 0.73,
+            width,
+            height,
+            faces: vec![FaceResult {
+                bbox: [8.0, 8.0, 32.0, 32.0],
+                landmarks: [(0.0, 0.0); 5],
+                detection_score: 0.9,
+                left_eye: EyeResult::unavailable("test", 0, None),
+                right_eye: EyeResult::unavailable("test", 0, None),
+                eye_disposition: EyeDisposition::Unknown,
+                expression_state: "unknown".to_string(),
+                expression_score: None,
+                expression_confidence: 0.0,
+                expression_reason: "test".to_string(),
+                expression_descriptor: None,
+                sharpness_metric: 0.0,
+                sharpness_confidence: 0.9,
+                exposure_metric: 0.61,
+                exposure_confidence: 0.9,
+                identity_embedding: None,
+            }],
+        }
+    }
 
     #[test]
     fn laplacian_variance_is_zero_for_a_flat_image() {
@@ -292,5 +352,36 @@ mod tests {
         let result = analyze_image_quality(&image, false, false, None, Some(&cancelled));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn unchanged_source_geometry_replaces_only_clarity_metrics() {
+        let source = DynamicImage::ImageLuma8(GrayImage::from_fn(64, 64, |x, y| {
+            Luma([if (x + y) % 2 == 0 { 0 } else { 255 }])
+        }));
+        let mut analyzed = analyzed_with_face(64, 64);
+
+        assert!(apply_source_clarity_metrics(&source, &mut analyzed));
+        assert!(analyzed.sharpness_metric > 0.0);
+        assert!(analyzed.center_focus_metric > 0.0);
+        assert!(analyzed.faces[0].sharpness_metric > 0.0);
+        assert_eq!(analyzed.exposure_metric, 0.73);
+        assert_eq!(analyzed.faces[0].exposure_metric, 0.61);
+        assert_eq!(analyzed.faces[0].expression_reason, "test");
+        assert_eq!(analyzed.faces[0].eye_disposition, EyeDisposition::Unknown);
+    }
+
+    #[test]
+    fn transformed_geometry_keeps_rendered_clarity_metrics() {
+        let source = DynamicImage::new_luma8(32, 64);
+        let mut analyzed = analyzed_with_face(64, 64);
+        analyzed.sharpness_metric = 12.0;
+        analyzed.center_focus_metric = 13.0;
+        analyzed.faces[0].sharpness_metric = 14.0;
+
+        assert!(!apply_source_clarity_metrics(&source, &mut analyzed));
+        assert_eq!(analyzed.sharpness_metric, 12.0);
+        assert_eq!(analyzed.center_focus_metric, 13.0);
+        assert_eq!(analyzed.faces[0].sharpness_metric, 14.0);
     }
 }

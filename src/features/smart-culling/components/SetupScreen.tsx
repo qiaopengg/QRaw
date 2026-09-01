@@ -83,6 +83,16 @@ export function SetupScreen({
               </div>
             </div>
           ) : null}
+          {!snapshot.device.capabilities.releaseReady ? (
+            <div className="sc-recovery-notice" role="status">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>{tx('calibrationBuildTitle')}</strong>
+                <p>{tx('calibrationBuildHint')}</p>
+                <small>{snapshot.device.policyVersion}</small>
+              </div>
+            </div>
+          ) : null}
           {ignoredVirtualCopies > 0 ? (
             <div className="sc-virtual-copy-notice" role="status">
               <CopySlash size={17} />

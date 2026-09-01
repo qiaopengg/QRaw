@@ -166,8 +166,11 @@ export function UnsupportedScreen({ snapshot, onExit }: { snapshot: SmartCulling
       gpu_inference_unavailable: tx('gpuInferenceUnavailable'),
       bundled_models_missing: tx('bundledModelsMissing'),
       bundled_models_invalid: tx('bundledModelsInvalid'),
+      calibration_models_missing: tx('calibrationModelsMissing'),
     }[snapshot.device.reason ?? ''] ?? tx('gpuInferenceUnavailable');
-  const modelsReady = !['bundled_models_missing', 'bundled_models_invalid'].includes(snapshot.device.reason ?? '');
+  const modelsReady = !['bundled_models_missing', 'bundled_models_invalid', 'calibration_models_missing'].includes(
+    snapshot.device.reason ?? '',
+  );
   return (
     <div className="sc-page">
       <LifecycleChrome screen="unsupported" />
