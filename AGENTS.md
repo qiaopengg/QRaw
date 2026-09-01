@@ -3,6 +3,14 @@
 本项目二开必须严格非侵入：禁止直接修改上游 `CyberTimon/RapidRAW` 代码，所有功能仅可通过扩展、包装、配置化或独立模块方式接入。
 所有二开功能接入与重构必须同时遵守 `docs/feature-integration-guidelines.md`。
 
+智能选图人像表情联调任务开始前，必须依次完整阅读：
+
+1. `src-tauri/src/features/smart_culling/docs/PORTRAIT_RATING_STANDARD.md`
+2. `src-tauri/src/features/smart_culling/docs/EXPRESSION_CALIBRATION_WORKFLOW.md`
+3. `src-tauri/src/features/smart_culling/docs/EXPRESSION_CALIBRATION_COLLABORATION_PLAYBOOK.md`
+
+与用户协作标注、复核、盲测或恢复联调进度时，必须遵守第三份文档定义的“傻瓜式”指导与回答方式。
+
 # AGENTS.md
 
 ## 1. Core Principles
