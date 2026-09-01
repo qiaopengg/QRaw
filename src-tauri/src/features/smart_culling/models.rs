@@ -65,13 +65,6 @@ fn load_face_models_uncached(app_handle: &tauri::AppHandle) -> Result<Arc<SmartC
     load_face_models_from_resource_dir(&resource_dir)
 }
 
-#[cfg(test)]
-pub(super) fn load_face_models_for_test(
-    resource_dir: &Path,
-) -> Result<Arc<SmartCullingFaceModels>> {
-    load_face_models_from_resource_dir(resource_dir)
-}
-
 fn load_face_models_from_resource_dir(resource_dir: &Path) -> Result<Arc<SmartCullingFaceModels>> {
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
         return Err(anyhow!(
@@ -149,23 +142,6 @@ pub(super) fn verify_model(path: &Path, expected_sha256: &str) -> Result<()> {
 
 fn gpu_session(model_path: &PathBuf, dimension_override: Option<(&str, i64)>) -> Result<Session> {
     gpu_session_with_optimization(model_path, dimension_override, None)
-}
-
-#[cfg(test)]
-pub(super) fn load_yunet_for_test(resource_dir: &Path) -> Result<Mutex<Session>> {
-    let path = resource_dir.join(YUNET_MODEL_FILENAME);
-    verify_model(&path, YUNET_SHA256)?;
-    let session = gpu_session(&path, None)?;
-    validate_session_contract(
-        &session,
-        "input",
-        &[1, 3, 640, 640],
-        &[
-            "cls_8", "cls_16", "cls_32", "obj_8", "obj_16", "obj_32", "bbox_8", "bbox_16",
-            "bbox_32", "kps_8", "kps_16", "kps_32",
-        ],
-    )?;
-    Ok(Mutex::new(session))
 }
 
 pub(super) fn gpu_session_with_optimization(

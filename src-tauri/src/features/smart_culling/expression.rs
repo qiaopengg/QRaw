@@ -137,14 +137,6 @@ impl ExpressionDescriptor {
         self.tongue_out
     }
 
-    pub(in crate::features::smart_culling) const fn head_pitch_degrees(&self) -> Option<f32> {
-        self.head_pitch_degrees
-    }
-
-    pub(in crate::features::smart_culling) const fn head_yaw_degrees(&self) -> Option<f32> {
-        self.head_yaw_degrees
-    }
-
     pub(in crate::features::smart_culling) fn is_reliable(&self) -> bool {
         self.face_presence >= MIN_RELIABLE_FACE_PRESENCE
             && self

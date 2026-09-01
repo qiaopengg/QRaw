@@ -7,7 +7,7 @@ use image::DynamicImage;
 
 use super::super::expression::{ExpressionDescriptor, ExpressionDescriptorError};
 use super::super::face_models::DetectedFace;
-use super::eye_policy::{EyeMotionEvidence, EyeUsability, classify_eye, combine_eyes};
+use super::eye_policy::{EyeMotionEvidence, EyeUsability, classify_eye};
 use super::roi::FaceRoi;
 use super::{FaceMotionPocModels, run_blendshapes, run_face_mesh};
 
@@ -22,7 +22,6 @@ pub(super) struct FaceMotionEvidenceDump {
     pub landmark_consistency_error: Option<f32>,
     pub left_eye: EyeUsability,
     pub right_eye: EyeUsability,
-    pub overall_eye: EyeUsability,
     pub blendshapes: BTreeMap<&'static str, f32>,
 }
 
@@ -80,7 +79,6 @@ pub(super) fn extract_face_motion_evidence(
         landmark_consistency_error,
         left_eye,
         right_eye,
-        overall_eye: combine_eyes(left_eye, right_eye),
         blendshapes,
     })
 }
@@ -223,7 +221,6 @@ mod tests {
             landmark_consistency_error: Some(0.01),
             left_eye: EyeUsability::Open,
             right_eye: EyeUsability::Open,
-            overall_eye: EyeUsability::Open,
             blendshapes: super::super::BLENDSHAPE_NAMES
                 .into_iter()
                 .map(|name| (name, 0.0))

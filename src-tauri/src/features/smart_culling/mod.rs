@@ -1,7 +1,5 @@
 mod analysis;
 mod api;
-#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
-mod arniqa_poc;
 #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
 mod calibration_model_assets;
 mod coordinator;

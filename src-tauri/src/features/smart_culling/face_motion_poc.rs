@@ -9,14 +9,8 @@
 //! pinned model inputs or mutate the resulting eye assessment.
 
 mod decision;
-#[cfg(test)]
-mod eval;
 mod evidence;
-#[cfg(test)]
-mod expression_isolation_tests;
 mod eye_policy;
-#[cfg(test)]
-mod paired_eval;
 mod roi;
 
 use std::path::{Path, PathBuf};

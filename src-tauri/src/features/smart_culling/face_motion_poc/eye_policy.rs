@@ -14,16 +14,6 @@ pub(super) enum EyeUsability {
     Unknown,
 }
 
-impl EyeUsability {
-    pub(super) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Unusable => "unusable",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EyeMotionEvidence {
     pub aspect_ratio: Option<f32>,
@@ -55,7 +45,8 @@ pub(super) fn classify_eye(evidence: EyeMotionEvidence) -> EyeUsability {
     }
 }
 
-pub(super) fn combine_eyes(left: EyeUsability, right: EyeUsability) -> EyeUsability {
+#[cfg(test)]
+fn combine_eyes(left: EyeUsability, right: EyeUsability) -> EyeUsability {
     if left == EyeUsability::Unusable || right == EyeUsability::Unusable {
         EyeUsability::Unusable
     } else if left == EyeUsability::Open && right == EyeUsability::Open {

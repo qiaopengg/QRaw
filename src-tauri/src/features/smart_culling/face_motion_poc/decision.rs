@@ -172,7 +172,6 @@ mod tests {
             landmark_consistency_error: Some(0.0),
             left_eye: left,
             right_eye: right,
-            overall_eye: left,
             blendshapes: BTreeMap::from([("eyeBlinkLeft", 0.8), ("eyeBlinkRight", 0.8)]),
         }
     }
