@@ -65,6 +65,13 @@ fn load_face_models_uncached(app_handle: &tauri::AppHandle) -> Result<Arc<SmartC
     load_face_models_from_resource_dir(&resource_dir)
 }
 
+#[cfg(test)]
+pub(super) fn load_face_models_for_test(
+    resource_dir: &Path,
+) -> Result<Arc<SmartCullingFaceModels>> {
+    load_face_models_from_resource_dir(resource_dir)
+}
+
 fn load_face_models_from_resource_dir(resource_dir: &Path) -> Result<Arc<SmartCullingFaceModels>> {
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
         return Err(anyhow!(

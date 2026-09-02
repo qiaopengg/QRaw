@@ -8,6 +8,8 @@
 //! work may reuse the raw face-motion evidence, but it must not replace the
 //! pinned model inputs or mutate the resulting eye assessment.
 
+#[cfg(test)]
+mod calibration_export;
 mod decision;
 mod evidence;
 mod eye_policy;

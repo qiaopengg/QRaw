@@ -130,3 +130,18 @@ and all `eye*` coefficients byte-for-byte identical. The eye contract remains
 Before any Release enablement, QRaw still requires an independent real-camera
 blind task, Windows DirectML parity, performance/thermal measurement,
 photographer acceptance, and explicit model-weight redistribution clearance.
+
+## Five-level ordinal calibration candidate
+
+`train_ordinal.py` and `ordinal_model.py` provide an isolated, reproducible
+calibration CLI for the manual 1-to-5 expression-quality target. It reuses the
+same 18 HSE outputs and 38 non-eye Blendshape features, selects PCA dimension
+and L2 strength only inside the supplied training batch, and keeps the existing
+descriptor reliability gate separate from the five-level label.
+
+The first `0.1` candidate trained on batch 001 and diagnosed on already-revealed
+batch 002 reached 59/89 exact, 86/89 within one level, and three two-level
+errors. A post-hoc confidence gate could remove those errors only by reducing
+five-level coverage to 33/89, so no confidence threshold or production
+integration was accepted. The scripts and emitted constants are calibration
+assets only; they are not compiled into the application.
