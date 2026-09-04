@@ -14,7 +14,7 @@ from scipy.stats import spearmanr
 
 from ordinal_model import balanced_nll, fit, predict, select_hyperparameters, thresholds
 
-MODEL_VERSION = "qraw-expression-quality-ordinal-candidate-0.1"
+DEFAULT_MODEL_VERSION = "qraw-expression-quality-ordinal-candidate-0.1"
 FEATURE_VERSION = "18-hse-raw-plus-log1p-38-non-eye-blendshapes"
 
 
@@ -132,12 +132,23 @@ def prediction_rows(dataset: Dataset, probabilities: np.ndarray) -> list[dict]:
     return output
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--training-evidence", type=Path, required=True)
     parser.add_argument("--evaluation-evidence", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
+    parser.add_argument("--training-dataset", default="training")
+    parser.add_argument("--evaluation-dataset", default="evaluation")
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
+    if not args.model_version.strip():
+        raise RuntimeError("model version cannot be empty")
+    if not args.training_dataset.strip() or not args.evaluation_dataset.strip():
+        raise RuntimeError("dataset names cannot be empty")
     training = load_dataset(args.training_evidence)
     evaluation = load_dataset(args.evaluation_evidence)
     if training.feature_names != evaluation.feature_names:
@@ -154,18 +165,20 @@ def main() -> None:
     reliable_probabilities = evaluation_probabilities[evaluation.reliable]
     result = {
         "schemaVersion": "qraw-expression-ordinal-candidate-report-1.0",
-        "modelVersion": MODEL_VERSION,
+        "modelVersion": args.model_version,
         "status": "calibration_candidate_not_for_production",
         "protocol": {
             "target": "manual expression labels 1..5 as an ordered outcome",
             "model": "class-balanced proportional-odds logistic regression",
             "features": FEATURE_VERSION,
             "dimensionReduction": "training-only standardized PCA",
-            "selection": "lowest five-fold class-balanced negative log-likelihood on batch 001 only",
+            "selection": f"lowest five-fold class-balanced negative log-likelihood inside {args.training_dataset} only",
             "foldingLimitation": "subject_id and capture_group_id are unresolved; folds are stratified by label and sample hash only",
             "abstention": "existing descriptor reliability gate; no candidate confidence threshold is frozen",
         },
         "inputs": {
+            "trainingDataset": args.training_dataset,
+            "evaluationDataset": args.evaluation_dataset,
             "trainingEvidenceSha256": sha256(args.training_evidence),
             "evaluationEvidenceSha256": sha256(args.evaluation_evidence),
             "trainingCount": len(training.rows),
@@ -177,16 +190,16 @@ def main() -> None:
             "selectedPcaComponents": components,
             "selectedL2": l2,
             "candidates": candidates,
-            "batch001FiveFoldDiagnostic": metrics(training.labels, cross_validated),
+            "trainingFiveFoldDiagnostic": metrics(training.labels, cross_validated),
         },
-        "batch002CrossBatchDiagnostic": metrics(
+        "evaluationCrossBatchDiagnostic": metrics(
             evaluation.labels[evaluation.reliable], reliable_probabilities
         ),
         "limitations": [
-            "Batch 002 labels were already revealed and inspected, so this is not a strict blind result.",
-            "Neither batch has confirmed subject_id/capture_group_id isolation.",
-            "Known AI-generated images and unknown-source images cannot prove real-camera generalization.",
-            "The candidate is not connected to production scoring and has no release authority.",
+            f"{args.evaluation_dataset} labels are supplied to this audit; without independently frozen predictions this is not a strict blind result.",
+            "The supplied datasets do not have confirmed subject_id/capture_group_id isolation.",
+            "AI-generated or unknown-source images cannot prove real-camera generalization.",
+            "This report does not by itself authorize production scoring or Release packaging.",
         ],
         "model": {
             "featureNames": training.feature_names,
@@ -203,7 +216,7 @@ def main() -> None:
     with args.output.open("x", encoding="utf-8") as file:
         json.dump(result, file, ensure_ascii=False, indent=2)
         file.write("\n")
-    print(json.dumps(result["batch002CrossBatchDiagnostic"], ensure_ascii=False, indent=2))
+    print(json.dumps(result["evaluationCrossBatchDiagnostic"], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

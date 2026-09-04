@@ -55,7 +55,9 @@ const zhReasons: Record<string, string> = {
   portrait_key_person_unresolved: '人像模式：指定人物未全部确认，保持 0 星并请人工确认',
   group_key_person_unresolved: '群像模式：指定人物未全部确认，保持 0 星并请人工确认',
   key_person_unresolved: '指定人物未全部可靠确认，保持 0 星并请人工确认',
-  portrait_person_unclear: '人像模式：人物清晰门禁确认不清晰，按 1 星处理',
+  portrait_person_unclear: '人像模式：人物清晰门禁确认不清晰，按 0 星进入弃选区',
+  portrait_person_clarity_unresolved: '人像模式：人物清晰度无法可靠确认，保持 0 星并请人工确认',
+  portrait_discrete_partial_evidence: '人像模式：已按离散规则评分；无法确定的评分项按 0 增量处理',
   group_key_person_unclear: '群像模式：指定人物清晰门禁未通过，按 1 星处理',
   group_image_unclear: '群像模式：整体画面清晰门禁未通过，按 1 星处理',
   environment_image_unclear: '环境人像：整体画面清晰门禁未通过，按 1 星处理',
@@ -134,7 +136,11 @@ const enReasons: Record<string, string> = {
   portrait_key_person_unresolved: 'Portrait: not every selected person is confirmed; kept at 0 stars for manual review',
   group_key_person_unresolved: 'Group: not every selected person is confirmed; kept at 0 stars for manual review',
   key_person_unresolved: 'Not every selected person can be confirmed reliably; kept at 0 stars for manual review',
-  portrait_person_unclear: 'Portrait: the person-clarity gate confirmed an unclear subject; assigned 1 star',
+  portrait_person_unclear: 'Portrait: the person-clarity gate confirmed an unclear subject; assigned 0 stars',
+  portrait_person_clarity_unresolved:
+    'Portrait: subject clarity could not be confirmed reliably; kept at 0 stars for review',
+  portrait_discrete_partial_evidence:
+    'Portrait: discrete rating applied; unresolved signals contributed zero increments',
   group_key_person_unclear: 'Group: the selected-person clarity gate failed; assigned 1 star',
   group_image_unclear: 'Group: the image-clarity gate failed; assigned 1 star',
   environment_image_unclear: 'Environmental portrait: the image-clarity gate failed; assigned 1 star',
@@ -420,7 +426,7 @@ const zh = {
   groupRank: '组内排序',
   rankedByQuality: '按照片质量排序',
   expressionPending:
-    '表情仅依据非眼面部动作判断稳定瞬间，不评价情绪，也不读取或改写眼态结论；当前只对 macOS Debug 中身份已确认的指定人物参与。无指定人物、Release 与其他平台保持不可用。',
+    '表情使用第 001～003 批冻结标注校准的五档有序模型，不读取或改写眼态结论；当前仍属于 macOS Debug 校准能力，尚未通过真实相机独立盲测。',
   identityPending: '身份仍需人工确认，不参与自动打分',
   reviewUpdateFailed: '复核修改保存失败，原结果未改变',
   setAsA: '设为 A',
@@ -694,7 +700,7 @@ const en: Record<keyof typeof zh, string> = {
   groupRank: 'Group rank',
   rankedByQuality: 'Ranked by photo quality',
   expressionPending:
-    'Expression uses only non-eye facial motion to judge a stable instant; it never rates emotion or reads or rewrites the eye decision. It currently participates only for confirmed selected people in macOS Debug, and remains unavailable without a selected identity, in Release, and on other platforms.',
+    'Expression uses a five-level ordinal head calibrated from frozen batches 001-003 and never reads or rewrites eye state. It remains a macOS Debug calibration pending an independent real-camera blind test.',
   identityPending: 'Identity still needs manual confirmation and does not affect automatic scoring',
   reviewUpdateFailed: 'The review change could not be saved; the previous result was kept',
   setAsA: 'Set as A',

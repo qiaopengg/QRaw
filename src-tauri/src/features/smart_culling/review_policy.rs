@@ -47,7 +47,7 @@ pub(crate) fn result_is_writable(result: &ReviewResult) -> bool {
     if result.source == "manual" {
         return result.rating <= 5;
     }
-    !result.requires_human_review && (1..=5).contains(&result.rating)
+    !result.requires_human_review && result.rating <= 5
 }
 
 pub(crate) fn requires_calibration_acknowledgement(
@@ -101,6 +101,7 @@ mod tests {
 
     #[test]
     fn writes_all_valid_ai_ratings_without_a_pool_gate() {
+        assert!(result_is_writable(&result("ai", 0, false)));
         assert!(result_is_writable(&result("ai", 1, false)));
         assert!(result_is_writable(&result("ai", 5, false)));
     }

@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "qraw-expression-ordinal-calibration-record-1.0",
+  "modelVersion": "qraw-expression-quality-ordinal-calibration-0.3",
+  "status": "macos_debug_calibration_not_release_ready",
+  "target": "manual expression labels 1..5 as an ordered outcome",
+  "features": "18 raw HSE outputs + log1p(100 * 38 non-eye blendshapes)",
+  "model": "class-balanced proportional-odds logistic regression",
+  "selection": {
+    "protocol": "leave-one-batch-out across frozen batches 001, 002 and 003",
+    "selectedPcaComponents": 15,
+    "selectedL2": 0.1,
+    "subjectIsolation": false,
+    "captureGroupIsolation": false
+  },
+  "inputs": {
+    "batch001": {
+      "evidenceSha256": "c3202d8ee3466ffd86892fcd1dd98c29a992dc7d35417c5f24b230dada397cb7",
+      "reliableCount": 70
+    },
+    "batch002": {
+      "evidenceSha256": "0c5e49ea6be1c308b45de1696342cdfe3c77004e7ec0238fb733fe5001c02b62",
+      "reliableCount": 89
+    },
+    "batch003": {
+      "evidenceSha256": "f41f8504ca1b3a4320ca27250296c1277960f0f54712b4bc5dae57ad9099a4d8",
+      "reliableCount": 124
+    },
+    "combinedReliableCount": 283,
+    "labelCounts": {
+      "1": 56,
+      "2": 35,
+      "3": 102,
+      "4": 58,
+      "5": 32
+    }
+  },
+  "leaveOneBatchOutDiagnostic": {
+    "count": 283,
+    "exact": 167,
+    "exactRate": 0.5901060070671378,
+    "withinOne": 261,
+    "withinOneRate": 0.9222614840989399,
+    "crossLevelErrors": 22,
+    "meanAbsoluteError": 0.4911660777385159,
+    "spearmanExpectedLabel": 0.8179619084365878,
+    "classBalancedNegativeLogLikelihood": 0.9750101004117526,
+    "predictedClassCounts": {
+      "1": 55,
+      "2": 50,
+      "3": 84,
+      "4": 66,
+      "5": 28
+    },
+    "confusionMatrixActualRowsPredictedColumns": [
+      [33, 11, 11, 1, 0],
+      [14, 13, 8, 0, 0],
+      [8, 26, 53, 15, 0],
+      [0, 0, 10, 44, 4],
+      [0, 0, 2, 6, 24]
+    ]
+  },
+  "combinedTrainingFitDiagnostic": {
+    "count": 283,
+    "exact": 181,
+    "exactRate": 0.6395759717314488,
+    "withinOne": 274,
+    "withinOneRate": 0.9681978798586572,
+    "crossLevelErrors": 9,
+    "meanAbsoluteError": 0.3957597173144876,
+    "spearmanExpectedLabel": 0.8707249296884012,
+    "classBalancedNegativeLogLikelihood": 0.8541554406374952,
+    "predictedClassCounts": {
+      "1": 46,
+      "2": 49,
+      "3": 94,
+      "4": 68,
+      "5": 26
+    },
+    "confusionMatrixActualRowsPredictedColumns": [
+      [33, 16, 6, 1, 0],
+      [12, 14, 9, 0, 0],
+      [1, 19, 67, 15, 0],
+      [0, 0, 11, 44, 3],
+      [0, 0, 1, 8, 23]
+    ]
+  },
+  "runtime": {
+    "compiledFile": "../../expression/ordinal.rs",
+    "reliabilityGate": "qraw-expression-descriptor-1.0",
+    "explicitEyeBlendshapesExcluded": true,
+    "hseModelsSeeTheFullFace": true,
+    "confidenceCap": 0.49
+  },
+  "limitations": [
+    "All three batches are revealed calibration data; the diagnostics are not a strict blind accuracy claim.",
+    "Batch 003 is AI-generated and source provenance for parts of batches 001 and 002 is incomplete.",
+    "The evidence does not provide verified subject_id or capture_group_id isolation.",
+    "No independent real-camera holdout has validated generalization.",
+    "This calibration is enabled only in the existing macOS Debug expression path and does not authorize Release packaging."
+  ]
+}

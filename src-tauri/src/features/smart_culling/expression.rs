@@ -6,6 +6,8 @@
 //! still requires chronological descriptors for the same tracked subject in
 //! one similar-shot group.
 
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+mod ordinal;
 mod sequence;
 #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
 mod usability;
@@ -23,7 +25,7 @@ pub(in crate::features::smart_culling) const EXPRESSION_SEQUENCE_POLICY_VERSION:
     "qraw-expression-sequence-policy-1.0";
 #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
 pub(in crate::features::smart_culling) const EXPRESSION_QUALITY_REASON: &str =
-    "expression_single_frame_quality_hsemotion_fusion_calibration";
+    "expression_single_frame_quality_ordinal_calibration";
 pub(in crate::features::smart_culling) const EXPRESSION_QUALITY_GATE_ENABLED: bool =
     cfg!(any(test, all(debug_assertions, target_os = "macos")));
 
@@ -397,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn one_reliable_frame_emits_a_calibrated_quality_score() {
+    fn one_reliable_frame_emits_a_calibrated_ordinal_level() {
         let model_outputs = super::super::expression_quality_poc::ExpressionQualityModelOutputs {
             mtl: [0.0; 10],
             vgaf: [0.0; 8],
@@ -405,8 +407,8 @@ mod tests {
         let evidence =
             ExpressionEvidence::from_single_frame(&descriptor(&scores()), &model_outputs);
 
-        assert_eq!(evidence.state, "scored");
-        assert!(evidence.quality_score.is_some());
+        assert_eq!(evidence.state, "natural");
+        assert_eq!(evidence.quality_score, Some(0.5));
         assert_eq!(evidence.reason, EXPRESSION_QUALITY_REASON);
     }
 

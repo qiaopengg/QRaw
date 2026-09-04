@@ -142,6 +142,20 @@ descriptor reliability gate separate from the five-level label.
 The first `0.1` candidate trained on batch 001 and diagnosed on already-revealed
 batch 002 reached 59/89 exact, 86/89 within one level, and three two-level
 errors. A post-hoc confidence gate could remove those errors only by reducing
-five-level coverage to 33/89, so no confidence threshold or production
-integration was accepted. The scripts and emitted constants are calibration
-assets only; they are not compiled into the application.
+five-level coverage to 33/89, so that candidate and its confidence threshold
+remain rejected.
+
+After the user explicitly requested a calibration-first algorithm update,
+version `qraw-expression-quality-ordinal-calibration-0.3` was fitted from all
+283 reliable rows across frozen batches 001, 002, and 003. Leave-one-batch-out
+diagnostics reached 167/283 exact and 261/283 within one level, with 22
+cross-level errors. The frozen proportional-odds head is compiled in
+`expression/ordinal.rs` and replaces the old binary continuous score only in
+the existing macOS Debug calibration path. Descriptor reliability remains a
+separate abstention gate, and eye Blendshapes remain excluded.
+
+All three source batches have revealed labels, lack verified subject/capture
+group isolation, and include generated or incompletely sourced images. This is
+therefore a working calibration integration, not a blind generalization or
+Release-readiness claim. Exact source hashes, label counts, diagnostics, and
+limitations are frozen in `ORDINAL_CALIBRATION_0_3.json`.

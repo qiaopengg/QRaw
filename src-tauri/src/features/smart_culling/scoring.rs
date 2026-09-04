@@ -8,16 +8,19 @@ use super::expression_grouping::apply_group_expression_sequences;
 use super::grouping::{CaptureDescriptor, group_capture_sequence};
 use super::key_person_policy::apply_key_person_gate;
 use super::key_person_scoring::rank_key_person_performance;
-use super::mode_scoring::{evaluate_mode, normalize_focus, rating_for_mode};
+#[cfg(test)]
+use super::mode_scoring::rating_for_mode;
+use super::mode_scoring::{evaluate_mode, normalize_focus};
 use super::types::{FaceResult, KeyPersonEvidence};
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub(crate) const POLICY_VERSION: &str =
-    "qraw-smart-culling-policy-4.9-macos-expression-incremental-calibration";
+    "qraw-smart-culling-policy-5.0-macos-portrait-discrete-calibration";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
-pub(crate) const POLICY_VERSION: &str = "qraw-smart-culling-policy-4.2-safe-evidence";
+pub(crate) const POLICY_VERSION: &str =
+    "qraw-smart-culling-policy-5.0-portrait-discrete-safe-evidence";
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.1+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0+qraw-expression-quality-hsemotion-fusion-0.5+apple-vision-face-capture-quality-calibration-0.1+apple-vision-aesthetics-observation-0.1";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.1+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0+qraw-expression-quality-ordinal-calibration-0.3+apple-vision-face-capture-quality-calibration-0.1+apple-vision-aesthetics-observation-0.1";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
 pub(crate) const MODEL_VERSION: &str =
     "yunet-2023mar+ocec-loaded-unscored+sface-2021dec+eye-expression-unavailable-v1";
@@ -110,7 +113,7 @@ pub(crate) fn organize_results(
             for candidate_index in group.indices {
                 let candidate = &folder_items[candidate_index];
                 let (rank, evaluation) = &rank_by_index[&candidate_index];
-                let base_rating = rating_for_mode(&evaluation.resolved_mode, evaluation.score);
+                let base_rating = evaluation.rating;
                 let key_person = apply_key_person_gate(&candidate.key_person_evidence, base_rating);
                 let requires_human_review = group_kind == "reviewOnly"
                     || evaluation.requires_human_review
@@ -414,15 +417,15 @@ mod tests {
     #[test]
     fn result_versions_identify_the_seven_strategy_contract() {
         #[cfg(all(debug_assertions, target_os = "macos"))]
-        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.9-"));
+        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-5.0-"));
         #[cfg(not(all(debug_assertions, target_os = "macos")))]
-        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-4.2-"));
+        assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-5.0-"));
         assert!(MODEL_VERSION.contains("yunet-2023mar"));
         assert!(MODEL_VERSION.contains("sface-2021dec"));
         #[cfg(all(debug_assertions, target_os = "macos"))]
         {
             assert!(MODEL_VERSION.contains("qraw-eye-policy-1.1"));
-            assert!(MODEL_VERSION.contains("qraw-expression-quality-hsemotion-fusion-0.5"));
+            assert!(MODEL_VERSION.contains("qraw-expression-quality-ordinal-calibration-0.3"));
             assert!(MODEL_VERSION.contains("apple-vision-face-capture-quality-calibration-0.1"));
             assert!(MODEL_VERSION.contains("apple-vision-aesthetics-observation-0.1"));
         }
@@ -522,6 +525,24 @@ mod tests {
             results.iter().all(|result| {
                 result.reason_codes == vec!["exposure_bracket_review".to_string()]
             })
+        );
+    }
+
+    #[test]
+    fn unclear_portrait_reaches_the_result_contract_as_a_resolved_zero_star() {
+        let mut item = candidate("blurred-portrait.jpg", 1_000, 1);
+        let mut subject = face();
+        subject.sharpness_metric = 1.0;
+        item.faces = vec![subject];
+
+        let results = organize_results(Path::new("."), "portrait", vec![item]);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].rating, 0);
+        assert!(!results[0].requires_human_review);
+        assert_eq!(
+            results[0].reason_codes,
+            vec!["portrait_person_unclear".to_string()]
         );
     }
 

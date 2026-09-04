@@ -3,9 +3,34 @@ import unittest
 import numpy as np
 
 from ordinal_model import balanced_nll, fit, predict, thresholds
+from train_ordinal import parse_args
 
 
 class OrdinalModelTest(unittest.TestCase):
+    def test_candidate_metadata_arguments_are_explicit(self) -> None:
+        args = parse_args(
+            [
+                "--training-evidence",
+                "/tmp/training.jsonl",
+                "--evaluation-evidence",
+                "/tmp/evaluation.jsonl",
+                "--output",
+                "/tmp/report.json",
+                "--model-version",
+                "qraw-expression-quality-ordinal-candidate-0.2",
+                "--training-dataset",
+                "batch001+batch002-reliable",
+                "--evaluation-dataset",
+                "batch003-synthetic",
+            ]
+        )
+
+        self.assertEqual(
+            args.model_version, "qraw-expression-quality-ordinal-candidate-0.2"
+        )
+        self.assertEqual(args.training_dataset, "batch001+batch002-reliable")
+        self.assertEqual(args.evaluation_dataset, "batch003-synthetic")
+
     def test_fit_produces_ordered_probabilities(self) -> None:
         labels = np.repeat(np.arange(1, 6, dtype=np.int8), 12)
         centered = labels.astype(np.float64) - 3.0

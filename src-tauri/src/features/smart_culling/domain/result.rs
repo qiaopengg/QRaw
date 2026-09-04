@@ -44,8 +44,8 @@ impl ConfirmedResult {
         if self.result_id.is_empty() {
             return Err("result id is required");
         }
-        if self.rating > 5 || (self.source == ResultSource::Ai && self.rating == 0) {
-            return Err("AI rating must be 1-5 and manual rating must be 0-5");
+        if self.rating > 5 {
+            return Err("rating must be 0-5");
         }
         if self.source == ResultSource::Manual && !self.reason_codes.is_empty() {
             return Err("manual results cannot retain AI reasons");
@@ -91,13 +91,18 @@ mod tests {
     }
 
     #[test]
-    fn ai_results_require_a_visible_rating() {
-        assert!(result(ResultSource::Ai, 0, &[]).validate().is_err());
+    fn ai_results_accept_the_frozen_zero_to_five_range() {
+        assert!(
+            result(ResultSource::Ai, 0, &["portrait_person_unclear"])
+                .validate()
+                .is_ok()
+        );
         assert!(
             result(ResultSource::Ai, 5, &["sharp_subject"])
                 .validate()
                 .is_ok()
         );
+        assert!(result(ResultSource::Ai, 6, &[]).validate().is_err());
     }
 
     #[test]

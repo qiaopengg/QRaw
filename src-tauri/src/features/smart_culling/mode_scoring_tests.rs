@@ -16,6 +16,11 @@ fn eye(state: &str) -> EyeResult {
 }
 
 fn face(x: f32, width: f32, eye_state: &str, expression_state: &str) -> FaceResult {
+    let expression_state = match expression_state {
+        "usable" => "outstanding",
+        "unusable" => "severe_failure",
+        other => other,
+    };
     FaceResult {
         bbox: [x, 10.0, width, 30.0],
         landmarks: [(0.0, 0.0); 5],
@@ -30,16 +35,25 @@ fn face(x: f32, width: f32, eye_state: &str, expression_state: &str) -> FaceResu
         },
         expression_state: expression_state.to_string(),
         expression_score: match expression_state {
-            "usable" => Some(1.0),
-            "unusable" => Some(0.0),
+            "severe_failure" => Some(0.0),
+            "not_recommended" => Some(0.25),
+            "natural" => Some(0.5),
+            "excellent" => Some(0.75),
+            "outstanding" => Some(1.0),
             _ => None,
         },
-        expression_confidence: if matches!(expression_state, "usable" | "unusable") {
+        expression_confidence: if matches!(
+            expression_state,
+            "severe_failure" | "not_recommended" | "natural" | "excellent" | "outstanding"
+        ) {
             0.4
         } else {
             0.0
         },
-        expression_reason: if matches!(expression_state, "usable" | "unusable") {
+        expression_reason: if matches!(
+            expression_state,
+            "severe_failure" | "not_recommended" | "natural" | "excellent" | "outstanding"
+        ) {
             EXPRESSION_QUALITY_REASON.to_string()
         } else {
             "expression_test".to_string()
@@ -172,7 +186,7 @@ fn vision_face_capture_quality_changes_only_weighted_person_clarity() {
 
 #[cfg(all(debug_assertions, target_os = "macos"))]
 #[test]
-fn vision_face_capture_quality_cannot_change_the_frozen_closed_eye_gate() {
+fn vision_face_capture_quality_cannot_change_discrete_eye_or_expression_increments() {
     let mut low = candidate(vec![face(5.0, 40.0, "closed", "usable")]);
     low.vision_quality.face_capture_qualities = vec![Some(0.05)];
     let mut high = candidate(vec![face(5.0, 40.0, "closed", "usable")]);
@@ -183,8 +197,16 @@ fn vision_face_capture_quality_cannot_change_the_frozen_closed_eye_gate() {
 
     assert_eq!(low_evaluation.score, 0.0);
     assert_eq!(high_evaluation.score, 0.0);
-    assert_eq!(low_evaluation.reason_code, "portrait_closed_eyes");
-    assert_eq!(high_evaluation.reason_code, "portrait_closed_eyes");
+    assert_eq!(low_evaluation.rating, 0);
+    assert_eq!(high_evaluation.rating, 0);
+    assert_eq!(
+        low_evaluation.reason_code,
+        "portrait_discrete_partial_evidence"
+    );
+    assert_eq!(
+        high_evaluation.reason_code,
+        "portrait_discrete_partial_evidence"
+    );
     assert_eq!(low_evaluation.confidence, high_evaluation.confidence);
 }
 
@@ -209,12 +231,15 @@ fn portrait_and_group_key_modes_score_only_confirmed_selected_faces() {
     ]);
     item.key_person_evidence = vec![confirmed_key(1, 1)];
 
-    for mode in ["portrait", "group"] {
-        let evaluation = evaluate_mode(mode, &item);
-        assert_eq!(rating_for_mode(mode, evaluation.score), 5);
-        assert!(!evaluation.requires_human_review);
-        assert!(!evaluation.reason_code.contains("closed_eyes"));
-    }
+    let portrait = evaluate_mode("portrait", &item);
+    assert_eq!(portrait.rating, 4);
+    assert!(!portrait.requires_human_review);
+    assert!(!portrait.reason_code.contains("closed_eyes"));
+
+    let group = evaluate_mode("group", &item);
+    assert_eq!(group.rating, 5);
+    assert!(!group.requires_human_review);
+    assert!(!group.reason_code.contains("closed_eyes"));
 }
 
 #[test]
@@ -264,7 +289,7 @@ fn unresolved_key_identity_stays_zero_star_manual_review() {
 }
 
 #[test]
-fn image_and_person_definite_blur_gates_short_circuit_to_one_star() {
+fn definite_blur_uses_zero_for_portrait_and_keeps_other_mode_policy() {
     let mut scene = candidate(Vec::new());
     scene.sharpness_metric = 2.0;
     scene.center_focus_metric = 2.0;
@@ -277,20 +302,21 @@ fn image_and_person_definite_blur_gates_short_circuit_to_one_star() {
     portrait.sharpness_metric = 2.0;
     portrait.faces[0].sharpness_metric = 2.0;
     let portrait_evaluation = evaluate_mode("portrait", &portrait);
-    assert_eq!(rating_for_mode("portrait", portrait_evaluation.score), 1);
+    assert_eq!(portrait_evaluation.rating, 0);
     assert!(!portrait_evaluation.requires_human_review);
     assert_eq!(portrait_evaluation.reason_code, "portrait_person_unclear");
 }
 
 #[test]
-fn uncertain_person_clarity_continues_to_later_evidence() {
+fn uncertain_person_clarity_requires_review_without_guessing() {
     let mut item = candidate(vec![face(5.0, 40.0, "open", "usable")]);
     item.faces[0].sharpness_metric = 3.0;
 
     let evaluation = evaluate_mode("portrait", &item);
 
-    assert!(evaluation.score > 0.0);
-    assert_ne!(evaluation.reason_code, "portrait_person_unclear");
+    assert_eq!(evaluation.rating, 0);
+    assert!(evaluation.requires_human_review);
+    assert_eq!(evaluation.reason_code, "portrait_person_clarity_unresolved");
 }
 
 #[test]
@@ -302,12 +328,12 @@ fn score_interval_requires_review_when_missing_composition_crosses_tiers() {
 }
 
 #[test]
-fn ordinary_closed_eyes_are_hard_capped_only_in_portrait_and_key_group() {
+fn portrait_uses_negative_eye_increment_while_key_group_keeps_its_gate() {
     let portrait = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "closed", "usable")]),
     );
-    assert_eq!(rating_for_mode("portrait", portrait.score), 1);
+    assert_eq!(portrait.rating, 0);
     assert!(!portrait.requires_human_review);
 
     let mut key_group_item = candidate(vec![face(5.0, 40.0, "closed", "usable")]);
@@ -323,14 +349,14 @@ fn ordinary_closed_eyes_are_hard_capped_only_in_portrait_and_key_group() {
 }
 
 #[test]
-fn deliberate_eye_pose_never_exceeds_three_stars_in_portrait() {
+fn deliberate_eye_pose_is_unable_to_determine_and_adds_zero() {
     let evaluation = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "deliberate", "usable")]),
     );
 
-    assert_eq!(rating_for_mode("portrait", evaluation.score), 3);
-    assert_eq!(evaluation.reason_code, "portrait_deliberate_eye_pose");
+    assert_eq!(evaluation.rating, 2);
+    assert_eq!(evaluation.reason_code, "portrait_discrete_partial_evidence");
 }
 
 #[test]
@@ -348,7 +374,7 @@ fn deliberate_pose_cannot_hide_another_selected_subjects_unknown_eyes() {
 }
 
 #[test]
-fn technical_sequence_state_cannot_bypass_expression_quality_gate() {
+fn technical_sequence_state_maps_to_unable_to_determine_zero_increment() {
     let stable = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "open", "stable")]),
@@ -358,16 +384,19 @@ fn technical_sequence_state_cannot_bypass_expression_quality_gate() {
         &candidate(vec![face(5.0, 40.0, "open", "transitional")]),
     );
 
-    assert_eq!(stable.score, 0.0);
-    assert_eq!(transitional.score, 0.0);
-    assert!(stable.requires_human_review);
-    assert!(transitional.requires_human_review);
-    assert_eq!(stable.reason_code, "portrait_expression_unresolved");
-    assert_eq!(transitional.reason_code, "portrait_expression_unresolved");
+    assert_eq!(stable.rating, 2);
+    assert_eq!(transitional.rating, 2);
+    assert!(!stable.requires_human_review);
+    assert!(!transitional.requires_human_review);
+    assert_eq!(stable.reason_code, "portrait_discrete_partial_evidence");
+    assert_eq!(
+        transitional.reason_code,
+        "portrait_discrete_partial_evidence"
+    );
 }
 
 #[test]
-fn synthetic_single_frame_expression_is_evaluated_before_combination() {
+fn five_level_expression_is_mapped_before_discrete_combination() {
     let usable = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "open", "usable")]),
@@ -378,19 +407,23 @@ fn synthetic_single_frame_expression_is_evaluated_before_combination() {
     );
 
     assert!(usable.score > low_quality.score);
-    assert!(low_quality.score > 0.0);
-    assert_ne!(low_quality.reason_code, "portrait_expression_unresolved");
+    assert_eq!(usable.rating, 4);
+    assert_eq!(low_quality.rating, 0);
+    assert_eq!(
+        low_quality.reason_code,
+        "portrait_discrete_partial_evidence"
+    );
 }
 
 #[test]
-fn synthetic_expression_cannot_replace_frozen_closed_eye_one_star() {
+fn expression_and_eye_increments_are_combined_without_a_portrait_hard_cap() {
     let portrait = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "closed", "unusable")]),
     );
-    assert_eq!(rating_for_mode("portrait", portrait.score), 1);
+    assert_eq!(portrait.rating, 0);
     assert!(!portrait.requires_human_review);
-    assert_eq!(portrait.reason_code, "portrait_closed_eyes");
+    assert_eq!(portrait.reason_code, "portrait_discrete_partial_evidence");
 
     let mut group_item = candidate(vec![face(5.0, 40.0, "closed", "unusable")]);
     group_item.key_person_evidence = vec![confirmed_key(1, 0)];
@@ -401,7 +434,7 @@ fn synthetic_expression_cannot_replace_frozen_closed_eye_one_star() {
 }
 
 #[test]
-fn unknown_expression_stops_before_weighted_combination() {
+fn unknown_expression_adds_zero_and_does_not_block_portrait_rating() {
     let usable = evaluate_mode(
         "portrait",
         &candidate(vec![face(5.0, 40.0, "open", "usable")]),
@@ -412,9 +445,9 @@ fn unknown_expression_stops_before_weighted_combination() {
     );
 
     assert!(usable.score > 0.0);
-    assert_eq!(unknown.score, 0.0);
-    assert!(unknown.requires_human_review);
-    assert_eq!(unknown.reason_code, "portrait_expression_unresolved");
+    assert_eq!(unknown.rating, 2);
+    assert!(!unknown.requires_human_review);
+    assert_eq!(unknown.reason_code, "portrait_discrete_partial_evidence");
 }
 
 #[test]

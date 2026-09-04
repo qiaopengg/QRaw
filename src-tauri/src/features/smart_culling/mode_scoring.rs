@@ -8,6 +8,8 @@ use super::mode_evidence::{
 use super::mode_policy::{
     ClarityGateTarget, ModePolicy, ModeStrategy, policy_for, resolve_strategy,
 };
+use super::portrait_rating::PortraitRatingDecision;
+use super::portrait_rating_adapter::{PortraitEvidenceDecision, adapt_portrait_rating};
 use super::quality_evidence::{FixedScoreInterval, WeightedEvidence, combine_fixed_weights};
 use super::scoring::AnalysisCandidate;
 use super::types::{EyeDisposition, FaceResult};
@@ -16,6 +18,7 @@ use super::types::{EyeDisposition, FaceResult};
 pub(crate) struct ModeEvaluation {
     pub resolved_mode: String,
     pub score: f64,
+    pub rating: u8,
     pub confidence: f32,
     pub requires_human_review: bool,
     pub reason_code: &'static str,
@@ -58,6 +61,30 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
     }
 
     let clarity = clarity_evidence(policy.clarity_gate, item, &subjects);
+    if strategy == ModeStrategy::Portrait {
+        return match adapt_portrait_rating(&clarity, &subjects) {
+            PortraitEvidenceDecision::NeedsClarityReview => {
+                manual_evaluation("portrait", "portrait_person_clarity_unresolved")
+            }
+            PortraitEvidenceDecision::Rated {
+                decision,
+                confidence,
+            } => {
+                let rating = decision.final_rating();
+                ModeEvaluation {
+                    resolved_mode: "portrait".to_string(),
+                    score: f64::from(rating) / 5.0,
+                    rating,
+                    confidence,
+                    requires_human_review: false,
+                    reason_code: match decision {
+                        PortraitRatingDecision::SubjectUnclear => "portrait_person_unclear",
+                        PortraitRatingDecision::Scored(_) => "portrait_discrete_partial_evidence",
+                    },
+                }
+            }
+        };
+    }
     if clarity.is_one_star_gate() {
         return one_star_evaluation(
             policy.resolved_mode(),
@@ -168,6 +195,7 @@ fn evaluate_strategy(
     ModeEvaluation {
         resolved_mode: policy.resolved_mode().to_string(),
         score: interval.lower_bound,
+        rating: lower_rating,
         confidence: interval.confidence.clamp(0.0, 1.0) as f32,
         requires_human_review,
         reason_code,
@@ -218,6 +246,7 @@ fn manual_evaluation(mode: &str, reason_code: &'static str) -> ModeEvaluation {
     ModeEvaluation {
         resolved_mode: mode.to_string(),
         score: 0.0,
+        rating: 0,
         confidence: 0.0,
         requires_human_review: true,
         reason_code,
@@ -228,6 +257,7 @@ fn one_star_evaluation(mode: &str, reason_code: &'static str) -> ModeEvaluation 
     ModeEvaluation {
         resolved_mode: mode.to_string(),
         score: 0.0,
+        rating: 1,
         confidence: LEGACY_CLARITY_CONFIDENCE_CAP as f32,
         requires_human_review: false,
         reason_code,

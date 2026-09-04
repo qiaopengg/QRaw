@@ -68,7 +68,7 @@ pub(crate) const fn policy_for(strategy: ModeStrategy) -> ModePolicy {
                 optical: 0.10,
                 composition: 0.10,
             },
-            closed_eye_hard_cap: true,
+            closed_eye_hard_cap: false,
         },
         ModeStrategy::GroupWithKeyPeople => ModePolicy {
             strategy,
@@ -227,9 +227,10 @@ mod tests {
     }
 
     #[test]
-    fn only_portrait_and_key_person_group_hard_cap_closed_eyes() {
-        let capped = [ModeStrategy::Portrait, ModeStrategy::GroupWithKeyPeople];
+    fn only_key_person_group_keeps_the_legacy_closed_eye_hard_cap() {
+        let capped = [ModeStrategy::GroupWithKeyPeople];
         let weighted_only = [
+            ModeStrategy::Portrait,
             ModeStrategy::GroupScene,
             ModeStrategy::Environment,
             ModeStrategy::Landscape,
