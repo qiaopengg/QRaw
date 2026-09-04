@@ -50,6 +50,9 @@ export const ReviewInspector = forwardRef<
     if (status === 'ambiguous') return tx('keyPersonAmbiguous');
     return tx('keyPersonUnknown');
   };
+  // 不设 aria-hidden：抽屉关闭态已由 CSS `visibility: hidden` 承担隐藏职责，
+  // 它同时屏蔽屏幕阅读器与键盘焦点。宽屏下检视器常驻时若保留
+  // aria-hidden={!open} 会被永久屏蔽，详见 ReviewWorkbench 侧栏上的同名注释。
   return (
     <aside
       ref={ref}
@@ -57,7 +60,6 @@ export const ReviewInspector = forwardRef<
       role="dialog"
       aria-modal={open || undefined}
       aria-label={tx('reviewEvidence')}
-      aria-hidden={!open}
       tabIndex={-1}
     >
       <header>

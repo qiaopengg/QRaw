@@ -1,0 +1,660 @@
+/* 方案 A · 常驻三栏工作台（Conductor）主题层
+
+   本文件只做视觉与布局，不参与任何业务逻辑：
+   - 不新增、不删除、不修改任何 DOM 结构或事件行为
+   - 不改动状态、命令调用、判定规则
+   - 仅在 .sc-page 容器宽度 >= 1120px 时把复核页的两个抽屉改为常驻栏
+     窄屏（< 1120px）完全保留上游既有的抽屉降级行为，避免破坏响应式
+
+   加载位置必须是 feature.tsx 中最后一条 import，才能覆盖既有样式表。 */
+
+/* ------------------------------------------------------------------ */
+/* 1. 设计令牌                                                         */
+/* ------------------------------------------------------------------ */
+
+.sc-page {
+  /* base.css 引用了这四个变量却从未定义，属于既存缺陷，此处补齐 */
+  --sc-text-fine: 11px;
+  --sc-text-sm: 12px;
+  --sc-text-base: 13px;
+  --sc-text-lg: 15px;
+  --sc-text-xl: 17px;
+  --sc-text-title: 22px;
+  --sc-text-muted: #9a9a9a;
+
+  /* 中性色阶：统一为单一梯度，消除多套并存 */
+  --sc-deep: #101010;
+  --sc-bg: #131313;
+  --sc-surface: #1a1a1a;
+  --sc-raised: #212121;
+  --sc-active: #2b2b2b;
+  --sc-border: #2b2b2b;
+  --sc-border-strong: #3a3a3a;
+  --sc-text: #ededed;
+  --sc-muted: #9a9a9a;
+  --sc-faint: #6a6a6a;
+
+  /* 语义色 */
+  --sc-green: #73b760;
+  --sc-yellow: #d4aa2f;
+  --sc-red: #d75c55;
+  --sc-blue: #5b8def;
+
+  /* 圆角：4 / 6 / 8 / 12 四级，取代原有的 2-12 混用 */
+  --sc-r-sm: 4px;
+  --sc-r-md: 6px;
+  --sc-r-lg: 8px;
+  --sc-r-xl: 12px;
+
+  /* 间距：4 的倍数 */
+  --sc-sp-1: 4px;
+  --sc-sp-2: 8px;
+  --sc-sp-3: 12px;
+  --sc-sp-4: 16px;
+  --sc-sp-5: 20px;
+  --sc-sp-6: 24px;
+}
+
+/* ------------------------------------------------------------------ */
+/* 2. 全局控件统一                                                     */
+/* ------------------------------------------------------------------ */
+
+.sc-page .sc-topbar {
+  height: 56px;
+  padding: 0 var(--sc-sp-5);
+  border-bottom: 1px solid var(--sc-border);
+  background: var(--sc-surface);
+}
+
+.sc-page .sc-brand {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* 步骤条：胶囊取代「圆点 + 长连线」，在窄屏下更不易挤压 */
+.sc-page .sc-steps {
+  gap: 4px;
+  justify-content: center;
+}
+
+.sc-page .sc-steps > div {
+  width: auto;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: var(--sc-text-sm);
+  color: var(--sc-faint);
+}
+
+.sc-page .sc-steps > div:not(:last-child)::after {
+  display: none;
+}
+
+.sc-page .sc-steps span {
+  width: 17px;
+  height: 17px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sc-active);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sc-page .sc-steps .is-active {
+  background: var(--sc-raised);
+  color: var(--sc-text);
+  font-weight: 500;
+}
+
+.sc-page .sc-steps .is-active span {
+  background: var(--sc-text);
+  color: #111;
+}
+
+.sc-page .sc-steps .is-done {
+  color: var(--sc-muted);
+}
+
+.sc-page .sc-steps .is-done span {
+  background: rgba(115, 183, 96, 0.18);
+  color: var(--sc-green);
+}
+
+.sc-page .sc-status {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  font-size: var(--sc-text-sm);
+}
+
+/* 按钮：统一高度与圆角，消除 min-height 9 种取值 */
+.sc-page .sc-primary,
+.sc-page .sc-secondary,
+.sc-page .sc-danger {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: var(--sc-r-md);
+  font-size: var(--sc-text-base) !important;
+  font-weight: 500;
+}
+
+.sc-page .sc-primary:disabled,
+.sc-page .sc-secondary:disabled,
+.sc-page .sc-danger:disabled {
+  opacity: 0.4;
+}
+
+.sc-page .sc-text-button {
+  font-size: var(--sc-text-sm) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* 3. 复核页：宽屏常驻三栏                                             */
+/*    仅在容器 >= 1120px 生效；窄屏保留上游抽屉降级                      */
+/* ------------------------------------------------------------------ */
+
+@container (min-width: 1120px) {
+  /* 三栏栅格。上游 review-decision-queue.css 把三栏无条件压成单栏，
+     smart-culling-review.css 又给过两栏；此处统一为方案 A 的三栏。
+     高度同步顶栏改为 56px 后的剩余空间，避免底部溢出 2px。 */
+  .sc-page.sc-review-page .sc-review-layout {
+    grid-template-columns: 256px minmax(0, 1fr) 320px;
+    height: calc(100% - 56px);
+  }
+
+  /* 未选中任何结果时检视器不渲染，此时让画布吃掉右侧列，避免留白 */
+  .sc-page.sc-review-page .sc-review-layout:not(:has(.sc-inspector)) {
+    grid-template-columns: 256px minmax(0, 1fr);
+  }
+
+  /* 左栏：抽屉 -> 常驻 */
+  .sc-page.sc-review-page .sc-review-sidebar {
+    position: relative;
+    z-index: auto;
+    top: auto;
+    bottom: auto;
+    left: auto;
+    width: auto;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    box-shadow: none;
+    transition: none;
+    overflow: hidden;
+  }
+
+  /* 右栏：抽屉 -> 常驻 */
+  .sc-page.sc-review-page .sc-inspector {
+    position: relative;
+    z-index: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    box-shadow: none;
+    transition: none;
+  }
+
+  /* 常驻后遮罩与开合按钮失去意义；仅隐藏显示，不触碰其事件与状态 */
+  .sc-page.sc-review-page .sc-review-drawer-backdrop,
+  .sc-page.sc-review-page .sc-review-panel-button,
+  .sc-page.sc-review-page .sc-inspector .sc-review-drawer-close {
+    display: none;
+  }
+
+  .sc-page.sc-review-page .sc-review-sidebar .sc-review-drawer-close {
+    display: none;
+  }
+
+  /* 头部：从「112px 高、筛选换行到第二行」压成单行工具条 */
+  .sc-page.sc-review-page .sc-review-canvas > header {
+    min-height: 60px;
+    flex-wrap: nowrap;
+    align-content: center;
+    gap: var(--sc-sp-3);
+    padding: var(--sc-sp-3) var(--sc-sp-4);
+    border-bottom: 1px solid var(--sc-border);
+    background: var(--sc-surface);
+  }
+
+  .sc-page.sc-review-page .sc-review-queue-heading-main {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .sc-page.sc-review-page .sc-review-canvas > header .sc-review-queue-heading-main h1 {
+    margin-top: 2px;
+    font-size: var(--sc-text-lg);
+  }
+
+  /* 筛选与对比按钮靠右，不再换行 */
+  .sc-page.sc-review-page .sc-review-canvas > header nav {
+    order: 0;
+    width: auto;
+    margin-left: auto;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--sc-border);
+    border-radius: var(--sc-r-md);
+    background: var(--sc-raised);
+  }
+
+  .sc-page.sc-review-page .sc-review-canvas > header nav button {
+    min-height: 24px;
+    padding: 0 12px;
+    border: 0 !important;
+    border-radius: var(--sc-r-sm);
+    font-size: var(--sc-text-sm) !important;
+  }
+
+  .sc-page.sc-review-page .sc-review-canvas > header nav button.is-active {
+    border: 0 !important;
+    background: var(--sc-active);
+    color: var(--sc-text);
+  }
+
+  .sc-page.sc-review-page .sc-review-next-control {
+    padding-left: var(--sc-sp-3);
+    border-left: 1px solid var(--sc-border);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. 复核页内部：视觉统一（不受容器断点限制）                          */
+/* ------------------------------------------------------------------ */
+
+.sc-page.sc-review-page {
+  background: var(--sc-deep);
+}
+
+.sc-page.sc-review-page .sc-review-sidebar {
+  background: var(--sc-surface);
+}
+
+.sc-page.sc-review-page .sc-review-sidebar > header {
+  min-height: 52px;
+  padding: var(--sc-sp-3) var(--sc-sp-3) var(--sc-sp-2);
+}
+
+.sc-page.sc-review-page .sc-review-sidebar > header strong {
+  font-size: var(--sc-text-base);
+}
+
+.sc-page.sc-review-page .sc-search {
+  min-height: 30px;
+  margin: var(--sc-sp-3);
+  padding: 0 10px;
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-md);
+  background: var(--sc-raised);
+  font-size: var(--sc-text-sm);
+}
+
+.sc-page.sc-review-page .sc-search input {
+  font-size: var(--sc-text-sm);
+}
+
+.sc-page.sc-review-page .sc-review-sidebar h3 {
+  padding: var(--sc-sp-2) var(--sc-sp-3) var(--sc-sp-1);
+  color: var(--sc-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.sc-page.sc-review-page .sc-review-sidebar > button {
+  min-height: 30px;
+  margin: 1px var(--sc-sp-2);
+  padding: 0 var(--sc-sp-2) 0 var(--sc-sp-4);
+  border-radius: var(--sc-r-md);
+  font-size: var(--sc-text-sm) !important;
+}
+
+.sc-page.sc-review-page .sc-review-sidebar > button.is-active {
+  box-shadow: inset 2px 0 0 var(--sc-text);
+}
+
+.sc-page.sc-review-page .sc-review-sidebar > footer {
+  padding: var(--sc-sp-3);
+  font-size: var(--sc-text-sm);
+}
+
+/* 队列行 */
+.sc-page.sc-review-page .sc-review-queue-row button {
+  height: 30px;
+  border-radius: var(--sc-r-md);
+  font-size: var(--sc-text-sm);
+}
+
+.sc-page.sc-review-page .sc-review-queue-row button.is-active {
+  box-shadow: inset 2px 0 0 #e8e8e8;
+}
+
+/* 画布 */
+.sc-page.sc-review-page .sc-review-canvas {
+  background: var(--sc-bg);
+}
+
+/* 失败与跳过 */
+.sc-page.sc-review-page .sc-failures {
+  margin: var(--sc-sp-3) var(--sc-sp-4) var(--sc-sp-4);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-surface);
+}
+
+.sc-page.sc-review-page .sc-failures > button {
+  min-height: 40px;
+  padding: 0 var(--sc-sp-3);
+  gap: var(--sc-sp-2);
+}
+
+.sc-page.sc-review-page .sc-failures p {
+  padding: var(--sc-sp-2) var(--sc-sp-3);
+  font-size: var(--sc-text-sm);
+}
+
+/* 检视器 */
+.sc-page.sc-review-page .sc-inspector {
+  background: var(--sc-surface);
+}
+
+.sc-page.sc-review-page .sc-inspector > header {
+  min-height: 52px;
+  padding: 0 var(--sc-sp-3);
+}
+
+.sc-page.sc-review-page .sc-inspector > header strong {
+  font-size: var(--sc-text-base);
+}
+
+.sc-page.sc-review-page .sc-inspector > section {
+  padding: var(--sc-sp-3);
+}
+
+.sc-page.sc-review-page .sc-inspector h3 {
+  margin-bottom: var(--sc-sp-2);
+  color: var(--sc-text);
+  font-size: var(--sc-text-base);
+}
+
+.sc-page.sc-review-page .sc-inspector section > p {
+  color: var(--sc-muted);
+  font-size: var(--sc-text-sm);
+  line-height: 1.65;
+}
+
+/* 照片卡片 */
+.sc-page.sc-review-page .sc-photo-card {
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-surface);
+  transition: border-color 120ms ease;
+}
+
+.sc-page.sc-review-page .sc-photo-card.is-focused {
+  border-color: var(--sc-text);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.sc-page.sc-review-page .sc-photo-meta {
+  padding: var(--sc-sp-2);
+}
+
+.sc-page.sc-review-page .sc-photo-meta small {
+  margin-top: var(--sc-sp-1);
+  font-size: var(--sc-text-fine);
+}
+
+/* 空态 */
+.sc-page.sc-review-page .sc-review-empty {
+  border: 1px dashed var(--sc-border-strong);
+  border-radius: var(--sc-r-lg);
+}
+
+/* 提示条 */
+.sc-page.sc-review-page .sc-partial-review-notice,
+.sc-page.sc-review-page .sc-manual-sync-notice {
+  min-height: 36px;
+  padding: var(--sc-sp-2) var(--sc-sp-4);
+  font-size: var(--sc-text-sm);
+}
+
+/* 顶栏计数胶囊 */
+.sc-page.sc-review-page .sc-review-counts {
+  gap: var(--sc-sp-2);
+}
+
+.sc-page.sc-review-page .sc-review-counts span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: var(--sc-text-fine);
+  font-weight: 500;
+}
+
+.sc-page.sc-review-page .sc-apply {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: var(--sc-r-md);
+}
+
+/* 对比按钮 */
+.sc-page.sc-review-page .sc-review-compare-button {
+  min-height: 32px !important;
+  padding: 0 12px;
+  border: 1px solid var(--sc-border-strong) !important;
+  border-radius: var(--sc-r-md) !important;
+  font-size: var(--sc-text-sm) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. 配置屏                                                           */
+/* ------------------------------------------------------------------ */
+
+.sc-page.sc-setup-page {
+  background: var(--sc-bg);
+}
+
+.sc-page.sc-setup-page .sc-setup-workspace {
+  padding: var(--sc-sp-6) clamp(24px, 4cqw, 56px);
+  overflow-y: auto;
+}
+
+.sc-page.sc-setup-page .sc-setup-card {
+  padding: var(--sc-sp-5);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-xl);
+  background: var(--sc-surface);
+}
+
+/* 五个拍摄模式一行铺开，窄屏自动折行 */
+.sc-page.sc-setup-page .sc-mode-grid {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+}
+
+.sc-page.sc-setup-page .sc-mode-grid button {
+  min-height: 84px;
+  padding: var(--sc-sp-3);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-raised);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.sc-page.sc-setup-page .sc-mode-grid button.is-active {
+  border-color: var(--sc-green);
+  background: rgba(115, 183, 96, 0.08);
+}
+
+/* 配置屏的三类提示条统一形态 */
+.sc-page.sc-setup-page .sc-recovery-notice,
+.sc-page.sc-setup-page .sc-virtual-copy-notice {
+  min-height: 38px;
+  gap: var(--sc-sp-2);
+  padding: 10px var(--sc-sp-3);
+  border-radius: var(--sc-r-md);
+  font-size: var(--sc-text-sm);
+  line-height: 1.55;
+}
+
+.sc-page.sc-setup-page .sc-recovery-notice {
+  border-color: rgba(212, 170, 47, 0.28);
+  color: #e2d3a8;
+  background: rgba(212, 170, 47, 0.07);
+}
+
+.sc-page.sc-setup-page .sc-virtual-copy-notice {
+  border-color: rgba(91, 141, 239, 0.26);
+  color: #b9c9e6;
+  background: rgba(91, 141, 239, 0.07);
+}
+
+.sc-page.sc-setup-page .sc-section-title h2 {
+  font-size: var(--sc-text-lg);
+}
+
+.sc-page.sc-setup-page .sc-section-title p {
+  font-size: var(--sc-text-sm);
+}
+
+.sc-page.sc-setup-page .sc-setup-footer {
+  padding-top: var(--sc-sp-5);
+  margin-top: var(--sc-sp-5);
+  border-top: 1px solid var(--sc-border);
+}
+
+.sc-page.sc-setup-page .sc-people-entry {
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-raised);
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. 分析屏                                                           */
+/* ------------------------------------------------------------------ */
+
+.sc-page .sc-analysis-dock {
+  min-height: 92px;
+  gap: var(--sc-sp-3);
+  padding: var(--sc-sp-3) var(--sc-sp-4);
+  border: 1px solid var(--sc-border-strong);
+  border-radius: var(--sc-r-xl);
+  background: rgba(26, 26, 26, 0.96);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.sc-page .sc-analysis-dock strong {
+  font-size: var(--sc-text-base);
+}
+
+.sc-page .sc-analysis-dock small,
+.sc-page .sc-analysis-dock .sc-progress {
+  font-size: var(--sc-text-sm);
+}
+
+.sc-page .sc-progress {
+  border-radius: 3px;
+  background: var(--sc-active);
+}
+
+.sc-page .sc-analysis-shell > header h1 {
+  font-size: var(--sc-text-xl);
+}
+
+.sc-page .sc-analysis-grid article {
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-md);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* 7. 写入结果屏                                                       */
+/* ------------------------------------------------------------------ */
+
+/* 连体表格改为独立指标卡，四项读数更易扫读 */
+.sc-page .sc-write-metrics {
+  gap: var(--sc-sp-3);
+  margin-top: var(--sc-sp-5);
+  border: 0;
+  border-radius: 0;
+}
+
+.sc-page .sc-write-metrics article {
+  min-height: 84px;
+  padding: var(--sc-sp-3) var(--sc-sp-4);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-surface);
+}
+
+/* 上游给最后一格清了边框（连体表格写法），独立卡片下需要补回 */
+.sc-page .sc-write-metrics article:last-child {
+  border: 1px solid var(--sc-border);
+}
+
+.sc-page .sc-write-metrics strong {
+  font-size: 20px;
+  letter-spacing: -0.3px;
+}
+
+.sc-page .sc-write-metrics span {
+  margin-top: var(--sc-sp-1);
+  color: var(--sc-faint);
+  font-size: var(--sc-text-fine);
+  line-height: 1.45;
+}
+
+.sc-page .sc-write-columns {
+  gap: var(--sc-sp-3);
+  margin-top: var(--sc-sp-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* 8. 弹窗与不支持屏                                                   */
+/* ------------------------------------------------------------------ */
+
+.sc-modal-backdrop {
+  background: rgba(8, 8, 8, 0.72);
+}
+
+.sc-modal {
+  border: 1px solid var(--sc-border-strong);
+  border-radius: var(--sc-r-xl);
+  background: var(--sc-surface);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.sc-modal h2 {
+  font-size: var(--sc-text-lg);
+}
+
+.sc-modal .sc-confirm-metrics {
+  gap: var(--sc-sp-2);
+  margin: var(--sc-sp-4) 0;
+}
+
+.sc-modal .sc-confirm-metrics > div {
+  padding: var(--sc-sp-3);
+  border-radius: var(--sc-r-lg);
+  background: var(--sc-raised);
+}
+
+.sc-page .sc-unsupported {
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-r-xl);
+  background: var(--sc-surface);
+}
+
+.sc-page .sc-device-check {
+  gap: var(--sc-sp-2);
+  padding: var(--sc-sp-3);
+  border-radius: var(--sc-r-md);
+  background: var(--sc-raised);
+}

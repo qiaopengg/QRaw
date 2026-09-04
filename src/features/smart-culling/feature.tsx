@@ -13,6 +13,9 @@ import './styles/setup-decision-queue.css';
 import './styles/analysis-decision-queue.css';
 import './styles/review-decision-queue.css';
 import './styles/accessibility.css';
+/* 方案 A 主题层：必须最后加载，用于覆盖上方全部样式表的布局与视觉。
+   仅作用于 UI，不参与任何业务逻辑。详见文件头注释。 */
+import './styles/theme-conductor.css';
 
 export function useSmartCullingFeature(): AppFeatureRegistration {
   return {
