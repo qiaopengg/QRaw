@@ -14,6 +14,12 @@ observation audit is documented in
 [`vision_quality_poc/README.md`](vision_quality_poc/README.md). It adds no model
 asset and remains a macOS Debug calibration path.
 
+The eDifFIQA(T) face-quality observation model, attribution, equivalent graph
+conversion and hardware/photo probes are documented in
+[`ediffiqa/README.md`](ediffiqa/README.md). This optional macOS Debug observation
+does not change any rating; missing or invalid weights do not disable the
+independently calibrated eye/expression models.
+
 ## Local calibration loading
 
 The application does not redistribute these calibration weights. Debug builds

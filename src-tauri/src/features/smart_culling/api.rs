@@ -219,6 +219,8 @@ pub struct ReviewResult {
     pub width: u32,
     pub height: u32,
     pub faces: Vec<DetectedFaceDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portrait_quality: Option<super::portrait_quality::PortraitQualityObservation>,
     pub key_person_evidence: Vec<KeyPersonEvidenceDto>,
 }
 

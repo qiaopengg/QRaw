@@ -82,6 +82,7 @@ fn candidate(faces: Vec<FaceResult>) -> AnalysisCandidate {
         width: 100,
         height: 100,
         faces,
+        portrait_quality: None,
         #[cfg(all(debug_assertions, target_os = "macos"))]
         vision_quality: Default::default(),
         key_person_evidence: Vec::new(),
@@ -97,6 +98,85 @@ fn confirmed_key(priority: usize, face_index: usize) -> KeyPersonEvidence {
         auto_score_eligible: true,
         performance_rank: None,
     }
+}
+
+#[test]
+fn portrait_observation_cannot_override_rating_and_is_forwarded_to_review() {
+    use crate::features::smart_culling::{portrait_quality, scoring::organize_results};
+    use std::sync::atomic::AtomicBool;
+    for focus in [0.0, 30.0, 300.0] {
+        for quality_score in [-1000.0, 1000.0] {
+            let mut item = candidate(vec![face(20.0, 30.0, "open", "outstanding")]);
+            item.sharpness_metric = focus;
+            item.faces[0].sharpness_metric = focus;
+            let before = evaluate_mode("portrait", &item);
+            let mut observation = portrait_quality::observe(
+                &image::DynamicImage::new_rgb8(100, 100),
+                &item.faces,
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            observation.faces[0].quality_score = Some(quality_score);
+            observation.faces[0].quality_unavailable_reason = None;
+            item.portrait_quality = Some(observation);
+            let after = evaluate_mode("portrait", &item);
+            assert_eq!(after.rating, before.rating);
+            assert_eq!(after.requires_human_review, before.requires_human_review);
+            assert_eq!(after.reason_code, before.reason_code);
+            assert!(
+                after.rating <= 4,
+                "observations cannot invent the joint +1 star"
+            );
+            let result =
+                organize_results(std::path::Path::new("."), "portrait", vec![item]).remove(0);
+            let json = serde_json::to_value(result).unwrap();
+            assert_eq!(
+                json["portraitQuality"]["subjectFaceIndices"],
+                serde_json::json!([0])
+            );
+            assert_eq!(
+                json["portraitQuality"]["faces"][0]["qualityScore"],
+                serde_json::json!(quality_score)
+            );
+        }
+    }
+}
+
+#[test]
+fn portrait_observation_labels_the_same_subjects_as_the_rating_path() {
+    use crate::features::smart_culling::portrait_quality;
+    let mut item = candidate(vec![
+        face(5.0, 40.0, "open", "natural"),
+        face(55.0, 20.0, "open", "natural"),
+    ]);
+    item.portrait_quality = Some(
+        portrait_quality::observe(
+            &image::DynamicImage::new_rgb8(100, 100),
+            &item.faces,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        portrait_quality::for_review(&item)
+            .unwrap()
+            .subject_face_indices,
+        vec![0]
+    );
+    item.key_person_evidence = vec![confirmed_key(1, 1)];
+    assert_eq!(
+        portrait_quality::for_review(&item)
+            .unwrap()
+            .subject_face_indices,
+        vec![1]
+    );
+    item.key_person_evidence[0].status = "unknown".into();
+    assert!(
+        portrait_quality::for_review(&item)
+            .unwrap()
+            .subject_face_indices
+            .is_empty()
+    );
 }
 
 #[test]
@@ -317,6 +397,12 @@ fn uncertain_person_clarity_requires_review_without_guessing() {
     assert_eq!(evaluation.rating, 0);
     assert!(evaluation.requires_human_review);
     assert_eq!(evaluation.reason_code, "portrait_person_clarity_unresolved");
+}
+
+#[test]
+#[should_panic(expected = "portrait mode must use the discrete rating contract")]
+fn portrait_cannot_enter_legacy_weighted_rating_thresholds() {
+    rating_for_mode("portrait", 0.5);
 }
 
 #[test]

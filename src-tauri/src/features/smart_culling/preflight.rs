@@ -74,6 +74,12 @@ pub(crate) fn run_preflight(
         return Err(unsupported("gpu_inference_unavailable"));
     }
 
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    if let Err(error) = super::portrait_quality::model::preflight(&calibration_model_dir) {
+        // Auxiliary observations must not disable the calibrated eye/expression path.
+        log::warn!("Smart-culling eDifFIQA observation unavailable: {error}");
+    }
+
     let vision_observation_available = vision_observation_available();
 
     Ok((

@@ -87,6 +87,7 @@ mod tests {
             width: 1,
             height: 1,
             faces: Vec::new(),
+            portrait_quality: None,
             key_person_evidence: Vec::new(),
         }
     }

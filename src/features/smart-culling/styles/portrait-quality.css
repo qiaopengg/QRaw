@@ -1,0 +1,39 @@
+.sc-portrait-quality details {
+  padding: 9px 0;
+  border-top: 1px solid var(--sc-border, rgba(128, 128, 128, 0.2));
+}
+
+.sc-portrait-quality summary {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sc-portrait-quality summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.sc-portrait-quality dl {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.sc-portrait-quality dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sc-portrait-quality dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-portrait-quality .sc-portrait-quality-version {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  opacity: 0.65;
+}

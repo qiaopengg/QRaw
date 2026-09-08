@@ -123,6 +123,7 @@ mod tests {
             width: 100,
             height: 100,
             faces,
+            portrait_quality: None,
             #[cfg(all(debug_assertions, target_os = "macos"))]
             vision_quality: Default::default(),
             key_person_evidence: Vec::new(),

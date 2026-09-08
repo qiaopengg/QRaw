@@ -5,6 +5,7 @@ import { keyPersonIdentityLabel, useSmartCullingModes, useSmartCullingReasonText
 import type { ReviewResult } from '../types';
 import { fileName } from './LifecycleChrome';
 import { PhotoEvidenceViewport } from './PhotoEvidenceViewport';
+import { PortraitQualityEvidence } from './PortraitQualityEvidence';
 import { LabelControls, Stars } from './ReviewControls';
 
 export const ReviewInspector = forwardRef<
@@ -120,6 +121,9 @@ export const ReviewInspector = forwardRef<
           </>
         )}
       </section>
+      {result.source === 'ai' && result.portraitQuality ? (
+        <PortraitQualityEvidence evidence={result.portraitQuality} />
+      ) : null}
       <section>
         <h3>{tx('ratingAndLabel')}</h3>
         <Stars value={result.rating} onChange={readOnly ? undefined : (rating) => onEdit({ rating })} />

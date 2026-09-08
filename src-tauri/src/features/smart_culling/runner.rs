@@ -81,6 +81,22 @@ pub(crate) fn run_analysis(
                             &image,
                             &quality.faces,
                         );
+                        let portrait_quality = if mode == "portrait" {
+                            match super::portrait_quality::observe(
+                                &image,
+                                &quality.faces,
+                                cancellation,
+                            ) {
+                                Ok(observation) => Some(observation),
+                                Err(_) if cancellation.load(Ordering::Acquire) => break,
+                                Err(error) => {
+                                    log::warn!("Portrait quality observation unavailable: {error}");
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
                         if cancellation.load(Ordering::Acquire) {
                             break;
                         }
@@ -100,6 +116,7 @@ pub(crate) fn run_analysis(
                             width: quality.width,
                             height: quality.height,
                             faces: quality.faces,
+                            portrait_quality,
                             #[cfg(all(debug_assertions, target_os = "macos"))]
                             vision_quality,
                             key_person_evidence: Vec::new(),

@@ -14,7 +14,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import { useSmartCullingFailureText } from '../errorText';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
-import { reviewResultIsWritable } from '../reviewPolicy';
+import {
+  reviewResultBucket,
+  reviewResultIsWritable,
+  type ReviewResultBucket,
+} from '../reviewPolicy';
 import type { ReviewChange, ReviewResult, SmartCullingSnapshot } from '../types';
 import { runSmartCullingCommand, useSmartCullingStore } from '../useSmartCulling';
 import { ConfirmModal } from './ConfirmModal';
@@ -26,27 +30,13 @@ import { ReviewQueueNavigation } from './ReviewQueueNavigation';
 import { SimilarGroupReview } from './SimilarGroupReview';
 import { useDrawerFocus } from './useDrawerFocus';
 
-/** 筛选值沿用既有文案键名，避免在 i18n 中重复定义同义键。 */
-type ReviewFilter = 'all' | 'aiRated' | 'pending';
+/** 三个结果区互斥且覆盖全集；`all` 只用于取消结果区筛选。 */
+type ReviewFilter = 'all' | ReviewResultBucket;
 type CompareSlots = { groupId: string | null; a: string | null; b: string | null };
 type PendingMetadataEdit = {
   result: ReviewResult;
   patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>;
 };
-
-/** 「智能选图」：AI 已给出有效星级建议的结果。 */
-function isAiRatedResult(result: ReviewResult) {
-  return result.source === 'ai' && result.rating > 0;
-}
-
-/**
- * 「待人工复核」：取「智能选图」的补集，即 AI 未给出有效星级 + 已被人工改动过的全部结果。
- * 取补集而非直接判断 rating === 0，是为了让两个筛选互斥且并集恒等于全集，
- * 否则人工打过星的结果会两边都不落入，导致两组数量相加小于总数。
- */
-function needsManualReview(result: ReviewResult) {
-  return !isAiRatedResult(result);
-}
 
 export function ReviewWorkbench({
   snapshot,
@@ -62,7 +52,7 @@ export function ReviewWorkbench({
   const { focusedResultId, confirmOpen, manualSyncPending, setState } = useSmartCullingStore();
   const [folder, setFolder] = useState('all');
   const [filter, setFilter] = useState<ReviewFilter>(() =>
-    snapshot.results.some(needsManualReview) ? 'pending' : 'all',
+    snapshot.results.some((result) => reviewResultBucket(result) === 'pending') ? 'pending' : 'all',
   );
   const [query, setQuery] = useState('');
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -89,9 +79,7 @@ export function ReviewWorkbench({
           result.folder.toLocaleLowerCase().includes(normalizedQuery) ||
           result.path.toLocaleLowerCase().includes(normalizedQuery);
         const matchesFilter =
-          filter === 'all' ||
-          (filter === 'aiRated' && isAiRatedResult(result)) ||
-          (filter === 'pending' && needsManualReview(result));
+          filter === 'all' || reviewResultBucket(result) === filter;
         return matchesFolder && matchesQuery && matchesFilter;
       }),
     [filter, folder, normalizedQuery, snapshot.results],
@@ -109,7 +97,7 @@ export function ReviewWorkbench({
   const compareA = snapshot.results.find((result) => result.resultId === compareSlots.a) ?? null;
   const compareB = snapshot.results.find((result) => result.resultId === compareSlots.b) ?? null;
   const writable = snapshot.results.filter(reviewResultIsWritable).length;
-  const pendingQueue = snapshot.results.filter(needsManualReview);
+  const pendingQueue = snapshot.results.filter((result) => reviewResultBucket(result) === 'pending');
   const pending = pendingQueue.length;
   const pendingPosition = focused
     ? Math.max(0, pendingQueue.findIndex((result) => result.resultId === focused.resultId) + 1)
@@ -154,7 +142,11 @@ export function ReviewWorkbench({
     const other = slot === 'a' ? next.b : next.a;
     if (other && other !== result.resultId) setCompareOpen(true);
   };
-  const filterText = (item: ReviewFilter) => (item === 'aiRated' ? tx('aiRatedFilter') : tx(item));
+  const filterText = (item: ReviewFilter) => {
+    if (item === 'aiRated') return tx('aiRatedFilter');
+    if (item === 'aiRejected') return tx('aiRejectedFilter');
+    return tx(item);
+  };
   const goToNextPending = () => {
     if (pendingQueue.length === 0) return;
     const currentIndex = pendingQueue.findIndex((result) => result.resultId === focused?.resultId);
@@ -342,7 +334,7 @@ export function ReviewWorkbench({
               </button>
             </div>
             <nav>
-              {(['all', 'aiRated', 'pending'] as ReviewFilter[]).map((item) => (
+              {(['all', 'aiRated', 'aiRejected', 'pending'] as ReviewFilter[]).map((item) => (
                 <button key={item} className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)}>
                   {filterText(item)}
                 </button>

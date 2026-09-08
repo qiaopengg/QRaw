@@ -23,6 +23,7 @@ mod mode_evidence;
 mod mode_policy;
 mod mode_scoring;
 mod models;
+mod portrait_quality;
 mod portrait_rating;
 mod portrait_rating_adapter;
 mod preflight;

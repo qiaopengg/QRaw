@@ -278,7 +278,7 @@ fn ensure_not_cancelled(cancellation: Option<&AtomicBool>) -> Result<()> {
     }
 }
 
-fn crop_pixel_bbox(image: &DynamicImage, bbox: [f32; 4]) -> Option<DynamicImage> {
+pub(super) fn crop_pixel_bbox(image: &DynamicImage, bbox: [f32; 4]) -> Option<DynamicImage> {
     let (width, height) = image.dimensions();
     let x = bbox[0].max(0.0).floor() as u32;
     let y = bbox[1].max(0.0).floor() as u32;

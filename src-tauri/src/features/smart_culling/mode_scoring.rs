@@ -34,12 +34,9 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
     let policy = policy_for(strategy);
 
     let subjects = match strategy {
-        ModeStrategy::Portrait if item.key_person_evidence.is_empty() => important
-            .iter()
-            .copied()
-            .max_by(|left, right| face_area(left).total_cmp(&face_area(right)))
-            .into_iter()
-            .collect(),
+        ModeStrategy::Portrait if item.key_person_evidence.is_empty() => {
+            portrait_subjects(item).expect("portrait without key people has a subject list")
+        }
         ModeStrategy::Portrait | ModeStrategy::GroupWithKeyPeople => {
             let Some(subjects) = confirmed_key_subjects(item) else {
                 return manual_evaluation(
@@ -103,7 +100,9 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
     // Expression must be assessed before weighted combination, but a low
     // expression score is valid evidence rather than a reason to skip rating.
     if EXPRESSION_QUALITY_GATE_ENABLED
-        && policy.weights.expression > f64::EPSILON
+        && policy
+            .weights
+            .is_some_and(|weights| weights.expression > f64::EPSILON)
         && expression_assessment(&subjects) == ExpressionAssessment::Unknown
     {
         return manual_evaluation(
@@ -141,7 +140,9 @@ fn evaluate_strategy(
     subjects: &[&FaceResult],
 ) -> ModeEvaluation {
     let evidence = adapt_mode_evidence(item, subjects);
-    let weights = policy.weights;
+    let weights = policy
+        .weights
+        .expect("portrait mode must use the discrete rating adapter");
     let mut interval = combine_fixed_weights(&[
         WeightedEvidence {
             evidence: &evidence.person_clarity,
@@ -202,6 +203,19 @@ fn evaluate_strategy(
     }
 }
 
+pub(super) fn portrait_subjects(item: &AnalysisCandidate) -> Option<Vec<&FaceResult>> {
+    if !item.key_person_evidence.is_empty() {
+        return confirmed_key_subjects(item);
+    }
+    Some(
+        important_faces(item)
+            .into_iter()
+            .max_by(|left, right| face_area(left).total_cmp(&face_area(right)))
+            .into_iter()
+            .collect(),
+    )
+}
+
 fn confirmed_key_subjects(item: &AnalysisCandidate) -> Option<Vec<&FaceResult>> {
     if item.key_person_evidence.is_empty()
         || item
@@ -225,7 +239,7 @@ fn cap_interval(mut interval: FixedScoreInterval, cap: f64) -> FixedScoreInterva
 
 fn rating_thresholds(mode: &str) -> [f64; 4] {
     match mode {
-        "portrait" => [0.32, 0.48, 0.63, 0.79],
+        "portrait" => panic!("portrait mode must use the discrete rating contract"),
         "environment" => [0.34, 0.50, 0.65, 0.80],
         "group" => [0.30, 0.46, 0.62, 0.78],
         _ => [0.34, 0.50, 0.64, 0.78],
@@ -274,7 +288,9 @@ fn key_subject_unresolved_reason(strategy: ModeStrategy) -> &'static str {
 
 fn clarity_gate_reason(strategy: ModeStrategy, target: ClarityGateTarget) -> &'static str {
     match (strategy, target) {
-        (ModeStrategy::Portrait, ClarityGateTarget::Person) => "portrait_person_unclear",
+        (ModeStrategy::Portrait, _) => {
+            unreachable!("portrait clarity is handled by the discrete rating adapter")
+        }
         (ModeStrategy::GroupWithKeyPeople, ClarityGateTarget::Person) => "group_key_person_unclear",
         (ModeStrategy::GroupScene, ClarityGateTarget::Image) => "group_image_unclear",
         (ModeStrategy::Environment, ClarityGateTarget::Image) => "environment_image_unclear",
@@ -287,16 +303,15 @@ fn clarity_gate_reason(strategy: ModeStrategy, target: ClarityGateTarget) -> &'s
 }
 
 fn closed_eye_reason(strategy: ModeStrategy) -> &'static str {
-    if strategy == ModeStrategy::Portrait {
-        "portrait_closed_eyes"
-    } else {
-        "group_closed_eyes"
-    }
+    debug_assert_eq!(strategy, ModeStrategy::GroupWithKeyPeople);
+    "group_closed_eyes"
 }
 
 fn expression_unresolved_reason(strategy: ModeStrategy) -> &'static str {
     match strategy {
-        ModeStrategy::Portrait => "portrait_expression_unresolved",
+        ModeStrategy::Portrait => {
+            unreachable!("portrait expression is handled by the discrete rating adapter")
+        }
         ModeStrategy::GroupWithKeyPeople => "group_expression_unresolved",
         ModeStrategy::Environment => "environment_expression_unresolved",
         ModeStrategy::AutoPeople => "auto_expression_unresolved",
@@ -311,19 +326,12 @@ fn strategy_reason(
     requires_human_review: bool,
     has_missing_evidence: bool,
 ) -> &'static str {
-    if matches!(
-        strategy,
-        ModeStrategy::Portrait | ModeStrategy::GroupWithKeyPeople
-    ) {
+    if strategy == ModeStrategy::GroupWithKeyPeople {
         if eye_disposition == Some(EyeDisposition::Unusable) {
             return closed_eye_reason(strategy);
         }
         if eye_disposition == Some(EyeDisposition::DeliberatePoseCandidate) {
-            return if strategy == ModeStrategy::Portrait {
-                "portrait_deliberate_eye_pose"
-            } else {
-                "group_deliberate_eye_pose"
-            };
+            return "group_deliberate_eye_pose";
         }
     }
     if subjects
@@ -331,7 +339,9 @@ fn strategy_reason(
         .any(|face| face.expression_state == "transitional")
     {
         return match strategy {
-            ModeStrategy::Portrait => "portrait_expression_transition",
+            ModeStrategy::Portrait => {
+                unreachable!("portrait expression is handled by the discrete rating adapter")
+            }
             ModeStrategy::GroupWithKeyPeople => "group_expression_transition",
             ModeStrategy::Environment => "environment_expression_transition",
             ModeStrategy::AutoPeople => "auto_expression_transition",
@@ -339,7 +349,9 @@ fn strategy_reason(
         };
     }
     match (strategy, requires_human_review, has_missing_evidence) {
-        (ModeStrategy::Portrait, true, _) => "portrait_evidence_interval_review",
+        (ModeStrategy::Portrait, _, _) => {
+            unreachable!("portrait scoring must not enter the weighted scorer")
+        }
         (ModeStrategy::GroupWithKeyPeople, true, _) => "group_key_evidence_interval_review",
         (ModeStrategy::GroupScene, true, _) => "group_scene_evidence_interval_review",
         (ModeStrategy::Environment, true, _) => "environment_evidence_interval_review",
@@ -347,7 +359,6 @@ fn strategy_reason(
         (ModeStrategy::AutoPeople | ModeStrategy::AutoScene, true, _) => {
             "auto_evidence_interval_review"
         }
-        (ModeStrategy::Portrait, false, true) => "portrait_partial_evidence_same_tier",
         (ModeStrategy::GroupWithKeyPeople, false, true) => "group_key_partial_evidence_same_tier",
         (ModeStrategy::GroupScene, false, true) => "group_scene_partial_evidence_same_tier",
         (ModeStrategy::Environment, false, true) => "environment_partial_evidence_same_tier",
@@ -355,7 +366,6 @@ fn strategy_reason(
         (ModeStrategy::AutoPeople | ModeStrategy::AutoScene, false, true) => {
             "auto_partial_evidence_same_tier"
         }
-        (ModeStrategy::Portrait, false, false) => "portrait_weighted_score",
         (ModeStrategy::GroupWithKeyPeople, false, false) => "group_key_weighted_score",
         (ModeStrategy::GroupScene, false, false) => "group_scene_weighted_score",
         (ModeStrategy::Environment, false, false) => "environment_weighted_score",

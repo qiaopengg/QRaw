@@ -1,8 +1,9 @@
 //! Immutable mode-to-signal policy for smart culling.
 //!
 //! This module owns only product policy: which evidence participates in a
-//! shooting mode and its fixed weight. Model inference and score calibration
-//! live elsewhere so they cannot silently change these contracts.
+//! shooting mode and its fixed weight. Portrait keeps only its routing and
+//! clarity target here; its discrete rating contract lives in portrait_rating.
+//! Model inference and score calibration live elsewhere.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModeStrategy {
@@ -40,7 +41,8 @@ impl SignalWeights {
 pub(crate) struct ModePolicy {
     pub strategy: ModeStrategy,
     pub clarity_gate: ClarityGateTarget,
-    pub weights: SignalWeights,
+    /// `None` means this strategy has its own non-weighted rating contract.
+    pub weights: Option<SignalWeights>,
     pub closed_eye_hard_cap: bool,
 }
 
@@ -61,73 +63,67 @@ pub(crate) const fn policy_for(strategy: ModeStrategy) -> ModePolicy {
         ModeStrategy::Portrait => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Person,
-            weights: SignalWeights {
-                person_clarity: 0.0,
-                eyes: 0.40,
-                expression: 0.40,
-                optical: 0.10,
-                composition: 0.10,
-            },
+            weights: None,
             closed_eye_hard_cap: false,
         },
         ModeStrategy::GroupWithKeyPeople => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Person,
-            weights: SignalWeights {
+            weights: Some(SignalWeights {
                 person_clarity: 0.0,
                 eyes: 0.40,
                 expression: 0.40,
                 optical: 0.10,
                 composition: 0.10,
-            },
+            }),
             closed_eye_hard_cap: true,
         },
         ModeStrategy::GroupScene => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Image,
-            weights: SignalWeights {
+            weights: Some(SignalWeights {
                 person_clarity: 0.0,
                 eyes: 0.0,
                 expression: 0.0,
                 optical: 0.90,
                 composition: 0.10,
-            },
+            }),
             closed_eye_hard_cap: false,
         },
         ModeStrategy::Environment => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Image,
-            weights: SignalWeights {
+            weights: Some(SignalWeights {
                 person_clarity: 0.05,
                 eyes: 0.05,
                 expression: 0.05,
                 optical: 0.50,
                 composition: 0.35,
-            },
+            }),
             closed_eye_hard_cap: false,
         },
         ModeStrategy::Landscape | ModeStrategy::AutoScene => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Image,
-            weights: SignalWeights {
+            weights: Some(SignalWeights {
                 person_clarity: 0.0,
                 eyes: 0.0,
                 expression: 0.0,
                 optical: 0.50,
                 composition: 0.50,
-            },
+            }),
             closed_eye_hard_cap: false,
         },
         ModeStrategy::AutoPeople => ModePolicy {
             strategy,
             clarity_gate: ClarityGateTarget::Image,
-            weights: SignalWeights {
+            weights: Some(SignalWeights {
                 person_clarity: 0.50,
                 eyes: 0.15,
                 expression: 0.15,
                 optical: 0.10,
                 composition: 0.10,
-            },
+            }),
             closed_eye_hard_cap: false,
         },
     }
@@ -154,9 +150,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_strategy_has_exactly_one_hundred_percent_weight() {
+    fn every_weighted_strategy_has_exactly_one_hundred_percent_weight() {
         let strategies = [
-            ModeStrategy::Portrait,
             ModeStrategy::GroupWithKeyPeople,
             ModeStrategy::GroupScene,
             ModeStrategy::Environment,
@@ -166,18 +161,21 @@ mod tests {
         ];
 
         for strategy in strategies {
-            assert!((policy_for(strategy).weights.total() - 1.0).abs() < f64::EPSILON);
+            let weights = policy_for(strategy)
+                .weights
+                .expect("non-portrait strategies must use fixed weights");
+            assert!((weights.total() - 1.0).abs() < f64::EPSILON);
         }
+        assert_eq!(policy_for(ModeStrategy::Portrait).weights, None);
+        assert_eq!(
+            policy_for(ModeStrategy::Portrait).clarity_gate,
+            ClarityGateTarget::Person
+        );
     }
 
     #[test]
-    fn every_strategy_keeps_its_exact_frozen_weights_and_clarity_gate() {
+    fn every_weighted_strategy_keeps_its_exact_frozen_weights_and_clarity_gate() {
         let expected = [
-            (
-                ModeStrategy::Portrait,
-                ClarityGateTarget::Person,
-                [0.0, 0.40, 0.40, 0.10, 0.10],
-            ),
             (
                 ModeStrategy::GroupWithKeyPeople,
                 ClarityGateTarget::Person,
@@ -210,18 +208,21 @@ mod tests {
             ),
         ];
 
-        for (strategy, clarity_gate, weights) in expected {
+        for (strategy, clarity_gate, expected_weights) in expected {
             let policy = policy_for(strategy);
             assert_eq!(policy.clarity_gate, clarity_gate);
+            let actual_weights = policy
+                .weights
+                .expect("non-portrait strategies must use fixed weights");
             assert_eq!(
                 [
-                    policy.weights.person_clarity,
-                    policy.weights.eyes,
-                    policy.weights.expression,
-                    policy.weights.optical,
-                    policy.weights.composition,
+                    actual_weights.person_clarity,
+                    actual_weights.eyes,
+                    actual_weights.expression,
+                    actual_weights.optical,
+                    actual_weights.composition,
                 ],
-                weights
+                expected_weights
             );
         }
     }
@@ -229,7 +230,7 @@ mod tests {
     #[test]
     fn only_key_person_group_keeps_the_legacy_closed_eye_hard_cap() {
         let capped = [ModeStrategy::GroupWithKeyPeople];
-        let weighted_only = [
+        let uncapped = [
             ModeStrategy::Portrait,
             ModeStrategy::GroupScene,
             ModeStrategy::Environment,
@@ -244,7 +245,7 @@ mod tests {
                 .all(|strategy| policy_for(strategy).closed_eye_hard_cap)
         );
         assert!(
-            weighted_only
+            uncapped
                 .into_iter()
                 .all(|strategy| !policy_for(strategy).closed_eye_hard_cap)
         );

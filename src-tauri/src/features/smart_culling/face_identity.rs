@@ -55,7 +55,7 @@ pub fn run_sface_embedding(
     normalize_embedding(embedding)
 }
 
-fn align_face(image: &DynamicImage, landmarks: &[(f32, f32); 5]) -> Result<RgbImage> {
+pub(super) fn align_face(image: &DynamicImage, landmarks: &[(f32, f32); 5]) -> Result<RgbImage> {
     if landmarks
         .iter()
         .flat_map(|point| [point.0, point.1])

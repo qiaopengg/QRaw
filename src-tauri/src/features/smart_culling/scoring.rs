@@ -38,6 +38,7 @@ pub(crate) struct AnalysisCandidate {
     pub width: u32,
     pub height: u32,
     pub faces: Vec<FaceResult>,
+    pub portrait_quality: Option<super::portrait_quality::PortraitQualityObservation>,
     #[cfg(all(debug_assertions, target_os = "macos"))]
     pub vision_quality: super::vision_quality_poc::VisionQualitySignals,
     pub key_person_evidence: Vec<KeyPersonEvidence>,
@@ -181,6 +182,7 @@ pub(crate) fn organize_results(
                     requires_human_review,
                     width: candidate.width,
                     height: candidate.height,
+                    portrait_quality: super::portrait_quality::for_review(candidate),
                     faces: candidate
                         .faces
                         .iter()
@@ -446,6 +448,7 @@ mod tests {
             width: 100,
             height: 100,
             faces: Vec::new(),
+            portrait_quality: None,
             #[cfg(all(debug_assertions, target_os = "macos"))]
             vision_quality: Default::default(),
             key_person_evidence: Vec::new(),
