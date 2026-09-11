@@ -36,25 +36,15 @@ pub(super) fn observe(
         quality_score: None,
         quality_unavailable_reason: Some(Reason::InvalidFaceBox),
     };
+    let crop = match validated_crop(image, face.bbox) {
+        Ok(crop) => crop,
+        Err(reason) => {
+            result.quality_unavailable_reason = Some(reason);
+            return result;
+        }
+    };
     let [x, y, width, height] = face.bbox;
     let (frame_width, frame_height) = image.dimensions();
-    if face.bbox.iter().any(|value| !value.is_finite())
-        || width <= 0.0
-        || height <= 0.0
-        || x + width <= 0.0
-        || y + height <= 0.0
-        || x >= frame_width as f32
-        || y >= frame_height as f32
-    {
-        return result;
-    }
-    if x < 0.0 || y < 0.0 || x + width > frame_width as f32 || y + height > frame_height as f32 {
-        result.quality_unavailable_reason = Some(Reason::PartialFace);
-        return result;
-    }
-    let Some(crop) = crop_pixel_bbox(image, face.bbox) else {
-        return result;
-    };
     result.crop_dimensions = Some([crop.width(), crop.height()]);
     result.detail = detail::measure(&crop);
     result.optical = optical::measure(&crop);
@@ -102,6 +92,29 @@ pub(super) fn observe(
     }
     result.quality_unavailable_reason = Some(Reason::ModelUnavailable);
     result
+}
+
+pub(super) fn validated_crop(
+    image: &DynamicImage,
+    bbox: [f32; 4],
+) -> Result<DynamicImage, QualityUnavailableReason> {
+    use QualityUnavailableReason as Reason;
+    let [x, y, width, height] = bbox;
+    let (frame_width, frame_height) = image.dimensions();
+    if bbox.iter().any(|value| !value.is_finite())
+        || width <= 0.0
+        || height <= 0.0
+        || x + width <= 0.0
+        || y + height <= 0.0
+        || x >= frame_width as f32
+        || y >= frame_height as f32
+    {
+        return Err(Reason::InvalidFaceBox);
+    }
+    if x < 0.0 || y < 0.0 || x + width > frame_width as f32 || y + height > frame_height as f32 {
+        return Err(Reason::PartialFace);
+    }
+    crop_pixel_bbox(image, bbox).ok_or(Reason::InvalidFaceBox)
 }
 
 fn placement(bbox: [f32; 4], width: u32, height: u32) -> FacePlacementMeasurements {

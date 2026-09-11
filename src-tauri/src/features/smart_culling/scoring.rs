@@ -183,6 +183,11 @@ pub(crate) fn organize_results(
                     width: candidate.width,
                     height: candidate.height,
                     portrait_quality: super::portrait_quality::for_review(candidate),
+                    portrait_rating: super::portrait_rating_evidence::for_review(
+                        candidate,
+                        evaluation,
+                        requires_human_review,
+                    ),
                     faces: candidate
                         .faces
                         .iter()

@@ -1,0 +1,42 @@
+{
+  "version": "qraw-clarity-stress-1",
+  "candidate_version": "qraw-clarity-detail-gap-candidate-0.1",
+  "sample_count": 24,
+  "detail_absolute_tolerance": 1e-8,
+  "checks": {
+    "baseline_matches_frozen_observations": true,
+    "background_detail_changes_allowed": 0,
+    "blurry_promotions_after_noise_or_sharpen_allowed": 0,
+    "rendered_source_accepted_allowed": 0,
+    "resize_darkening_and_box_shift_are_sensitivity_only": true,
+    "synthetic_variants_are_not_new_human_truth": true,
+    "independent_holdout_required_before_runtime": true
+  },
+  "cases": [
+    {"id": "original", "kind": "original", "value": 0},
+    {"id": "background_flat", "kind": "background", "value": 128},
+    {"id": "background_checker", "kind": "background", "value": -1},
+    {"id": "face_blur_2", "kind": "blur", "value": 2},
+    {"id": "face_blur_6", "kind": "blur", "value": 6},
+    {"id": "noise_8", "kind": "noise", "value": 8},
+    {"id": "noise_24", "kind": "noise", "value": 24},
+    {"id": "noise_48", "kind": "noise", "value": 48},
+    {"id": "unsharpen_1_2", "kind": "unsharpen", "value": 1.2},
+    {"id": "noise24_unsharpen", "kind": "noise_sharpen", "value": 24},
+    {"id": "face_dark_025", "kind": "darken", "value": 0.25},
+    {"id": "preview_1600", "kind": "resize", "value": 1600},
+    {"id": "preview_720", "kind": "resize", "value": 720},
+    {"id": "preview_360", "kind": "resize", "value": 360},
+    {"id": "box_left_5pct", "kind": "box_shift", "value": -0.05},
+    {"id": "box_right_5pct", "kind": "box_shift", "value": 0.05}
+  ],
+  "notes": [
+    "候选和阈值固定，不调用 fit；失败不能改协议或删除样本。",
+    "固定人工指定脸框，不重跑检测；背景检查只证明固定框内局部测量隔离。",
+    "噪声为面部 RGB 各通道固定种子的均匀整数扰动 ±value，不模拟真实传感器噪声。",
+    "noise_sharpen 先加噪再使用 image::unsharpen(sigma=1.2, threshold=0)。",
+    "背景替换不改变指定框内任何像素；面部扰动不改变框外像素。",
+    "resize 用现有 image::thumbnail 且不放大，按实际新旧尺寸映射脸框，不冒充 GPU 渲染。",
+    "对合成变体强制套用 decodedRgb8 数值门槛仅为反事实敏感性诊断，同时单独检查真实来源门禁。"
+  ]
+}

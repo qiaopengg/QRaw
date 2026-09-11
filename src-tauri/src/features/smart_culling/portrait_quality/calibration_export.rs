@@ -10,6 +10,7 @@ const TEST: &str = "features::smart_culling::portrait_quality::calibration_expor
 const CHILD: &str = "QRAW_PORTRAIT_QUALITY_EXPORT_CHILD";
 const INPUT: &str = "QRAW_PORTRAIT_QUALITY_IMAGE_DIR";
 const OUTPUT: &str = "QRAW_PORTRAIT_QUALITY_OUTPUT";
+const CALIBRATION: &str = "QRAW_PORTRAIT_QUALITY_CALIBRATION";
 const PASS: &str = "QRAW_PORTRAIT_QUALITY_EXPORT_PASS";
 
 #[test]
@@ -64,8 +65,15 @@ fn run_export() -> Result<()> {
                 })
     });
     paths.sort();
-    // A bounded smoke probe, never a substitute for a frozen labelled benchmark.
-    paths.truncate(12);
+    let calibration = std::env::var(CALIBRATION).as_deref() == Ok("1");
+    if calibration {
+        // Explicit small-batch export: never silently truncate a labelled batch.
+        if paths.len() > 200 {
+            return Err(anyhow!("calibration export is limited to 200 images"));
+        }
+    } else {
+        paths.truncate(12);
+    }
     if paths.is_empty() {
         return Err(anyhow!("no JPEG/PNG probe images"));
     }
@@ -81,7 +89,12 @@ fn run_export() -> Result<()> {
         let image = image::load_from_memory(&bytes).with_context(|| path.display().to_string())?;
         let analyzed = analyze_image_quality(&image, true, false, Some(&models), None)?;
         let mut variants = Vec::new();
-        for sigma in [0.0, 2.0, 6.0] {
+        let sigmas: &[f32] = if calibration {
+            &[0.0]
+        } else {
+            &[0.0, 2.0, 6.0]
+        };
+        for &sigma in sigmas {
             let started = std::time::Instant::now();
             let input = if sigma == 0.0 {
                 image.clone()
@@ -116,12 +129,21 @@ fn run_export() -> Result<()> {
             path.file_name().unwrap().to_string_lossy(),
             analyzed.faces.len()
         );
-        rows.push(json!({"path": path, "sha256": source_hash, "variants": variants}));
+        // Only geometry/quality; do not serialize identity or expression descriptors.
+        let detections = analyzed.faces.iter().enumerate().map(|(index, face)| {
+            json!({"faceIndex": index, "bbox": face.bbox, "detectionScore": face.detection_score,
+                "sharpnessMetric": face.sharpness_metric, "sharpnessConfidence": face.sharpness_confidence})
+        }).collect::<Vec<_>>();
+        rows.push(
+            json!({"path": path, "sha256": source_hash, "variants": variants,
+            "detections": detections, "wholeImageSharpness": analyzed.sharpness_metric}),
+        );
     }
     if scored_faces == 0 {
         return Err(anyhow!("probe produced no real-photo quality scores"));
     }
-    let report = json!({"schema": "qraw-portrait-quality-probe-1", "accuracyValidated": false,
+    let report = json!({"schema": "qraw-portrait-quality-probe-2", "accuracyValidated": false,
+        "exportPurpose": if calibration { "clarityCalibration" } else { "smokeProbe" },
         "modelVersion": super::super::scoring::MODEL_VERSION, "policyVersion": super::super::scoring::POLICY_VERSION,
         "scoredFaceVariants": scored_faces, "maxOfficialReferenceError": max_reference_error, "rows": rows});
     let mut file = fs::OpenOptions::new()

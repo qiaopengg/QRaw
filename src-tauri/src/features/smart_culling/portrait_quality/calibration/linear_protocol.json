@@ -1,0 +1,29 @@
+{
+  "version": "qraw-clarity-linear-noise-method-1",
+  "candidate_version": "qraw-clarity-linear-noise-gap-candidate-0.3",
+  "measurement_version": "qraw-face-linear-noise-detail-1",
+  "measurement": "linearNoiseDetailV1",
+  "input_source": "decodedRgb8LosslessGeometry",
+  "features": {"fineEnergy": 1, "coarseToFineRatio": -1},
+  "method": {
+    "roi": "15 percent inset per dimension, same as existing local detail; no resampling",
+    "smoothing_kernels": [[0.25, 0.5, 0.25], [0.0625, 0.25, 0.375, 0.25, 0.0625]],
+    "response": "four-neighbour Laplacian after separable f64 binomial smoothing",
+    "energy": "mean squared response on shared valid support, exclude 3 pixels on every side",
+    "noise_sigma": "reuse robust-detail-1 high-pass median scale; no camera-noise calibration claimed",
+    "correction": "signed correctedEnergy = observedEnergy - noiseSigma^2 * sum(compositeKernel^2)",
+    "ratio": "coarse corrected energy / fine corrected energy; missing if either is nonpositive",
+    "fitter": "originals only, one fit, 25/75 percent class-extrema gap per feature; all must agree",
+    "fit_failure": "save explicit rejected candidate with empty thresholds; never remove samples or features",
+    "synthetic_unit_probe": "flat images, known-variance integer uniform white noise, fixed structure blur/exposure"
+  },
+  "notes": [
+    "0.3 为新数学假设，不是通过抬高或删掉 0.2 门槛修补结果。两个能量特征相关，不算独立投票。",
+    "噪声校正恒等式仅适用于零均值、像素独立白噪声；纹理、裁切、压缩及锐化相关噪声可破坏估计。",
+    "先固定方法和代码，再看原图新特征并拟合一次；随后保留原 24×16 条件，不使用变体重新拟合。",
+    "保留负校正值；不将过度扣除解释为模糊，不用全部未知包装成功。",
+    "原图及每种噪声/锐化条件继续报告误放、清晰降模糊、未知；沿用 0.2 筛查底线。",
+    "侧脸/像素尺寸保留，不以 FIQA 或 landmark 缺失删除指定人脸；缩图仍只是敏感性观测。",
+    "合成变体没有新人工真值。独立留出 0；本版本仅 test 编译，不接正式评分或运行时观测。"
+  ]
+}

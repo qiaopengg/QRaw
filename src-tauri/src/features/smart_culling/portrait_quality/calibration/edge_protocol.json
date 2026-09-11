@@ -1,0 +1,30 @@
+{
+  "version": "qraw-clarity-edge-spread-method-1",
+  "candidate_version": "qraw-clarity-edge-spread-gap-candidate-0.4",
+  "measurement_version": "qraw-face-edge-spread-1",
+  "measurement": "edgeSpreadV1",
+  "input_source": "decodedRgb8LosslessGeometry",
+  "features": {"widthP25": -1},
+  "method": {
+    "roi": "15 percent face inset; no resampling; inner minimum dimension 41; margin 20",
+    "localization": "f64 order-8 binomial smoothing, central gradient >=2; normal nonmaximum suppression; strongest per 4x4 cell; maximum 2048 profiles",
+    "sampling": "native grayscale through image::interpolate_bilinear (f32 interpolation, f64 accumulation); normal -15..15, tangent -6..6 averaged",
+    "profile_smoothing": "binomial order 4, kernel [1,4,6,4,1]/16, valid support only",
+    "contrast": "mean last 3 minus mean first 3 >=24 gray levels",
+    "plateau": "endpoint deviation <=0.2*contrast+4; each endpoint 2-pixel span change <=0.5*peak one-pixel profile slope",
+    "monotonicity": "total backward variation <=0.2*contrast+4",
+    "width": "first interpolated 90-percent crossing minus first 10-percent crossing, positive native-pixel width",
+    "support": "at least 6 accepted profiles; lower nearest-rank quartile; also report median/p75, contrast and all rejection counts",
+    "fitter": "originals only, one fit; existing 25/75-percent class-extrema gap; missing/overlap rejects whole fit",
+    "noise_correction": "none; no threshold fitted to noise observations or supplied clean reference"
+  },
+  "notes": [
+    "新空间过渡假设，仅 test 编译，不接运行时观测或正式门禁；不是 CPBD 软件或论文的复现。",
+    "先在已知 step/flat 上检查。初版漏检截断过渡，失败及代码归档于边缘过渡机制_v1/prototype_1；固定中心对照定位原因后补平台检查，原测试标准不变。",
+    "3 个基础测试通过只证明已测合成图形行为，不能预言真实人脸或 384 条件通过。",
+    "下四分位数可能偏向毛发或噪声伪边缘；低对比、曲边、纹理和不足支持可能导致未知。保留全部照片，不剔除困难样本。",
+    "同一原像素宽度不具有缩图尺度不变性；缩图/暗化/脸框偏移仍仅为敏感性，不新增人工真值。",
+    "保留原16条件和筛查底线：噪声/锐化模糊数值误放0、清晰降模糊0、未知<=20%；原图明确定论正确占比>=90%。",
+    "来源完全混杂，独立留出0；每类至少20张且人物/拍摄组隔离仍是替换门禁前的必要条件。"
+  ]
+}

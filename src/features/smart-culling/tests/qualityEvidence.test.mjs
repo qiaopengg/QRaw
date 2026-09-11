@@ -1,28 +1,8 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import { featureModule, renderComponent } from './componentHarness.mjs';
 
-// Exercise the actual component without adding a DOM/test framework dependency.
-const require = createRequire(import.meta.url);
-// Use the same CJS instances as the bundle, including its i18next context.
-const React = require('react');
-const { renderToStaticMarkup } = require('react-dom/server');
-const { createInstance } = require('i18next');
-const { I18nextProvider } = require('react-i18next');
-const bundled = await build({
-  entryPoints: [fileURLToPath(new URL('../components/PortraitQualityEvidence.tsx', import.meta.url))],
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  write: false,
-  packages: 'external',
-  loader: { '.css': 'empty' },
-});
-const compiled = { exports: {} };
-new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(require, compiled, compiled.exports);
-const { PortraitQualityEvidence } = compiled.exports;
+const { PortraitQualityEvidence } = await featureModule('../components/PortraitQualityEvidence.tsx');
 
 function evidence() {
   return {
@@ -50,12 +30,8 @@ function evidence() {
   };
 }
 
-async function render(value, language = 'zh-CN') {
-  const i18n = createInstance();
-  await i18n.init({ lng: language, resources: { [language]: { translation: { fixture: 'ready' } } } });
-  return renderToStaticMarkup(
-    React.createElement(I18nextProvider, { i18n }, React.createElement(PortraitQualityEvidence, { evidence: value })),
-  );
+function render(value, language = 'zh-CN') {
+  return renderComponent(PortraitQualityEvidence, { evidence: value }, language);
 }
 
 test('measurements clearly remain uncalibrated and raw score is not a percentage', async () => {
@@ -106,4 +82,62 @@ test('all unavailable reasons and English copy render without undefined labels',
     assert.ok(!html.includes('undefined'));
     assert.ok(!html.includes('0.4200'));
   }
+});
+
+function clarity() {
+  return {
+    version: 'qraw-clarity-input-1',
+    inputSource: 'decodedRgb8LosslessGeometry',
+    inputDimensions: [200, 200],
+    unavailableReason: null,
+    faces: [
+      {
+        faceIndex: 0,
+        bbox: [30, 30, 120, 120],
+        unavailableReason: null,
+        detail: { nativeDimensions: [84, 84], nativeLaplacian: 987.65 },
+        robustDetail: { denoisedDetail: { nativeLaplacian: 432.1 } },
+      },
+    ],
+  };
+}
+
+test('original and rendered face details stay distinguishable and neither becomes a focus verdict', async () => {
+  const html = await render({ ...evidence(), clarity: clarity() });
+  for (const text of [
+    '原图人脸细节（待校准）',
+    '已读取与当前人脸位置对应的原像素',
+    '84 × 84',
+    '987.65',
+    '432.10',
+    '32.50',
+    '缺少观测不表示照片模糊',
+  ])
+    assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('清晰度通过'));
+});
+
+test('unavailable native input never relabels rendered pixels or shows stale native measurements', async () => {
+  for (const reason of [
+    'notRequested',
+    'rawSourceUnvalidated',
+    'contentEdited',
+    'geometryUnvalidated',
+    'invalidAdjustments',
+    'invalidCrop',
+    'decodeFailed',
+    'renderDimensionsMismatch',
+  ]) {
+    const native = { ...clarity(), unavailableReason: reason };
+    for (const language of ['zh-CN', 'en']) {
+      const html = await render({ ...evidence(), clarity: native }, language);
+      assert.ok(!html.includes('987.65'));
+      assert.ok(!html.includes('undefined'));
+      assert.ok(html.includes('32.50'));
+    }
+  }
+  const absent = await render(evidence());
+  assert.ok(absent.includes('本次没有原图清晰度补充观测'));
+  const wrongSource = await render({ ...evidence(), clarity: { ...clarity(), inputSource: 'renderedRgb8' } });
+  assert.ok(!wrongSource.includes('987.65'));
 });

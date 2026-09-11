@@ -58,4 +58,36 @@ export interface PortraitQualityObservation {
   optical: OpticalMeasurements | null;
   faces: FaceQualityObservation[];
   subjectFaceIndices: number[];
+  clarity?: ClarityObservation | null;
+}
+
+export type ClarityInputUnavailable =
+  | 'notRequested'
+  | 'rawSourceUnvalidated'
+  | 'contentEdited'
+  | 'geometryUnvalidated'
+  | 'invalidAdjustments'
+  | 'invalidCrop'
+  | 'decodeFailed'
+  | 'renderDimensionsMismatch';
+
+export interface ClarityObservation {
+  version: string;
+  inputSource: 'decodedRgb8LosslessGeometry';
+  inputDimensions: [number, number] | null;
+  sourceSha256: string | null;
+  adjustmentsSha256: string | null;
+  unavailableReason: ClarityInputUnavailable | null;
+  faces: Array<{
+    faceIndex: number;
+    bbox: [number, number, number, number];
+    detail: FaceDetailMeasurements | null;
+    robustDetail: {
+      version: string;
+      noiseSigma: number;
+      medianRadius: number;
+      denoisedDetail: FaceDetailMeasurements;
+    } | null;
+    unavailableReason: QualityUnavailableReason | null;
+  }>;
 }

@@ -15,6 +15,7 @@ import { toast } from 'react-toastify';
 import { useSmartCullingFailureText } from '../errorText';
 import { useSmartCullingModes, useSmartCullingText } from '../i18n';
 import {
+  reviewChangeFor,
   reviewResultBucket,
   reviewResultIsWritable,
   type ReviewResultBucket,
@@ -113,16 +114,14 @@ export function ReviewWorkbench({
       return snapshot;
     }
   };
-  const changeFor = (
-    result: ReviewResult,
-    patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>,
-  ): ReviewChange => ({
-    resultId: result.resultId,
-    rating: patch.rating ?? result.rating,
-    colorLabel: patch.colorLabel === undefined ? result.colorLabel : patch.colorLabel,
-  });
-  const commitMetadataEdit = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) =>
-    void update([changeFor(result, patch)]);
+  const commitMetadataEdit = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => {
+    const change = reviewChangeFor(result, patch);
+    if (!change) {
+      toast.info(tx('ratingRequiredBeforeLabel'));
+      return;
+    }
+    void update([change]);
+  };
   const editMetadata = (result: ReviewResult, patch: Partial<Pick<ReviewResult, 'rating' | 'colorLabel'>>) => {
     if (result.source === 'ai' && !manualEditAcknowledged) {
       setPendingMetadataEdit({ result, patch });
@@ -181,7 +180,7 @@ export function ReviewWorkbench({
         const direction = event.key === 'ArrowLeft' ? -1 : 1;
         const nextIndex = Math.min(visible.length - 1, Math.max(0, currentIndex + direction));
         setState({ focusedResultId: visible[nextIndex].resultId });
-      } else if (focused && !readOnly && /^[1-5]$/.test(event.key)) {
+      } else if (focused && !readOnly && /^[0-5]$/.test(event.key)) {
         event.preventDefault();
         editMetadata(focused, { rating: Number(event.key) });
       }

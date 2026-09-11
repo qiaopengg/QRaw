@@ -26,10 +26,13 @@ mod models;
 mod portrait_quality;
 mod portrait_rating;
 mod portrait_rating_adapter;
+mod portrait_rating_evidence;
 mod preflight;
 mod quality_evidence;
 mod review_policy;
 mod runner;
+#[cfg(all(test, target_os = "macos"))]
+mod sampnet_gpu_test;
 mod scoring;
 mod task_recovery;
 mod types;

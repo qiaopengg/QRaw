@@ -28,12 +28,7 @@ pub(crate) fn adapt_portrait_rating(
     };
     let eyes = eye_rating_state(subjects);
     let expression = expression_rating_state(subjects);
-    // QRaw has a conservative optical proxy and an observation-only aesthetics
-    // signal, but no jointly validated optical+composition decision yet.
-    let optical_aesthetic = OpticalAestheticChecks {
-        optical: ValidationState::UnableToDetermine,
-        aesthetic_composition: ValidationState::UnableToDetermine,
-    };
+    let optical_aesthetic = optical_aesthetic_checks();
     let decision = calculate_portrait_rating(PortraitRatingInput {
         subject_clarity,
         eyes,
@@ -46,7 +41,15 @@ pub(crate) fn adapt_portrait_rating(
     }
 }
 
-fn eye_rating_state(subjects: &[&FaceResult]) -> EyeRatingState {
+pub(super) fn optical_aesthetic_checks() -> OpticalAestheticChecks {
+    // Measurements do not establish independently validated pass decisions.
+    OpticalAestheticChecks {
+        optical: ValidationState::UnableToDetermine,
+        aesthetic_composition: ValidationState::UnableToDetermine,
+    }
+}
+
+pub(super) fn eye_rating_state(subjects: &[&FaceResult]) -> EyeRatingState {
     match weakest_eye_disposition(subjects) {
         Some(EyeDisposition::Open) => EyeRatingState::Passed,
         Some(EyeDisposition::Unusable) => EyeRatingState::Failed,
@@ -56,7 +59,7 @@ fn eye_rating_state(subjects: &[&FaceResult]) -> EyeRatingState {
     }
 }
 
-fn expression_rating_state(subjects: &[&FaceResult]) -> ExpressionRatingState {
+pub(super) fn expression_rating_state(subjects: &[&FaceResult]) -> ExpressionRatingState {
     if subjects.is_empty() {
         return ExpressionRatingState::UnableToDetermine;
     }

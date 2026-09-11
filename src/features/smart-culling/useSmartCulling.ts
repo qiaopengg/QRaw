@@ -53,7 +53,12 @@ export async function runSmartCullingCommand(request: SmartCullingRequest, prese
     current.setState({
       snapshot,
       screen: preserveScreen ? current.screen : screenForTaskTransition(current.screen, snapshot),
-      mode: request.action === 'detectPeople' ? current.mode : (snapshot.mode ?? current.mode),
+      // Folder preflight returns its default mode after an asynchronous model
+      // check. Keep a shooting mode the user selected while that check ran.
+      mode:
+        request.action === 'detectPeople' || request.action === 'inspect'
+          ? current.mode
+          : (snapshot.mode ?? current.mode),
       keyPeople: clearPeople ? [] : current.keyPeople,
       focusedResultId,
       busy: false,

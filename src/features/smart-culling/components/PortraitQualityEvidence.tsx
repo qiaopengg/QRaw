@@ -1,5 +1,6 @@
 import { useSmartCullingText, type SmartCullingTextKey } from '../i18n';
 import type { OpticalMeasurements, PortraitQualityObservation, QualityUnavailableReason } from '../qualityEvidence';
+import { PortraitClarityEvidence } from './PortraitClarityEvidence';
 import '../styles/portrait-quality.css';
 
 const unavailableText: Record<QualityUnavailableReason, SmartCullingTextKey> = {
@@ -43,6 +44,7 @@ export function PortraitQualityEvidence({ evidence }: { evidence: PortraitQualit
     <section className="sc-portrait-quality">
       <h3>{tx('qualityObservationTitle')}</h3>
       <p className="sc-review-evidence-hint">{tx('qualityObservationHint')}</p>
+      <PortraitClarityEvidence evidence={evidence.clarity} />
       <details>
         <summary>{tx('qualityFrameOptical')}</summary>
         {evidence.optical ? <OpticalStats evidence={evidence.optical} /> : <p>{tx('qualityNoMeasurements')}</p>}

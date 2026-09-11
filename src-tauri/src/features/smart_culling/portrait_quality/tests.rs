@@ -2,6 +2,22 @@ use super::*;
 use crate::features::smart_culling::types::{EyeDisposition, EyeResult};
 use image::{Rgb, RgbImage};
 
+#[path = "clarity_observation_tests.rs"]
+mod clarity_observation_tests;
+#[path = "stress_probe.rs"]
+mod stress_probe;
+
+#[path = "decomposition_probe.rs"]
+mod decomposition_probe;
+#[path = "degradation_probe.rs"]
+mod degradation_probe;
+#[path = "noise_decomposition_tests.rs"]
+mod noise_decomposition_tests;
+#[path = "observed_noise_probe.rs"]
+mod observed_noise_probe;
+#[path = "paired_probe_io.rs"]
+mod paired_probe_io;
+
 fn sample_face() -> FaceResult {
     FaceResult {
         bbox: [40.0, 40.0, 120.0, 120.0],

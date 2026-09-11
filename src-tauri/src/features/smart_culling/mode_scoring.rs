@@ -22,6 +22,7 @@ pub(crate) struct ModeEvaluation {
     pub confidence: f32,
     pub requires_human_review: bool,
     pub reason_code: &'static str,
+    pub portrait_decision: Option<PortraitRatingDecision>,
 }
 
 pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEvaluation {
@@ -57,6 +58,18 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
         return manual_evaluation("environment", "environment_subject_unreliable");
     }
 
+    // Explicit native-input failures cannot be overridden by rendered legacy
+    // focus. Older observations without this input contract keep their behavior.
+    if strategy == ModeStrategy::Portrait
+        && item
+            .portrait_quality
+            .as_ref()
+            .and_then(|quality| quality.clarity.as_ref())
+            .is_some_and(|clarity| clarity.unavailable_reason.is_some())
+    {
+        return manual_evaluation("portrait", "portrait_person_clarity_unresolved");
+    }
+
     let clarity = clarity_evidence(policy.clarity_gate, item, &subjects);
     if strategy == ModeStrategy::Portrait {
         return match adapt_portrait_rating(&clarity, &subjects) {
@@ -74,6 +87,7 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
                     rating,
                     confidence,
                     requires_human_review: false,
+                    portrait_decision: Some(decision),
                     reason_code: match decision {
                         PortraitRatingDecision::SubjectUnclear => "portrait_person_unclear",
                         PortraitRatingDecision::Scored(_) => "portrait_discrete_partial_evidence",
@@ -200,6 +214,7 @@ fn evaluate_strategy(
         confidence: interval.confidence.clamp(0.0, 1.0) as f32,
         requires_human_review,
         reason_code,
+        portrait_decision: None,
     }
 }
 
@@ -264,6 +279,7 @@ fn manual_evaluation(mode: &str, reason_code: &'static str) -> ModeEvaluation {
         confidence: 0.0,
         requires_human_review: true,
         reason_code,
+        portrait_decision: None,
     }
 }
 
@@ -275,6 +291,7 @@ fn one_star_evaluation(mode: &str, reason_code: &'static str) -> ModeEvaluation 
         confidence: LEGACY_CLARITY_CONFIDENCE_CAP as f32,
         requires_human_review: false,
         reason_code,
+        portrait_decision: None,
     }
 }
 

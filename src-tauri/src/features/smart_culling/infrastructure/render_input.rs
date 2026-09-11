@@ -5,6 +5,8 @@ use std::fs;
 use image::{DynamicImage, GenericImageView};
 use tauri::{AppHandle, State};
 
+use super::decode_snapshot::decode_portrait_snapshot;
+use super::{ClarityInput, ClarityInputUnavailable};
 use crate::AppState;
 use crate::adjustment_utils::{apply_all_transformations, hydrate_adjustments};
 use crate::app_settings::load_settings;
@@ -21,6 +23,11 @@ use crate::lut_processing::get_or_load_lut;
 use crate::mask_generation::{
     MaskDefinition, generate_mask_bitmap, resolve_warped_image_for_masks,
 };
+
+pub(crate) struct AnalysisRenderInput {
+    pub image: DynamicImage,
+    pub clarity: ClarityInput,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RenderInputError {
@@ -61,6 +68,15 @@ pub(crate) fn render_current_state(
     state: &State<'_, AppState>,
     app_handle: &AppHandle,
 ) -> Result<DynamicImage, RenderInputError> {
+    render_analysis_input(path, state, app_handle, false).map(|input| input.image)
+}
+
+pub(crate) fn render_analysis_input(
+    path: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+    capture_clarity: bool,
+) -> Result<AnalysisRenderInput, RenderInputError> {
     let context = get_or_init_gpu_context(state, app_handle).map_err(RenderInputError::Gpu)?;
     let (source_path, sidecar_path) = parse_virtual_path(path);
     let source_path_string = source_path.to_string_lossy().to_string();
@@ -69,26 +85,41 @@ pub(crate) fn render_current_state(
     let mut adjustments = load_sidecar(&sidecar_path).adjustments;
     hydrate_adjustments(state, &mut adjustments);
 
-    let base_image = match read_file_mapped(&source_path) {
-        Ok(mapped) => load_and_composite(
-            &mapped,
-            &source_path_string,
-            &adjustments,
-            false,
-            &settings,
-            None,
-        ),
-        Err(_) => {
-            let bytes = fs::read(&source_path)
-                .map_err(|error| RenderInputError::Read(error.to_string()))?;
+    // Both planes use the same bytes and sidecar snapshot. No second file read
+    // after GPU work, which could silently refer to a different edit/source.
+    let decode = |bytes: &[u8]| {
+        let base = if capture_clarity {
+            decode_portrait_snapshot(bytes, &source_path_string, &adjustments, &settings)?
+        } else {
             load_and_composite(
-                &bytes,
+                bytes,
                 &source_path_string,
                 &adjustments,
                 false,
                 &settings,
                 None,
-            )
+            )?
+        };
+        let clarity = if capture_clarity {
+            ClarityInput::from_bytes(bytes, is_raw_file(&source_path_string), &adjustments)
+        } else {
+            ClarityInput::unavailable(ClarityInputUnavailable::NotRequested)
+        };
+        Ok::<_, anyhow::Error>((base, clarity))
+    };
+    let (base_image, mut clarity) = match read_file_mapped(&source_path) {
+        Ok(mapped) => {
+            if capture_clarity {
+                // Own the snapshot: an mmap alone can change between the two decoders.
+                decode(&mapped.to_vec())
+            } else {
+                decode(&mapped)
+            }
+        }
+        Err(_) => {
+            let bytes = fs::read(&source_path)
+                .map_err(|error| RenderInputError::Read(error.to_string()))?;
+            decode(&bytes)
         }
     }
     .map_err(|error| RenderInputError::Decode(error.to_string()))?;
@@ -128,8 +159,8 @@ pub(crate) fn render_current_state(
         _ => None,
     };
 
-    let job_hash = calculate_full_job_hash(&source_path_string, &adjustments);
-    process_and_get_dynamic_image(
+    let job_hash = analysis_job_hash(&source_path_string, &adjustments, capture_clarity);
+    let image = process_and_get_dynamic_image(
         &context,
         state,
         transformed.as_ref(),
@@ -142,7 +173,20 @@ pub(crate) fn render_current_state(
         },
         "smart_culling_render_input",
     )
-    .map_err(RenderInputError::Gpu)
+    .map_err(RenderInputError::Gpu)?;
+    clarity.check_render_dimensions(image.dimensions());
+    Ok(AnalysisRenderInput { image, clarity })
+}
+
+fn analysis_job_hash(path: &str, adjustments: &serde_json::Value, capture_clarity: bool) -> u64 {
+    if capture_clarity {
+        // The host cache keys only path/edits/dimensions, not source bytes or
+        // preprocessing settings. Force a fresh upload for this paired snapshot.
+        let snapshot_key = format!("qraw-clarity:{}:{path}", uuid::Uuid::new_v4());
+        calculate_full_job_hash(&snapshot_key, adjustments)
+    } else {
+        calculate_full_job_hash(path, adjustments)
+    }
 }
 
 fn ensure_texture_dimensions(
@@ -163,6 +207,17 @@ fn ensure_texture_dimensions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paired_clarity_render_cannot_reuse_a_stale_same_path_texture() {
+        let edits = serde_json::json!({});
+        let original = calculate_full_job_hash("same.png", &edits);
+        let first = analysis_job_hash("same.png", &edits, true);
+        let second = analysis_job_hash("same.png", &edits, true);
+        assert_ne!(first, original);
+        assert_ne!(first, second);
+        assert_eq!(analysis_job_hash("same.png", &edits, false), original);
+    }
 
     #[test]
     fn rejects_images_that_host_renderer_would_silently_bypass() {

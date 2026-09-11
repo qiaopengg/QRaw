@@ -1,5 +1,6 @@
 import type { SmartCullingMode } from './constants';
 import type { PortraitQualityObservation } from './qualityEvidence';
+import type { PortraitRatingEvidence } from './portraitRating';
 
 export type SmartCullingState =
   | 'idle'
@@ -125,6 +126,7 @@ export interface ReviewResult {
   height: number;
   faces: DetectedFace[];
   portraitQuality?: PortraitQualityObservation | null;
+  portraitRating?: PortraitRatingEvidence | null;
   keyPersonEvidence: KeyPersonEvidence[];
 }
 

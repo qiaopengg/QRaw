@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::analysis::{analyze_image_quality, apply_source_clarity_metrics};
 use super::api::{DetectedFaceDto, FailureItem, KeyPersonSelection, ReviewResult};
 use super::face_identity::{KeyPersonReference, aggregate_reference_embeddings, match_key_people};
-use super::infrastructure::{CatalogAsset, render_current_state};
+use super::infrastructure::{CatalogAsset, render_analysis_input, render_current_state};
 use super::models::SmartCullingFaceModels;
 use super::scoring::{AnalysisCandidate, organize_results};
 use super::types::{KeyPersonEvidence, MIN_RELIABLE_FACE_DETECTION_SCORE};
@@ -55,8 +55,9 @@ pub(crate) fn run_analysis(
             .iter()
             .map(|path| path.to_string_lossy().to_string())
             .collect::<Vec<_>>();
-        match render_current_state(&path, &state, app_handle) {
-            Ok(image) => {
+        match render_analysis_input(&path, &state, app_handle, mode == "portrait") {
+            Ok(input) => {
+                let image = input.image;
                 if cancellation.load(Ordering::Acquire) {
                     break;
                 }
@@ -71,7 +72,11 @@ pub(crate) fn run_analysis(
                         if cancellation.load(Ordering::Acquire) {
                             break;
                         }
-                        if !is_raw_file(&path)
+                        if mode == "portrait" {
+                            if let Some(source) = input.clarity.image() {
+                                apply_source_clarity_metrics(source, &mut quality);
+                            }
+                        } else if !is_raw_file(&path)
                             && let Ok(source) = image::open(&asset.display_path)
                         {
                             apply_source_clarity_metrics(&source, &mut quality);
@@ -82,8 +87,9 @@ pub(crate) fn run_analysis(
                             &quality.faces,
                         );
                         let portrait_quality = if mode == "portrait" {
-                            match super::portrait_quality::observe(
+                            match super::portrait_quality::observe_with_clarity(
                                 &image,
+                                &input.clarity,
                                 &quality.faces,
                                 cancellation,
                             ) {

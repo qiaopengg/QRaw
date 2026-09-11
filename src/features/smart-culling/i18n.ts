@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SmartCullingMode } from './constants';
+import { portraitReviewEn, portraitReviewZh } from './portraitReviewText';
 
 const zhModes: Record<SmartCullingMode, [string, string]> = {
   auto: ['自动 / 混合场景', '自动判断不同场景并组织结果'],
@@ -48,11 +49,11 @@ const zhReasons: Record<string, string> = {
   key_person_identity_unknown: '指定人物身份无法可靠判断，请人工确认',
   auto_people_uncertain: '自动模式：存在较弱人物线索，无法可靠按无人场景打星',
   environment_subject_unreliable: '环境人像：未找到可靠人物主体，保持 0 星并请人工确认',
-  portrait_key_person_unresolved: '人像模式：指定人物未全部确认，保持 0 星并请人工确认',
+  portrait_key_person_unresolved: '人像模式：指定人物未全部确认，未生成有效评分，进入待人工复核',
   group_key_person_unresolved: '群像模式：指定人物未全部确认，保持 0 星并请人工确认',
   key_person_unresolved: '指定人物未全部可靠确认，保持 0 星并请人工确认',
   portrait_person_unclear: '人像模式：人物清晰门禁确认不清晰，按 0 星进入弃选区',
-  portrait_person_clarity_unresolved: '人像模式：人物清晰度无法可靠确认，保持 0 星并请人工确认',
+  portrait_person_clarity_unresolved: '人像模式：人物清晰度无法可靠确认，未生成有效评分，进入待人工复核',
   portrait_discrete_partial_evidence: '人像模式：已按离散规则评分；无法确定的评分项按 0 增量处理',
   group_key_person_unclear: '群像模式：指定人物清晰门禁未通过，按 1 星处理',
   group_image_unclear: '群像模式：整体画面清晰门禁未通过，按 1 星处理',
@@ -119,12 +120,12 @@ const enReasons: Record<string, string> = {
   auto_people_uncertain: 'Auto: weak person evidence prevents a reliable scene-only rating; review manually',
   environment_subject_unreliable:
     'Environmental portrait: no reliable person subject was found; kept at 0 stars for manual review',
-  portrait_key_person_unresolved: 'Portrait: not every selected person is confirmed; kept at 0 stars for manual review',
+  portrait_key_person_unresolved: 'Portrait: not every selected person is confirmed; unrated, awaiting manual review',
   group_key_person_unresolved: 'Group: not every selected person is confirmed; kept at 0 stars for manual review',
   key_person_unresolved: 'Not every selected person can be confirmed reliably; kept at 0 stars for manual review',
   portrait_person_unclear: 'Portrait: the person-clarity gate confirmed an unclear subject; assigned 0 stars',
   portrait_person_clarity_unresolved:
-    'Portrait: subject clarity could not be confirmed reliably; kept at 0 stars for review',
+    'Portrait: subject clarity could not be confirmed reliably; unrated, awaiting manual review',
   portrait_discrete_partial_evidence:
     'Portrait: discrete rating applied; unresolved signals contributed zero increments',
   group_key_person_unclear: 'Group: the selected-person clarity gate failed; assigned 1 star',
@@ -183,14 +184,14 @@ function reasonText(code: string, isChinese: boolean) {
     const label = keyPersonIdentityLabel(Number(priority));
     const zhState = {
       confirmed: '已确认包含',
-      missing: '未包含，保持 0 星并请人工确认',
+      missing: '未包含，未生成有效评分，请人工确认',
       suspected: '疑是关键人物，请人工确认',
       ambiguous: '可能匹配多人，请人工确认',
       unknown: '无法可靠判断，请人工确认',
     }[state];
     const enState = {
       confirmed: 'confirmed present',
-      missing: 'not present; kept at 0 stars for manual review',
+      missing: 'not present; unrated, awaiting manual review',
       suspected: 'possibly present; verify manually',
       ambiguous: 'matches more than one candidate; verify manually',
       unknown: 'cannot be determined reliably; verify manually',
@@ -202,9 +203,10 @@ function reasonText(code: string, isChinese: boolean) {
 }
 
 const zh = {
+  ...portraitReviewZh,
   title: '智能选图',
   setupTitle: '设置本次筛选',
-  setupDescription: '仅分析当前文件夹中的照片，不进入子文件夹。确认前不会写入任何星级或标签。',
+  setupDescription: '仅分析当前文件夹中的照片，不进入子文件夹。确认前不写入星级或标签；图库读取照片时可能缓存 EXIF 元数据。',
   calibrationBuildTitle: '当前为校准与人工辅助版本',
   calibrationBuildHint:
     '眼态、表情、光学、构图和关键人物尚未全部通过发布准入。请逐张复核 AI 结果，不要将本版本用于无人值守批量确认。',
@@ -259,7 +261,7 @@ const zh = {
   reviewEvidenceHint: '建议只用于定位复核重点；请以照片本身作出最终决定。',
   qualityObservationTitle: '新质量证据（待校准）',
   qualityObservationHint:
-    '以下为当前预览的实测数据，尚不参与自动打星。质量分不是清晰概率，色调和构图位置也不等于审美结论。',
+    '以下为补充质量观测，尚不参与自动打星。原图与当前渲染画面的观测分别列出；质量分不是清晰概率，色调和构图位置也不等于审美结论。',
   qualityFrameOptical: '整张照片：曝光与色彩观测',
   qualityHighlights: '高光裁切估计',
   qualityShadows: '暗部裁切估计',
@@ -271,8 +273,8 @@ const zh = {
   qualityModelObserved: '人脸质量模型已输出观测值，尚未转为清晰度结论',
   qualityFacePixels: '人脸区域像素',
   qualityModelScore: '人脸质量原始分',
-  qualityNativeDetail: '局部细节（原尺度）',
-  qualityScaledDetail: '局部细节（受控尺度）',
+  qualityNativeDetail: '画面局部细节（原尺度）',
+  qualityScaledDetail: '画面局部细节（受控尺度）',
   qualityCompositionHint: '人脸中心到构图参考位置的归一化距离；越小仅表示越接近，不代表构图通过。',
   qualityCenterDistance: '距画面中心',
   qualityThirdsDistance: '距最近三分交点',
@@ -341,7 +343,7 @@ const zh = {
   partialReviewPrefix: '本次只完成',
   partialReviewSuffix: '其余照片未处理且不会写入',
   awaitingReview: '尚待你确认',
-  unconfirmedNotWritten: '确认前不会写入任何 .rrdata',
+  unconfirmedNotWritten: '确认前不会写入智能选图星级或标签',
   openReview: '进入复核',
   dismiss: '关闭提示',
   keepCompleted: '保留已完成结果',
@@ -495,10 +497,11 @@ const zh = {
 };
 
 const en: Record<keyof typeof zh, string> = {
+  ...portraitReviewEn,
   title: 'Smart Culling',
   setupTitle: 'Set up this cull',
   setupDescription:
-    'Analyze photos directly in this folder without entering subfolders. Nothing is written before confirmation.',
+    'Analyze photos directly in this folder without entering subfolders. Ratings and labels are not written before confirmation; Library may cache EXIF metadata when reading photos.',
   calibrationBuildTitle: 'Calibration and review-assist build',
   calibrationBuildHint:
     'Eye, expression, optical, composition, and key-person capabilities have not all passed release gates. Review every AI result; do not use this build for unattended bulk confirmation.',
@@ -555,7 +558,7 @@ const en: Record<keyof typeof zh, string> = {
   reviewEvidenceHint: 'Suggestions help focus review; make the final decision from the photo itself.',
   qualityObservationTitle: 'New quality evidence (uncalibrated)',
   qualityObservationHint:
-    'Measurements of the current preview; not used for ratings. Quality scores are not focus probabilities, and color or placement is not an aesthetic verdict.',
+    'Supplemental quality observations; not used for ratings. Original and rendered evidence are listed separately. Quality scores are not focus probabilities, and color or placement is not an aesthetic verdict.',
   qualityFrameOptical: 'Whole frame: exposure and color observations',
   qualityHighlights: 'Estimated highlight clipping',
   qualityShadows: 'Estimated shadow clipping',
@@ -640,7 +643,7 @@ const en: Record<keyof typeof zh, string> = {
   partialReviewPrefix: 'This task completed only',
   partialReviewSuffix: 'remaining photos were not processed and will not be written',
   awaitingReview: 'waiting for your confirmation',
-  unconfirmedNotWritten: 'Nothing is written to .rrdata before confirmation',
+  unconfirmedNotWritten: 'Smart-culling ratings and labels are not written before confirmation',
   openReview: 'Open review',
   dismiss: 'Dismiss',
   keepCompleted: 'Keep completed results',

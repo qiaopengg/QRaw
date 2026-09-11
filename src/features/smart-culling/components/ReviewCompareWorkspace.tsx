@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { useSmartCullingReasonText, useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
+import { reviewResultNeedsAttention } from '../reviewPolicy';
 import { fileName } from './LifecycleChrome';
 import { type EvidenceViewState, PhotoEvidenceViewport } from './PhotoEvidenceViewport';
 import { LabelControls, Stars } from './ReviewControls';
@@ -33,10 +34,10 @@ function DecisionControls({
 }) {
   return (
     <div className="sc-review-decision-controls">
-      <Stars value={result.rating} onChange={readOnly ? undefined : (rating) => onRating(result, rating)} compact />
+      <Stars result={result} onChange={readOnly ? undefined : (rating) => onRating(result, rating)} compact />
       <LabelControls
         value={result.colorLabel}
-        disabled={readOnly}
+        disabled={readOnly || reviewResultNeedsAttention(result)}
         onChange={(colorLabel) => onLabel(result, colorLabel)}
       />
     </div>

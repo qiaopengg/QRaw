@@ -65,7 +65,7 @@ export function ReviewResultCard({
           )}
         </div>
         <div className="sc-gallery-card-status">
-          <Stars value={result.rating} compact />
+          <Stars result={result} compact />
           <i className={`sc-color-dot is-${result.colorLabel ?? 'none'}`} />
           {result.protected ? (
             <span title={tx('lockedResultHint')}>

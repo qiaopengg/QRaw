@@ -4,6 +4,15 @@ use super::*;
 use crate::features::smart_culling::expression::EXPRESSION_QUALITY_REASON;
 use crate::features::smart_culling::types::{EyeResult, KeyPersonEvidence};
 
+#[path = "portrait_quality/clarity_replay.rs"]
+mod clarity_replay;
+
+#[path = "portrait_clarity_input_scoring_tests.rs"]
+mod portrait_clarity_input_scoring;
+
+#[path = "portrait_rating_evidence_tests.rs"]
+mod portrait_rating_evidence;
+
 fn eye(state: &str) -> EyeResult {
     EyeResult {
         open_probability: None,

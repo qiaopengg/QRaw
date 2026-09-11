@@ -3,6 +3,8 @@
 //! This module stays a pure policy layer. The active scorer reaches it only
 //! through `portrait_rating_adapter`, which owns evidence-to-state mapping.
 
+use serde::Serialize;
+
 pub(crate) const PORTRAIT_RATING_POLICY_VERSION: &str = "qraw-portrait-rating-discrete-1.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +13,8 @@ pub(crate) enum SubjectClarity {
     Unclear,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum EyeRatingState {
     UnableToDetermine,
     Passed,
@@ -28,7 +31,8 @@ impl EyeRatingState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum ExpressionRatingState {
     UnableToDetermine,
     SevereFailure,
@@ -50,14 +54,16 @@ impl ExpressionRatingState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum ValidationState {
     Passed,
     NotPassed,
     UnableToDetermine,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct OpticalAestheticChecks {
     pub(crate) optical: ValidationState,
     pub(crate) aesthetic_composition: ValidationState,
@@ -83,7 +89,8 @@ pub(crate) struct PortraitRatingInput {
     pub(crate) optical_aesthetic: OpticalAestheticChecks,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PortraitRatingBreakdown {
     pub(crate) eye_increment: i8,
     pub(crate) expression_increment: i8,

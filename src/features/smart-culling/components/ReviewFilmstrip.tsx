@@ -95,11 +95,7 @@ export function ReviewFilmstrip({
                 {comparisonSlot ? <i>{comparisonSlot}</i> : null}
               </button>
               <div className="sc-review-filmstrip-meta">
-                <Stars
-                  value={result.rating}
-                  onChange={readOnly ? undefined : (rating) => onRating(result, rating)}
-                  compact
-                />
+                <Stars result={result} onChange={readOnly ? undefined : (rating) => onRating(result, rating)} compact />
                 <span title={fileName(result.path)}>{fileName(result.path)}</span>
                 <i className={`sc-color-dot is-${result.colorLabel ?? 'none'}`} />
               </div>

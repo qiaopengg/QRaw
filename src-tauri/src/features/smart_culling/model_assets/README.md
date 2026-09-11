@@ -20,6 +20,33 @@ conversion and hardware/photo probes are documented in
 does not change any rating; missing or invalid weights do not disable the
 independently calibrated eye/expression models.
 
+The separate composition candidate's official spectral-saliency preprocessing,
+source/weight audit and pending conversion dependencies are documented in
+[`sampnet/README.md`](sampnet/README.md). Only input parity has been verified;
+the candidate does not yet run in QRaw or change optical/composition ratings.
+
+## Repeatable eye/expression resource inventory
+
+`release_inventory.py` reads the existing eye/expression runtime filename and
+SHA-256 constants, verifies the four development assets, and checks the supplied
+resource tree for ONNX files matching either the calibration names or bytes.
+Missing/empty resources, missing/changed models and source contract drift fail
+explicitly. Reports are created only at new paths; no asset or runtime is edited.
+
+```sh
+python3 -m unittest discover -s src-tauri/src/features/smart_culling/model_assets -p 'test_release_inventory.py' -v
+python3 src-tauri/src/features/smart_culling/model_assets/release_inventory.py --resource-dir src-tauri/resources --output '<new report.json>'
+```
+
+2026-09-11: six regression tests pass; all four calibration hashes match and
+the default resource tree contains four other ONNX files. This is a source/model
+inventory, not a build hook or a final installer audit. It does not assess arbitrary
+renamed non-ONNX files, compiled binaries, licensing or accuracy. `release_ready`
+remains false; independent camera acceptance and weight redistribution clearance
+are still required. The current [upstream HSE library statement](https://github.com/sb-ai-lab/EmotiEffLib/blob/main/emotiefflib/README.md)
+expressly licenses library code; this check does not expand that statement into
+a complete model/data rights clearance.
+
 ## Local calibration loading
 
 The application does not redistribute these calibration weights. Debug builds

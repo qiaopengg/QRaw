@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QRaw 人脸清晰度标注 · 第001批</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div><h1>只判断：框内人脸是否清晰</h1><p>不评价表情、睁闭眼、曝光或构图。本轮数字是按钮编号，不是星级。</p></div>
+      <strong id="progress" aria-live="polite">正在载入……</strong>
+    </header>
+    <main>
+      <section><h2>整张照片 · 只看绿色框内的人脸</h2><div class="overview"><canvas id="overview" aria-label="原图与指定人脸框"></canvas></div></section>
+      <section><h2>人脸细节 <label><select id="zoom" aria-label="细节显示比例"><option value="1">100% 原像素</option><option value="2">200% 放大查看</option></select></label></h2><div class="detail"><canvas id="detail" aria-label="指定人脸原像素细节"></canvas><p id="no-face" hidden>没有有效人脸框，请选择“暂不判断”。</p></div><p id="scale-note">100%：1 个原图像素对应 1 个屏幕物理像素；大图可以滚动查看。</p></section>
+    </main>
+    <footer>
+      <div class="navigation"><button id="previous" disabled>← 上一张</button><span id="position">—</span><button id="next" disabled>下一张 →</button><button id="clear" disabled>清除本张判断</button></div>
+      <div class="labels">
+        <button data-label="1" disabled><b>1 · 清晰</b><span>面部细节可辨，达到你正常保留的清晰度</span></button>
+        <button data-label="2" disabled><b>2 · 明显模糊</b><span>确实失焦或晃动，面部细节糊成一片</span></button>
+        <button data-label="3" disabled><b>3 · 暂不判断</b><span>边界拿不准、遮挡或人脸框不对，不勉强选</span></button>
+      </div>
+      <p id="status" role="status">照片只读；每次选择自动另存，刷新可继续。</p>
+      <p id="complete" hidden>本轮已全部保存。请回复 AI：<strong>清晰度第001批标注完成</strong></p>
+      <p id="error" role="alert" hidden></p>
+    </footer>
+  </body>
+</html>

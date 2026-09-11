@@ -88,6 +88,7 @@ mod tests {
             height: 1,
             faces: Vec::new(),
             portrait_quality: None,
+            portrait_rating: None,
             key_person_evidence: Vec::new(),
         }
     }

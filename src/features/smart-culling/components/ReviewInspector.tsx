@@ -3,9 +3,11 @@ import { forwardRef } from 'react';
 import { useProcessStore } from '../../../store/useProcessStore';
 import { keyPersonIdentityLabel, useSmartCullingModes, useSmartCullingReasonText, useSmartCullingText } from '../i18n';
 import type { ReviewResult } from '../types';
+import { reviewResultNeedsAttention } from '../reviewPolicy';
 import { fileName } from './LifecycleChrome';
 import { PhotoEvidenceViewport } from './PhotoEvidenceViewport';
 import { PortraitQualityEvidence } from './PortraitQualityEvidence';
+import { PortraitRatingEvidence } from './PortraitRatingEvidence';
 import { LabelControls, Stars } from './ReviewControls';
 
 export const ReviewInspector = forwardRef<
@@ -39,10 +41,12 @@ export const ReviewInspector = forwardRef<
   const reason = useSmartCullingReasonText();
   const modeCopy = useSmartCullingModes();
   const thumbnail = useProcessStore((state) => state.thumbnails[result.path]);
+  const unrated = reviewResultNeedsAttention(result);
+  const ratingSummary = unrated ? tx('unrated') : `${result.rating}/5 ${tx('starRating')}`;
   const groupSummary =
     result.groupSize > 1
-      ? `${result.rating}/5 ${tx('starRating')} · ${result.groupSize} ${tx('groupSuffix')}`
-      : `${result.rating}/5 ${tx('starRating')} · ${tx('singlePhoto')}`;
+      ? `${ratingSummary} · ${result.groupSize} ${tx('groupSuffix')}`
+      : `${ratingSummary} · ${tx('singlePhoto')}`;
   const sourceLabel = `${tx('source')}:`;
   const keyPersonStatusText = (status: ReviewResult['keyPersonEvidence'][number]['status']) => {
     if (status === 'confirmed') return tx('keyPersonConfirmed');
@@ -98,7 +102,9 @@ export const ReviewInspector = forwardRef<
             <p>{reason(result.reasonCodes)}</p>
             <p className="sc-review-evidence-hint">{tx('reviewEvidenceHint')}</p>
             {result.requiresHumanReview ? <p className="sc-review-human-check">{tx('needsHumanReview')}</p> : null}
-            {result.faces.length > 0 ? <p className="sc-expression-pending">{tx('expressionPending')}</p> : null}
+            {result.mode !== 'portrait' && result.faces.length > 0 ? (
+              <p className="sc-expression-pending">{tx('expressionPending')}</p>
+            ) : null}
             {result.keyPersonEvidence.length > 0 ? (
               <div className="sc-key-person-evidence">
                 <UserRoundSearch size={14} />
@@ -121,15 +127,17 @@ export const ReviewInspector = forwardRef<
           </>
         )}
       </section>
+      <PortraitRatingEvidence result={result} />
       {result.source === 'ai' && result.portraitQuality ? (
         <PortraitQualityEvidence evidence={result.portraitQuality} />
       ) : null}
       <section>
         <h3>{tx('ratingAndLabel')}</h3>
-        <Stars value={result.rating} onChange={readOnly ? undefined : (rating) => onEdit({ rating })} />
+        <Stars result={result} onChange={readOnly ? undefined : (rating) => onEdit({ rating })} />
+        {unrated && !readOnly ? <p>{tx('ratingRequiredBeforeLabel')}</p> : null}
         <LabelControls
           value={result.colorLabel}
-          disabled={readOnly}
+          disabled={readOnly || unrated}
           onChange={(colorLabel) => onEdit({ colorLabel })}
         />
         <div className="sc-mode-select">

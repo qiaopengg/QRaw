@@ -8,11 +8,45 @@ use serde::Serialize;
 
 use super::types::FaceResult;
 
+mod clarity_observation;
+#[cfg(test)]
+mod cross_channel_detail;
+#[cfg(test)]
+mod decomposition_trace;
+#[cfg(test)]
+mod degradation_cases;
+#[cfg(test)]
+mod degradation_intermediates;
 mod detail;
+#[cfg(test)]
+mod edge_profile;
+#[cfg(test)]
+mod edge_spread;
 mod face;
+#[cfg(test)]
+mod linear_detail;
+#[cfg(test)]
+mod linear_response;
+#[cfg(test)]
+mod mechanism_energy;
+#[cfg(test)]
+mod mechanism_samples;
 #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
 pub(crate) mod model;
+#[cfg(test)]
+mod noise_covariance;
+#[cfg(test)]
+mod noise_decomposition;
+#[cfg(test)]
+mod noise_mechanism;
+#[cfg(test)]
+mod noise_sampling;
+#[cfg(test)]
+mod observed_noise;
 mod optical;
+mod robust_detail;
+#[cfg(test)]
+mod stress_variants;
 
 pub(crate) const OBSERVATION_VERSION: &str = "qraw-portrait-quality-observation-1";
 
@@ -27,6 +61,8 @@ pub struct PortraitQualityObservation {
     pub optical: Option<optical::OpticalMeasurements>,
     pub faces: Vec<FaceQualityObservation>,
     pub subject_face_indices: Vec<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clarity: Option<clarity_observation::ClarityObservation>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,7 +118,20 @@ pub(crate) fn observe(
         faces: observations,
         // Filled by the existing subject selector when constructing the review DTO.
         subject_face_indices: Vec::new(),
+        clarity: None,
     })
+}
+
+pub(crate) fn observe_with_clarity(
+    image: &DynamicImage,
+    clarity: &super::infrastructure::ClarityInput,
+    faces: &[FaceResult],
+    cancellation: &AtomicBool,
+) -> Result<PortraitQualityObservation> {
+    let mut observation = observe(image, faces, cancellation)?;
+    observation.version = "qraw-portrait-quality-observation-2";
+    observation.clarity = Some(clarity_observation::observe(clarity, faces, cancellation)?);
+    Ok(observation)
 }
 
 pub(super) fn for_review(
