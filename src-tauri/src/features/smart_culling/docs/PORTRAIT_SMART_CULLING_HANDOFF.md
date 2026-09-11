@@ -1,6 +1,6 @@
 # QRaw 人像智能选图：当前交接文档
 
-更新时间：2026-09-11。**清晰度与噪声研发继续暂停，保留全部失败。眼态/表情桌面工程保持，准确率未验收。用户已明确回复“允许安装验证依赖”，torchvision0.23.0和einops0.8.1已在独立venv安装并核对来源，不重复询问。最新“SAMPNet网络与转换_v1”已完成官方19组双输入/完整网络基线、ONNX及项目严格CoreML对照；最大ONNX/GPU绝对差分别为2.14577e-6/2.08617e-6，CPU EP回退禁用。Python17项、Rust322项通过/14项忽略，fmt与Release离线check通过。两次导出失败、首次GPU失败、日志回调崩溃及原生诊断退出异常均保留。此为工程等价验证，光学独立判定、构图通过线、联合+1及正式发布仍未完成，release_ready=false。**
+更新时间：2026-09-11。**清晰度与噪声研发继续暂停，保留全部失败。眼态/表情桌面工程保持，准确率未验收。用户已明确回复“允许安装验证依赖”，torchvision0.23.0和einops0.8.1已在独立venv安装并核对来源，不重复询问。最新“SAMPNet网络与转换_v1”已完成官方19组双输入/完整网络基线、ONNX及项目严格CoreML对照；最大ONNX/GPU绝对差分别为1.90735e-6/2.08617e-6，CPU EP回退禁用。Python17项、Rust322项通过/14项忽略，fmt与Release离线check通过。两次导出失败、首次GPU失败、日志回调崩溃及原生诊断退出异常均保留。此为工程等价验证，光学独立判定、构图通过线、联合+1及正式发布仍未完成，release_ready=false。**
 
 交接有效，但不保证节省 token；只保留当前状态和证据入口，避免复制全部历史。新窗口必须核对磁盘，不能凭本文件宣布通过。阶段结束后更新本文件并提供可复制接手提示。
 
@@ -95,11 +95,11 @@
 
 2026-09-11 最新续接核验另存同根 `光学构图续接核验_v2/`，先读 `REPORT.md`、`AUTHORIZATION_CHECK.json`、`START.json` 和 `FINAL_CHECK.json`。249份源码、41份上一阶段产物、155份保护证据、20份早期记录、7份桌面记录、6份官方源码及9份桌面输入/侧车均匹配；未重扫旧图或执行清晰度实验。183,416,305字节权重哈希保持。当前Python3.9.6具有PyTorch2.8.0，仍无torchvision/einops；`PROPOSED_DEPENDENCIES.json`只有适用wheel的元数据，research目录没有wheel文件。上一任务只有首条接手用户消息，没有安装批准回复，本轮已询问并保持待答复，未创建环境或安装/复制依赖。预处理与发布清单测试各6项重新通过，真实资源检查通过；19组显著图对照仅核验历史产物，未重新执行。START快照时140个既有改动均已暂存，暂存内容与上一阶段不同但源码一致，变化时间及来源未核实；助手未操作索引。本轮只更新本交接并新增核验记录，没有网络推理、ONNX、GPU、桌面、Rust/前端或构建验收。初次路径键合并重复导致的旧文档哈希误报及JS括号错误已记录，统一路径并按最新已冻结哈希复查后无实际源码差异，未忽略任何不一致。
 
-2026-09-11 **“SAMPNet网络与转换_v1”工程阶段已完成**，目录为 `/Users/qiaopeng/Desktop/测试/QRaw_人像其他功能开发_第001批/SAMPNet网络与转换_v1`。先读 `REPORT.md`、`VALIDATION.json`、`FINAL_CHECK.json`、`GPU_PREPARED.json`，代码及精确命令已归档。
+2026-09-11 **“SAMPNet网络与转换_v1”工程阶段已完成**，目录为 `/Users/qiaopeng/Desktop/测试/QRaw_人像其他功能开发_第001批/SAMPNet网络与转换_v1`。先读 `REPORT_FINAL.md`、`VALIDATION.json`、`FINAL_RECHECK.json`、`GPU_PREPARED.json`，代码及精确命令已归档。
 
 - `START.json`记录用户“允许安装验证依赖”的授权。两份官方wheel核对哈希后，仅在该目录venv安装torchvision0.23.0/einops0.8.1，复用已有PyTorch2.8.0。没有全局、Cargo或npm依赖变更，不再等待授权；此前“待批准”段落仅为历史记录。
 - `official.py`复用未改的官方推理定义及严格权重载入；`baseline/REPORT.json`包含19组双输入与三类完整输出，38份f32输入冻结。双输入与官方逐值一致，136个张量全部载入。19组中16组为程序输入、3张为既有合成图片副本，不是独立摄影准确率验收。
-- 最终`export_prepared/samp_net.onnx`为183,506,326字节，SHA-256 `e7bf8240854da50e9f44cc5710cf69baf9d4139c3c8b312576bb6924fc654a3a`。固定精确池化/三角索引、1D池化加单元素维度、ORT BASIC常量折叠及41个Flatten→Reshape均在离线包装内完成。19组ONNX对照最大绝对差2.14577e-6，容差仍atol1e-4/rtol1e-5。
+- 最终`export_prepared/samp_net.onnx`为183,506,326字节，SHA-256 `e7bf8240854da50e9f44cc5710cf69baf9d4139c3c8b312576bb6924fc654a3a`。固定精确池化/三角索引、1D池化加单元素维度、ORT BASIC常量折叠及41个Flatten→Reshape均在离线包装内完成。19组ONNX对照最大绝对差1.90735e-6，容差仍atol1e-4/rtol1e-5。
 - `sampnet_gpu_test.rs`仅macOS `cfg(test)`，复用未改的项目`models.rs`、严格provider和哈希/形状检查。项目ORT1.22.0动态库的19组CoreML对照通过，最大绝对差2.08617e-6，容差仍atol1e-3/rtol1e-5。CPU EP回退禁用；CoreML本身配置CPUAndGPU，因此不宣称每个算子都在GPU硬件运行。模型没有复制到正式资源，评分仍未接入。
 - 两次导出失败（adaptive_max_pool1d、triu_indices）、首次严格GPU会话失败（41个Flatten和1个一维MaxPool）、临时ORT日志回调SIGSEGV以及原生诊断退出时mutex异常均保留。空JSON、完整日志及各阶段代码快照不覆盖，临时日志调用已撤回。`export_static/`、`export_coreml/`、`graph_diagnostic/`为历史中间结果，不能替代最终模型哈希。
 - Python17项、Rust智能选图322项通过/14项忽略，显式GPU另1项通过；fmt、Release离线check及真实资源清单检查通过。249份原源码只有本交接/README/mod.rs的预期变更，新增12份离线/测试代码；旧41份阶段产物、155份保护证据、20份早期记录、7份桌面记录、16份续接记录、6份官方源码及9份桌面输入/侧车均未变。索引期间再次变化、来源未核实，助手未操作暂存或提交。没有重跑清晰度实验、前端、桌面/RAW、最终安装包、Windows GPU或全局typecheck；旧69个上游类型错误仍是历史失败。
