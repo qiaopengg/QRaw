@@ -6,6 +6,8 @@ mod locking;
 mod manual_reconciliation;
 mod persistence;
 mod render_input;
+#[cfg(any(test, all(debug_assertions, target_os = "macos")))]
+pub(crate) mod sampnet;
 mod sidecar_transaction;
 
 #[cfg(test)]

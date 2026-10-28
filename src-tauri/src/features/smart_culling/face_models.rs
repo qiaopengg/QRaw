@@ -1,12 +1,15 @@
 use std::sync::Mutex;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage, imageops, imageops::FilterType};
-use ndarray::{Array, Array4};
+use ndarray::Array4;
 use ort::session::Session;
 use ort::value::Tensor;
 
+mod yunet_output;
+
 pub const YUNET_INPUT_SIZE: u32 = 640;
+pub(super) const YUNET_MODEL_CONTRACT_VERSION: &str = "qraw-yunet-model-contract-1.1";
 const YUNET_STRIDES: [u32; 3] = [8, 16, 32];
 const YUNET_CONF_THRESHOLD: f32 = 0.6;
 const YUNET_NMS_THRESHOLD: f32 = 0.45;
@@ -26,6 +29,7 @@ const OCEC_INPUT_WIDTH: u32 = 40;
 pub struct DetectedFace {
     /// Bounding box in pixel coordinates of the input image: [x, y, width, height]
     pub bbox: [f32; 4],
+    /// Official YuNet geometric mean of classification and objectness probabilities.
     pub score: f32,
     /// 5 facial landmarks in pixel coordinates: right eye, left eye, nose tip,
     /// right mouth corner, left mouth corner.
@@ -85,6 +89,22 @@ fn letterbox_region(region: &DynamicImage) -> Option<(RgbImage, f32, f32, f32)> 
     Some((canvas, scale, scaled_width as f32, scaled_height as f32))
 }
 
+fn prepare_yunet_input(canvas: &RgbImage) -> Array4<f32> {
+    let raw_pixels = canvas.as_raw();
+    let size = YUNET_INPUT_SIZE as usize;
+    let mut input_tensor = Array4::zeros((1, 3, size, size));
+    for y in 0..size {
+        for x in 0..size {
+            let idx = (y * size + x) * 3;
+            // OpenCV FaceDetectorYN consumes BGR in [0, 255], without normalization.
+            input_tensor[[0, 0, y, x]] = raw_pixels[idx + 2] as f32;
+            input_tensor[[0, 1, y, x]] = raw_pixels[idx + 1] as f32;
+            input_tensor[[0, 2, y, x]] = raw_pixels[idx] as f32;
+        }
+    }
+    input_tensor
+}
+
 /// Returns the 2x2 overlapping tiles for a frame, or an empty list when the
 /// frame is too small for tiling to recover any detail.
 fn tile_regions(width: u32, height: u32) -> Vec<(u32, u32, u32, u32)> {
@@ -119,96 +139,51 @@ fn detect_in_region(
     if scale <= 0.0 {
         return Ok(Vec::new());
     }
-    let raw_pixels = canvas.as_raw();
-
-    let size = YUNET_INPUT_SIZE as usize;
-    let mut input_tensor: Array<f32, _> = Array::zeros((1, 3, size, size));
-    for y in 0..size {
-        for x in 0..size {
-            let idx = (y * size + x) * 3;
-            input_tensor[[0, 0, y, x]] = raw_pixels[idx] as f32;
-            input_tensor[[0, 1, y, x]] = raw_pixels[idx + 1] as f32;
-            input_tensor[[0, 2, y, x]] = raw_pixels[idx + 2] as f32;
-        }
-    }
-
-    let input_tensor_dyn = input_tensor.into_dyn();
+    let input_tensor_dyn = prepare_yunet_input(&canvas).into_dyn();
     let t_input = Tensor::from_array(input_tensor_dyn.as_standard_layout().into_owned())?;
 
     let mut session_guard = session
         .lock()
         .map_err(|_| anyhow!("YuNet inference session lock is poisoned"))?;
-    let outputs = session_guard.run(ort::inputs!["input" => t_input])?;
+    let outputs = session_guard
+        .run(ort::inputs!["input" => t_input])
+        .with_context(|| format!("{YUNET_MODEL_CONTRACT_VERSION} inference failed"))?;
 
     let mut candidates: Vec<DetectedFace> = Vec::new();
 
     for &stride in YUNET_STRIDES.iter() {
-        let feature_size = (YUNET_INPUT_SIZE / stride) as usize;
-
-        let cls = outputs[format!("cls_{}", stride).as_str()]
+        let cls = outputs
+            .get(format!("cls_{stride}"))
+            .ok_or_else(|| anyhow!("YuNet output cls_{stride} is missing"))?
             .try_extract_array::<f32>()?
             .to_owned();
-        let obj = outputs[format!("obj_{}", stride).as_str()]
+        let obj = outputs
+            .get(format!("obj_{stride}"))
+            .ok_or_else(|| anyhow!("YuNet output obj_{stride} is missing"))?
             .try_extract_array::<f32>()?
             .to_owned();
-        let bbox = outputs[format!("bbox_{}", stride).as_str()]
+        let bbox = outputs
+            .get(format!("bbox_{stride}"))
+            .ok_or_else(|| anyhow!("YuNet output bbox_{stride} is missing"))?
             .try_extract_array::<f32>()?
             .to_owned();
-        let kps = outputs[format!("kps_{}", stride).as_str()]
+        let kps = outputs
+            .get(format!("kps_{stride}"))
+            .ok_or_else(|| anyhow!("YuNet output kps_{stride} is missing"))?
             .try_extract_array::<f32>()?
             .to_owned();
 
-        let cls_slice = cls.as_slice().unwrap();
-        let obj_slice = obj.as_slice().unwrap();
-        let bbox_slice = bbox.as_slice().unwrap();
-        let kps_slice = kps.as_slice().unwrap();
-
-        let num_priors = feature_size * feature_size;
-        for i in 0..num_priors {
-            let score = cls_slice[i] * obj_slice[i];
-            if score < YUNET_CONF_THRESHOLD {
-                continue;
-            }
-
-            let col = (i % feature_size) as f32;
-            let row = (i / feature_size) as f32;
-            let prior_x = col * stride as f32;
-            let prior_y = row * stride as f32;
-
-            let bx = bbox_slice[i * 4];
-            let by = bbox_slice[i * 4 + 1];
-            let bw = bbox_slice[i * 4 + 2];
-            let bh = bbox_slice[i * 4 + 3];
-
-            let cx = bx * stride as f32 + prior_x;
-            let cy = by * stride as f32 + prior_y;
-            let w = bw.exp() * stride as f32;
-            let h = bh.exp() * stride as f32;
-
-            // Discard anything centred in the zero-padded margin; it cannot be
-            // a real face from this region.
-            if cx > content_width || cy > content_height {
-                continue;
-            }
-
-            let x1 = (cx - w / 2.0) / scale + offset_x;
-            let y1 = (cy - h / 2.0) / scale + offset_y;
-            let box_w = w / scale;
-            let box_h = h / scale;
-
-            let mut landmarks = [(0.0f32, 0.0f32); 5];
-            for j in 0..5 {
-                let lx = kps_slice[i * 10 + j * 2] * stride as f32 + prior_x;
-                let ly = kps_slice[i * 10 + j * 2 + 1] * stride as f32 + prior_y;
-                landmarks[j] = (lx / scale + offset_x, ly / scale + offset_y);
-            }
-
-            candidates.push(DetectedFace {
-                bbox: [x1, y1, box_w, box_h],
-                score,
-                landmarks,
-            });
-        }
+        candidates.extend(yunet_output::decode_stride(
+            [cls.view(), obj.view(), bbox.view(), kps.view()],
+            stride,
+            yunet_output::RegionMapping {
+                scale,
+                content_width,
+                content_height,
+                offset_x,
+                offset_y,
+            },
+        )?);
     }
 
     Ok(candidates)
@@ -322,6 +297,24 @@ mod tests {
     use image::{Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn yunet_input_matches_official_bgr_nchw_without_normalization() {
+        let mut canvas = RgbImage::new(YUNET_INPUT_SIZE, YUNET_INPUT_SIZE);
+        canvas.put_pixel(0, 0, Rgb([255, 128, 7]));
+        canvas.put_pixel(13, 7, Rgb([5, 11, 19]));
+
+        let tensor = prepare_yunet_input(&canvas);
+
+        assert_eq!(tensor.shape(), [1, 3, 640, 640]);
+        for (channel, expected) in [7.0, 128.0, 255.0].into_iter().enumerate() {
+            assert_eq!(tensor[[0, channel, 0, 0]], expected);
+        }
+        for (channel, expected) in [19.0, 11.0, 5.0].into_iter().enumerate() {
+            assert_eq!(tensor[[0, channel, 7, 13]], expected);
+        }
+        assert_eq!(tensor[[0, 0, 639, 639]], 0.0);
+    }
 
     #[test]
     fn letterbox_preserves_aspect_ratio_instead_of_stretching() {

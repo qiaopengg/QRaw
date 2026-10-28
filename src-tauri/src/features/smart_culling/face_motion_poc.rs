@@ -33,7 +33,7 @@ use super::types::{EyeDisposition, EyeResult};
 pub(in crate::features::smart_culling) const EYE_POLICY_VERSION: &str =
     eye_policy::EYE_POLICY_VERSION;
 pub(in crate::features::smart_culling) const EYE_MODEL_CONTRACT_VERSION: &str =
-    "qraw-eye-model-contract-1.0";
+    "qraw-eye-model-contract-1.1";
 
 const FACE_MESH_MODEL_FILENAME: &str = "face_landmarks_detector_v2_qraw_poc.onnx";
 const FACE_BLENDSHAPES_MODEL_FILENAME: &str = "face_blendshapes_v2_qraw_poc.onnx";
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn eye_model_contract_identifiers_are_frozen() {
-        assert_eq!(EYE_MODEL_CONTRACT_VERSION, "qraw-eye-model-contract-1.0");
+        assert_eq!(EYE_MODEL_CONTRACT_VERSION, "qraw-eye-model-contract-1.1");
         assert_eq!(EYE_POLICY_VERSION, "qraw-eye-policy-1.1");
         assert_eq!(
             FACE_MESH_MODEL_FILENAME,
@@ -545,12 +545,33 @@ mod tests {
                 .unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
+            print!("{stdout}");
+            eprint!("{stderr}");
             assert!(
                 output.status.success() && stdout.contains(PASS_MARKER),
                 "isolated hardware POC failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
             );
             return;
         }
+
+        // Exercise the application's fixed-hash strict-provider detector path
+        // on a coloured program input; this is not a photograph/accuracy test.
+        let resources =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/smart_culling_models");
+        let base_models = super::super::models::load_face_models_for_test(&resources).unwrap();
+        let colour_input =
+            DynamicImage::ImageRgb8(RgbImage::from_pixel(640, 640, Rgb([255, 64, 0])));
+        let faces =
+            super::super::face_models::run_yunet_detection(&colour_input, &base_models.yunet)
+                .unwrap();
+        assert!(faces.iter().all(|face| face.score.is_finite()
+            && (0.0..=1.0).contains(&face.score)
+            && face.bbox.iter().all(|value| value.is_finite())));
+        println!(
+            "QRAW_YUNET_STRICT_COLOUR_PASS contract={} detections={}",
+            super::super::face_models::YUNET_MODEL_CONTRACT_VERSION,
+            faces.len()
+        );
 
         let models = load_models(&model_asset_dir()).unwrap();
         let roi = RgbImage::new(256, 256);

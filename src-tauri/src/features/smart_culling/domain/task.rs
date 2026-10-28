@@ -36,6 +36,7 @@ impl TaskState {
                 | (Cancelling, ReadyForReview | Failed)
                 | (ReadyForReview, Confirming | Abandoning)
                 | (Confirming, Completed | ReadyForReview | Failed)
+                | (Completed, Confirming)
                 | (Completed | Abandoning | Failed | Unsupported, Idle)
         )
     }
@@ -50,6 +51,13 @@ mod tests {
         assert!(TaskState::Organizing.can_transition_to(TaskState::ReadyForReview));
         assert!(TaskState::ReadyForReview.can_transition_to(TaskState::Confirming));
         assert!(!TaskState::Analyzing.can_transition_to(TaskState::Confirming));
+    }
+
+    #[test]
+    fn completed_write_retry_enters_the_protected_confirming_state() {
+        assert!(TaskState::Completed.can_transition_to(TaskState::Confirming));
+        assert!(TaskState::Confirming.can_transition_to(TaskState::Completed));
+        assert!(!TaskState::Confirming.can_transition_to(TaskState::Idle));
     }
 
     #[test]

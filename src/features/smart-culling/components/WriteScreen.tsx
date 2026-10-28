@@ -20,6 +20,7 @@ export function WriteScreen({
   const failureText = useSmartCullingFailureText();
   const thumbnails = useProcessStore((state) => state.thumbnails);
   const { busy, setState } = useSmartCullingStore();
+  const writing = busy || snapshot.state === 'confirming';
   const summary = snapshot.writeSummary;
   const writeFailures = snapshot.failures.filter((failure) => failure.stage === 'write');
   const retry = async () => {
@@ -117,7 +118,7 @@ export function WriteScreen({
                   <small>{failureText(failure)}</small>
                 </div>
                 {failure.retryable ? (
-                  <button disabled={busy} onClick={() => void retry()}>
+                  <button disabled={writing} onClick={() => void retry()}>
                     <RefreshCcw size={14} />
                     {tx('retry')}
                   </button>
@@ -132,10 +133,10 @@ export function WriteScreen({
           </section>
         </div>
         <footer>
-          <button className="sc-secondary" onClick={() => setState({ screen: 'review' })}>
+          <button className="sc-secondary" disabled={writing} onClick={() => setState({ screen: 'review' })}>
             {tx('viewResults')}
           </button>
-          <button className="sc-primary" onClick={() => void exit()}>
+          <button className="sc-primary" disabled={writing} onClick={() => void exit()}>
             {tx('returnLibrary')}
           </button>
         </footer>

@@ -12,6 +12,7 @@ use super::api::{
     FailureItem, LockChangeSummary, ReviewChange, SmartCullingRequest, SmartCullingSnapshot,
     TaskProgress,
 };
+use super::coordinator_guard::{ensure_write_report_matches, existing_inspection_snapshot};
 use super::coordinator_session::TaskSession;
 use super::coordinator_support::{
     apply_failure_code, catalog_failures, confirmed_result, eta_seconds, inventory_summary,
@@ -68,45 +69,45 @@ fn inspect(root_path: String, app_handle: &AppHandle) -> Result<SmartCullingSnap
     let root = PathBuf::from(&root_path);
     {
         let coordinator = COORDINATOR.lock().unwrap();
-        if let Some(session) = coordinator.session.as_ref()
-            && matches!(
-                session.state,
-                TaskState::Indexing
-                    | TaskState::Rendering
-                    | TaskState::Analyzing
-                    | TaskState::Organizing
-                    | TaskState::Cancelling
-                    | TaskState::ReadyForReview
-                    | TaskState::Confirming
-            )
-        {
-            if session.root_path != root {
-                return Err(format!(
-                    "A smart-culling task for {} is still active; review or abandon it before opening {}",
-                    session.root_path.display(),
-                    root.display()
-                ));
-            }
-            return Ok(session.snapshot());
+        if let Some(snapshot) = existing_inspection_snapshot(coordinator.session.as_ref(), &root)? {
+            return Ok(snapshot);
         }
     }
 
     let (device, models) = match run_preflight(app_handle) {
         Ok(value) => value,
         Err(device) => {
+            let mut coordinator = COORDINATOR.lock().unwrap();
+            if let Some(snapshot) =
+                existing_inspection_snapshot(coordinator.session.as_ref(), &root)?
+            {
+                return Ok(snapshot);
+            }
             let snapshot = SmartCullingSnapshot {
                 state: "unsupported".to_string(),
                 root_path: Some(root_path),
                 device,
                 ..SmartCullingSnapshot::default()
             };
-            COORDINATOR.lock().unwrap().last_snapshot = snapshot.clone();
+            coordinator.last_snapshot = snapshot.clone();
+            drop(coordinator);
             emit_snapshot(app_handle, &snapshot);
             return Ok(snapshot);
         }
     };
+    let mut coordinator = COORDINATOR.lock().unwrap();
+    if let Some(snapshot) = existing_inspection_snapshot(coordinator.session.as_ref(), &root)? {
+        return Ok(snapshot);
+    }
+    // Catalog scanning can recover sidecar transactions. Keep it serialized
+    // with writes and session installation, including after a slow preflight.
     let catalog = scan_catalog(&root)?;
-    let interrupted = task_recovery::take(app_handle);
+    let recovery_snapshot = coordinator
+        .session
+        .as_ref()
+        .map(TaskSession::snapshot)
+        .unwrap_or_else(|| coordinator.last_snapshot.clone());
+    let interrupted = task_recovery::take(&recovery_snapshot, app_handle);
     let inventory = inventory_summary(&catalog);
     let mut failures = catalog_failures(&catalog);
     if let Some(interrupted) = interrupted {
@@ -146,7 +147,6 @@ fn inspect(root_path: String, app_handle: &AppHandle) -> Result<SmartCullingSnap
         started_at: None,
     };
     let snapshot = session.snapshot();
-    let mut coordinator = COORDINATOR.lock().unwrap();
     coordinator.last_snapshot = snapshot.clone();
     coordinator.session = Some(session);
     drop(coordinator);
@@ -281,8 +281,8 @@ fn start(
             finish_analysis(&task_id, outcome, &thread_app_handle);
         })
     {
-        task_recovery::forget(&app_handle);
         let snapshot = restore_configuring_after_start_failure();
+        task_recovery::forget(&snapshot, &app_handle);
         save_and_emit(&app_handle, snapshot);
         return Err(error.to_string());
     }
@@ -339,7 +339,7 @@ fn confirm(
     calibration_acknowledged: bool,
     app_handle: &AppHandle,
 ) -> Result<SmartCullingSnapshot, String> {
-    let (items, attempted_count) = {
+    let (task_id, items, attempted_count) = {
         let mut coordinator = COORDINATOR.lock().unwrap();
         let session = coordinator
             .session
@@ -395,25 +395,25 @@ fn confirm(
             .map(|item| (item.sidecar_path.clone(), item.result.clone()))
             .collect();
         let attempted_count = items.len();
-        (items, attempted_count)
+        (session.task_id.clone(), items, attempted_count)
     };
 
     task_recovery::remember(&current_snapshot(), app_handle);
     let report = apply_confirmed_results(items);
-    finish_write(report, attempted_count, app_handle)
+    finish_write(&task_id, report, attempted_count, app_handle)
 }
 
 fn retry_failures(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
-    let items = {
-        let coordinator = COORDINATOR.lock().unwrap();
+    let (task_id, items) = {
+        let mut coordinator = COORDINATOR.lock().unwrap();
         let session = coordinator
             .session
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| "There is no completed task to retry".to_string())?;
         if session.state != TaskState::Completed || session.pending_write.is_empty() {
             return Err("There are no retryable write failures".to_string());
         }
-        session
+        let items = session
             .pending_write
             .iter()
             .map(|(sidecar, result)| {
@@ -444,11 +444,14 @@ fn retry_failures(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String
                     result: result.clone(),
                 })
             })
-            .collect::<Result<Vec<_>, String>>()?
+            .collect::<Result<Vec<_>, String>>()?;
+        session.transition_to(TaskState::Confirming)?;
+        (session.task_id.clone(), items)
     };
     let pending = items.len();
+    task_recovery::remember(&current_snapshot(), app_handle);
     let report = apply_confirmed_results(items);
-    finish_write(report, pending, app_handle)
+    finish_write(&task_id, report, pending, app_handle)
 }
 
 fn abandon(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
@@ -471,7 +474,7 @@ fn abandon(app_handle: &AppHandle) -> Result<SmartCullingSnapshot, String> {
         coordinator.last_snapshot = SmartCullingSnapshot::default();
         coordinator.last_snapshot.clone()
     };
-    task_recovery::forget(app_handle);
+    task_recovery::forget(&snapshot, app_handle);
     emit_snapshot(app_handle, &snapshot);
     Ok(snapshot)
 }
@@ -552,6 +555,7 @@ fn set_lock(
 }
 
 fn finish_write(
+    task_id: &str,
     report: super::infrastructure::ApplyReport,
     attempted: usize,
     app_handle: &AppHandle,
@@ -562,10 +566,13 @@ fn finish_write(
             .session
             .as_mut()
             .ok_or_else(|| "Smart-culling task disappeared while writing".to_string())?;
-        session.apply_write_report(report, attempted)?
+        ensure_write_report_matches(&session.task_id, session.state, task_id)?;
+        let snapshot = session.apply_write_report(report, attempted)?;
+        task_recovery::forget(&snapshot, app_handle);
+        coordinator.last_snapshot = snapshot.clone();
+        snapshot
     };
-    task_recovery::forget(app_handle);
-    save_and_emit(app_handle, snapshot.clone());
+    emit_snapshot(app_handle, &snapshot);
     Ok(snapshot)
 }
 
@@ -670,8 +677,13 @@ fn current_snapshot() -> SmartCullingSnapshot {
 }
 
 fn save_and_emit(app_handle: &AppHandle, snapshot: SmartCullingSnapshot) {
-    COORDINATOR.lock().unwrap().last_snapshot = snapshot.clone();
-    emit_snapshot(app_handle, &snapshot);
+    let accepted = {
+        let mut coordinator = COORDINATOR.lock().unwrap();
+        super::snapshot_order::store_if_current(&mut coordinator.last_snapshot, &snapshot)
+    };
+    if accepted {
+        emit_snapshot(app_handle, &snapshot);
+    }
 }
 
 fn emit_snapshot(app_handle: &AppHandle, snapshot: &SmartCullingSnapshot) {

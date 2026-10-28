@@ -16,6 +16,8 @@ export function expressionLabel(state: string | null | undefined): SmartCullingT
 
 export function signalReason(reason: string | null | undefined): SmartCullingTextKey {
   switch (reason) {
+    case 'eye_face_presence_unreliable':
+      return 'portraitFacePresenceUnreliable';
     case 'eye_pose_unreliable':
       return 'portraitPoseUnreliable';
     case 'eye_resolution_insufficient':

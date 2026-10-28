@@ -161,6 +161,7 @@ export interface LockChangeSummary {
 }
 
 export interface SmartCullingSnapshot {
+  revision: number;
   taskId: string | null;
   state: SmartCullingState;
   rootPath: string | null;

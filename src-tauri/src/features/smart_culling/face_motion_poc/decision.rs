@@ -5,6 +5,11 @@ use super::evidence::FaceMotionEvidenceDump;
 use super::eye_policy::EyeUsability;
 use super::{EYE_MODEL_CONTRACT_VERSION, EYE_POLICY_VERSION};
 
+// MediaPipe FaceMesh V2 gates landmarks on sigmoid(presence) > 0.5.
+// This restores model evidence validity; it does not tune the eye classifier.
+// https://github.com/google-ai-edge/mediapipe/blob/v0.10.21/mediapipe/tasks/cc/vision/face_landmarker/face_landmarks_detector_graph.cc
+const MIN_FACE_PRESENCE: f32 = 0.5;
+
 // Three observed residual-aperture samples landed immediately above the old
 // -5 degree boundary. The 1.1 policy keeps the frozen eye classifier untouched
 // and only admits this narrow -4.5 degree band into the existing deliberate
@@ -51,10 +56,20 @@ pub(super) fn assess(
     evidence: &FaceMotionEvidenceDump,
     pose_suppresses_eye_state: bool,
 ) -> EyeAssessment {
-    if pose_suppresses_eye_state {
+    let unavailable_reason = if !evidence.face_presence.is_finite()
+        || evidence.face_presence <= MIN_FACE_PRESENCE
+        || evidence.face_presence > 1.0
+    {
+        Some("eye_face_presence_unreliable")
+    } else if pose_suppresses_eye_state {
+        Some("eye_pose_unreliable")
+    } else {
+        None
+    };
+    if let Some(reason) = unavailable_reason {
         return EyeAssessment {
-            left_eye: EyeResult::unavailable("eye_pose_unreliable", 0, None),
-            right_eye: EyeResult::unavailable("eye_pose_unreliable", 0, None),
+            left_eye: EyeResult::unavailable(reason, 0, None),
+            right_eye: EyeResult::unavailable(reason, 0, None),
             disposition: EyeDisposition::Unknown,
         };
     }
@@ -263,13 +278,58 @@ mod tests {
     }
 
     #[test]
+    fn absent_or_invalid_face_presence_never_creates_an_eye_decision() {
+        for presence in [0.0, 0.25, 0.5, -0.1, 1.1, f32::NAN, f32::INFINITY] {
+            for usability in [EyeUsability::Open, EyeUsability::Unusable] {
+                let mut sample = evidence(usability, usability);
+                sample.face_presence = presence;
+
+                let result = assess(&sample, false);
+
+                assert_eq!(result.disposition(), EyeDisposition::Unknown, "{presence}");
+                for eye in [result.left_eye(), result.right_eye()] {
+                    assert_eq!(eye.state, "unknown");
+                    assert_eq!(eye.confidence, 0.0);
+                    assert_eq!(eye.open_probability, None);
+                    assert_eq!(eye.reason, "eye_face_presence_unreliable");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn officially_present_faces_preserve_the_existing_eye_decisions() {
+        for presence in [f32::from_bits(0.5f32.to_bits() + 1), 1.0] {
+            for usability in [
+                EyeUsability::Open,
+                EyeUsability::Unusable,
+                EyeUsability::Unknown,
+            ] {
+                let mut sample = evidence(usability, usability);
+                let before = assess(&sample, false);
+                sample.face_presence = presence;
+
+                let after = assess(&sample, false);
+
+                assert_eq!(after.disposition(), before.disposition());
+                assert_eq!(after.left_eye().state, before.left_eye().state);
+                assert_eq!(after.left_eye().confidence, before.left_eye().confidence);
+                assert_eq!(
+                    after.left_eye().open_probability,
+                    before.left_eye().open_probability
+                );
+            }
+        }
+    }
+
+    #[test]
     fn assessment_exposes_the_frozen_contract_without_mutators() {
         let result = assess(&evidence(EyeUsability::Open, EyeUsability::Open), false);
 
         assert_eq!(result.policy_version(), "qraw-eye-policy-1.1");
         assert_eq!(
             result.model_contract_version(),
-            "qraw-eye-model-contract-1.0"
+            "qraw-eye-model-contract-1.1"
         );
         assert_eq!(result.disposition(), EyeDisposition::Open);
     }

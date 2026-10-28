@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -10,6 +11,15 @@ use crate::image_processing::ImageMetadata;
 const JOURNAL_PREFIX: &str = ".qraw-smart-culling-transaction-";
 const JOURNAL_SUFFIX: &str = ".json";
 const JOURNAL_SCHEMA_VERSION: u32 = 1;
+// All feature callers share this lock, including lock/manual reconciliation
+// and folder recovery. A visible journal may still belong to a live writer.
+static TRANSACTION_LOCK: Mutex<()> = Mutex::new(());
+
+mod validation;
+
+#[cfg(test)]
+#[path = "sidecar_transaction/adversarial_tests.rs"]
+mod adversarial_tests;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +49,9 @@ where
 }
 
 pub(crate) fn recover_pending_sidecar_transactions(root: &Path) -> Result<(), String> {
+    let _transaction = TRANSACTION_LOCK
+        .lock()
+        .map_err(|_| "Sidecar transaction state is poisoned; recovery stopped".to_string())?;
     let entries = fs::read_dir(root)
         .map_err(|error| format!("Cannot inspect sidecar recovery journals: {error}"))?;
     let mut failures = Vec::new();
@@ -57,6 +70,13 @@ pub(crate) fn recover_pending_sidecar_transactions(root: &Path) -> Result<(), St
         if !name.starts_with(JOURNAL_PREFIX) || !name.ends_with(JOURNAL_SUFFIX) {
             continue;
         }
+        if !matches!(entry.file_type(), Ok(kind) if kind.is_file()) {
+            failures.push(format!(
+                "Recovery journal is not a regular file: {}",
+                path.display()
+            ));
+            continue;
+        }
         let result = fs::read(&path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
@@ -64,7 +84,7 @@ pub(crate) fn recover_pending_sidecar_transactions(root: &Path) -> Result<(), St
                     .map_err(|error| format!("Invalid sidecar transaction journal: {error}"))
             })
             .and_then(|journal| {
-                validate_journal(root, &journal)?;
+                validation::validate_journal(root, &journal)?;
                 rollback_journal(&path, &journal).map(|_| ())
             });
         if let Err(error) = result {
@@ -90,13 +110,22 @@ where
     if updates.is_empty() {
         return Ok(());
     }
+    let _transaction = TRANSACTION_LOCK
+        .lock()
+        .map_err(|_| "Sidecar transaction state is poisoned; write stopped".to_string())?;
     let (journal_path, journal) = create_journal(updates)?;
     if let Err(error) = guard() {
         let preserved = rollback_journal(&journal_path, &journal)?;
         return Err(transaction_error(error, &preserved));
     }
     for (index, entry) in journal.entries.iter().enumerate() {
-        let current = read_optional(&entry.path)?;
+        let current = match read_optional(&entry.path) {
+            Ok(current) => current,
+            Err(error) => {
+                let preserved = rollback_journal(&journal_path, &journal)?;
+                return Err(transaction_error(error, &preserved));
+            }
+        };
         if current != entry.original {
             let preserved = rollback_journal(&journal_path, &journal)?;
             return Err(transaction_error(
@@ -128,6 +157,7 @@ fn create_journal(
             updates[0].0.display()
         )
     })?;
+    validation::validate_targets(parent, updates.iter().map(|(path, _)| path.as_path()))?;
     let mut entries = Vec::with_capacity(updates.len());
     for (path, metadata) in updates {
         if path.parent() != Some(parent) {
@@ -179,20 +209,6 @@ fn rollback_journal(
             failures.join("; ")
         ))
     }
-}
-
-fn validate_journal(root: &Path, journal: &SidecarTransactionJournal) -> Result<(), String> {
-    if journal.schema_version != JOURNAL_SCHEMA_VERSION || journal.entries.is_empty() {
-        return Err("Unsupported or empty sidecar transaction journal".to_string());
-    }
-    if journal
-        .entries
-        .iter()
-        .any(|entry| entry.path.parent() != Some(root))
-    {
-        return Err("Sidecar transaction journal references a different folder".to_string());
-    }
-    Ok(())
 }
 
 fn transaction_error(error: String, preserved: &[PathBuf]) -> String {

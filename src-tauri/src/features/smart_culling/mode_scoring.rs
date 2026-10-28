@@ -58,15 +58,9 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
         return manual_evaluation("environment", "environment_subject_unreliable");
     }
 
-    // Explicit native-input failures cannot be overridden by rendered legacy
-    // focus. Older observations without this input contract keep their behavior.
-    if strategy == ModeStrategy::Portrait
-        && item
-            .portrait_quality
-            .as_ref()
-            .and_then(|quality| quality.clarity.as_ref())
-            .is_some_and(|clarity| clarity.unavailable_reason.is_some())
-    {
+    // Refused or inconsistent native input for the actual scoring subjects
+    // cannot be overridden by legacy focus. Unselected faces do not gate them.
+    if strategy == ModeStrategy::Portrait && portrait_input_is_unavailable(item, &subjects) {
         return manual_evaluation("portrait", "portrait_person_clarity_unresolved");
     }
 
@@ -131,6 +125,35 @@ pub(crate) fn evaluate_mode(requested: &str, item: &AnalysisCandidate) -> ModeEv
         evaluation.reason_code = "auto_people_uncertain";
     }
     evaluation
+}
+
+fn portrait_input_is_unavailable(item: &AnalysisCandidate, subjects: &[&FaceResult]) -> bool {
+    let Some(quality) = item.portrait_quality.as_ref() else {
+        return false;
+    };
+    let Some(clarity) = quality.clarity.as_ref() else {
+        // Version 1 predates the native-input contract. A newer observation
+        // must not silently discard that contract and inherit old behaviour.
+        return quality.version != super::portrait_quality::OBSERVATION_VERSION;
+    };
+    if clarity.unavailable_reason.is_some()
+        || clarity.input_dimensions != Some([item.width, item.height])
+    {
+        return true;
+    }
+    subjects.iter().any(|subject| {
+        let mut observations = clarity.faces.iter().filter(|observation| {
+            item.faces
+                .get(observation.face_index)
+                .is_some_and(|face| std::ptr::eq(face, *subject))
+        });
+        let Some(observation) = observations.next() else {
+            return true;
+        };
+        observation.unavailable_reason.is_some()
+            || observation.bbox != subject.bbox
+            || observations.next().is_some()
+    })
 }
 
 pub(crate) fn rating_for_mode(mode: &str, score: f64) -> u8 {

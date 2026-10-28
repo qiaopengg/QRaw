@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context, Result, ensure};
-use ort::value::Tensor;
 use serde_json::{Value, json};
 
-use super::models::{gpu_session_with_optimization, validate_session_contract, verify_model};
+use super::infrastructure::sampnet::{MODEL_SHA256, SampNetModel};
+use super::models::verify_model;
 
 fn verify() -> Result<Value> {
     let baseline = PathBuf::from(std::env::var("QRAW_SAMPNET_BASELINE_DIR")?);
@@ -30,18 +30,12 @@ fn verify() -> Result<Value> {
         "official baseline has not passed"
     );
     let model = export.join("samp_net.onnx");
-    verify_model(
-        &model,
-        converted["model_sha256"]
-            .as_str()
-            .context("model hash missing")?,
-    )?;
+    ensure!(
+        converted["model_sha256"] == MODEL_SHA256,
+        "unaccepted SAMP-Net conversion"
+    );
     let started = Instant::now();
-    // Reuse the real project's strict provider, with CPU EP fallback disabled.
-    let mut session = gpu_session_with_optimization(&model, None, None)?;
-    let names = ["pattern_logits", "attributes", "composition_distribution"];
-    validate_session_contract(&session, "image", &[1, 3, 224, 224], &names)?;
-    validate_session_contract(&session, "saliency", &[1, 1, 224, 224], &names)?;
+    let mut model = SampNetModel::load(&model)?;
     let compilation_seconds = started.elapsed().as_secs_f64();
     let cases = reference["cases"]
         .as_array()
@@ -52,19 +46,20 @@ fn verify() -> Result<Value> {
         let image = input::read_tensor(&baseline, &case["inputs"]["image"], 3)?;
         let saliency = input::read_tensor(&baseline, &case["inputs"]["saliency"], 1)?;
         let started = Instant::now();
-        let actual = session.run(ort::inputs![
-            "image" => Tensor::from_array(image)?, "saliency" => Tensor::from_array(saliency)?
-        ])?;
+        let actual = model.observe_prepared(image, saliency)?;
         let mut errors = serde_json::Map::new();
-        for (name, width) in names.iter().zip([8, 6, 5]) {
+        for (name, value) in [
+            ("pattern_logits", actual.pattern_logits.as_slice()),
+            ("attributes", actual.attributes.as_slice()),
+            (
+                "composition_distribution",
+                actual.composition_distribution.as_slice(),
+            ),
+        ] {
             let expected = case["outputs"][name][0]
                 .as_array()
                 .context("reference output missing")?;
-            let value = actual[*name].try_extract_array::<f32>()?;
-            ensure!(
-                value.shape() == [1, width] && expected.len() == width,
-                "output shape mismatch"
-            );
+            ensure!(expected.len() == value.len(), "output shape mismatch");
             let mut maximum = 0.0_f64;
             for (value, expected) in value.iter().zip(expected) {
                 let expected = expected.as_f64().context("invalid reference value")?;
@@ -76,7 +71,7 @@ fn verify() -> Result<Value> {
                 );
                 maximum = maximum.max(difference);
             }
-            errors.insert((*name).to_owned(), json!(maximum));
+            errors.insert(name.to_owned(), json!(maximum));
         }
         rows.push(json!({"id": case["id"], "max_absolute_errors": errors,
                          "inference_seconds": started.elapsed().as_secs_f64()}));
@@ -84,7 +79,7 @@ fn verify() -> Result<Value> {
     Ok(
         json!({"passed": true, "scope": "strict project CoreML parity, not classification accuracy",
               "cpu_ep_fallback_disabled": true, "release_ready": false, "cases": rows,
-              "compilation_seconds": compilation_seconds, "model_sha256": converted["model_sha256"]}),
+              "compilation_seconds": compilation_seconds, "model_sha256": MODEL_SHA256}),
     )
 }
 

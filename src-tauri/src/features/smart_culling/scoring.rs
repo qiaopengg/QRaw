@@ -20,10 +20,9 @@ pub(crate) const POLICY_VERSION: &str =
 pub(crate) const POLICY_VERSION: &str =
     "qraw-smart-culling-policy-5.0-portrait-discrete-safe-evidence";
 #[cfg(all(debug_assertions, target_os = "macos"))]
-pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+sface-2021dec+qraw-eye-model-contract-1.0+qraw-eye-policy-1.1+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0+qraw-expression-quality-ordinal-calibration-0.3+apple-vision-face-capture-quality-calibration-0.1+apple-vision-aesthetics-observation-0.1";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+qraw-yunet-model-contract-1.1+sface-2021dec+qraw-eye-model-contract-1.1+qraw-eye-policy-1.1+qraw-expression-descriptor-1.0+qraw-expression-sequence-policy-1.0+qraw-expression-quality-ordinal-calibration-0.3+apple-vision-face-capture-quality-calibration-0.1+apple-vision-aesthetics-observation-0.1";
 #[cfg(not(all(debug_assertions, target_os = "macos")))]
-pub(crate) const MODEL_VERSION: &str =
-    "yunet-2023mar+ocec-loaded-unscored+sface-2021dec+eye-expression-unavailable-v1";
+pub(crate) const MODEL_VERSION: &str = "yunet-2023mar+qraw-yunet-model-contract-1.1+ocec-loaded-unscored+sface-2021dec+eye-expression-unavailable-v1";
 pub(crate) struct AnalysisCandidate {
     pub result_id: String,
     pub path: PathBuf,
@@ -428,9 +427,13 @@ mod tests {
         #[cfg(not(all(debug_assertions, target_os = "macos")))]
         assert!(POLICY_VERSION.starts_with("qraw-smart-culling-policy-5.0-"));
         assert!(MODEL_VERSION.contains("yunet-2023mar"));
+        assert!(MODEL_VERSION.contains(super::super::face_models::YUNET_MODEL_CONTRACT_VERSION));
         assert!(MODEL_VERSION.contains("sface-2021dec"));
         #[cfg(all(debug_assertions, target_os = "macos"))]
         {
+            assert!(
+                MODEL_VERSION.contains(super::super::face_motion_poc::EYE_MODEL_CONTRACT_VERSION)
+            );
             assert!(MODEL_VERSION.contains("qraw-eye-policy-1.1"));
             assert!(MODEL_VERSION.contains("qraw-expression-quality-ordinal-calibration-0.3"));
             assert!(MODEL_VERSION.contains("apple-vision-face-capture-quality-calibration-0.1"));

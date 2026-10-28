@@ -33,6 +33,38 @@ fn ai_result() -> ConfirmedResult {
 }
 
 #[test]
+fn same_size_timestamp_photo_replacement_rejects_the_stale_rating() {
+    let directory = tempdir().unwrap();
+    let image = directory.path().join("photo.jpg");
+    let sidecar = get_primary_sidecar_path(&image);
+    std::fs::write(&image, b"original").unwrap();
+    write_metadata(&sidecar, &ImageMetadata::default());
+    let file_baseline = capture_file_baseline(&image).unwrap();
+    let sidecar_baseline = capture_sidecar_baseline(&sidecar).unwrap();
+    let original_sidecar = std::fs::read(&sidecar).unwrap();
+    let modified = std::fs::metadata(&image).unwrap().modified().unwrap();
+    std::fs::write(&image, b"replaced").unwrap();
+    File::options()
+        .write(true)
+        .open(&image)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+
+    let report = apply_confirmed_results(vec![ConfirmedWrite {
+        sidecar_path: sidecar.clone(),
+        member_sidecar_baselines: vec![(sidecar.clone(), sidecar_baseline)],
+        file_baselines: vec![(image.clone(), file_baseline)],
+        result: ai_result(),
+    }]);
+
+    assert!(report.succeeded.is_empty());
+    assert_eq!(report.failed[0].reason, ApplyFailureReason::AssetChanged);
+    assert_eq!(std::fs::read(image).unwrap(), b"replaced");
+    assert_eq!(std::fs::read(sidecar).unwrap(), original_sidecar);
+}
+
+#[test]
 fn synchronizes_the_result_to_raw_and_jpeg_sidecars() {
     let directory = tempdir().unwrap();
     let raw_sidecar = directory.path().join("IMG_0001.dng.rrdata");

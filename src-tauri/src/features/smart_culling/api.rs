@@ -92,6 +92,7 @@ pub struct ReviewChange {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartCullingSnapshot {
+    pub revision: u64,
     pub task_id: Option<String>,
     pub state: String,
     pub root_path: Option<String>,
@@ -110,6 +111,7 @@ pub struct SmartCullingSnapshot {
 impl Default for SmartCullingSnapshot {
     fn default() -> Self {
         Self {
+            revision: super::snapshot_order::next_revision(),
             task_id: None,
             state: "idle".to_string(),
             root_path: None,

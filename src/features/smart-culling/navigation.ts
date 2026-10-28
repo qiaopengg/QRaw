@@ -1,6 +1,12 @@
 import type { LifecycleScreen, SmartCullingSnapshot, SmartCullingState } from './types';
 
-const ANALYSIS_STATES = new Set<SmartCullingState>(['indexing', 'rendering', 'analyzing', 'organizing', 'cancelling']);
+export const ANALYSIS_STATES = new Set<SmartCullingState>([
+  'indexing',
+  'rendering',
+  'analyzing',
+  'organizing',
+  'cancelling',
+]);
 
 export function initialScreenForSnapshot(snapshot: SmartCullingSnapshot): LifecycleScreen {
   if (snapshot.state === 'unsupported') return 'unsupported';

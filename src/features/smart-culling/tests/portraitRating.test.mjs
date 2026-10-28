@@ -149,6 +149,9 @@ test('unavailable eye and expression reasons are explained, and invalid confiden
   assert.ok(html.includes('侧脸或姿态使眼睛证据不足'));
   assert.ok(html.includes('没有可用的已验证模型'));
   assert.ok(!html.includes('NaN'));
+  value.faces[0].leftEye.reason = 'eye_face_presence_unreliable';
+  assert.ok((await render(value)).includes('未可靠确认当前人脸，眼态未知'));
+  assert.ok((await render(value, 'en')).includes('Face presence is unconfirmed; eye state is unknown'));
   value.faces[0].expressionState = 'natural';
   value.faces[0].expressionConfidence = Number.NaN;
   assert.ok(!(await render(value)).includes('NaN'));

@@ -100,10 +100,23 @@ fn supported_native_geometry_preserves_the_existing_rating() {
         assert_eq!(input.unavailable_reason(), None);
         for focus in [0.0, 300.0] {
             let mut item = candidate(vec![face(20.0, 40.0, "open", "outstanding")]);
+            // This positive fixture must satisfy the existing native crop floor.
+            item.faces[0].bbox[3] = 40.0;
             item.sharpness_metric = focus;
             item.faces[0].sharpness_metric = focus;
             let before = evaluate_mode("portrait", &item);
             attach_input(&mut item, &input);
+            assert!(
+                item.portrait_quality
+                    .as_ref()
+                    .unwrap()
+                    .clarity
+                    .as_ref()
+                    .unwrap()
+                    .faces[0]
+                    .unavailable_reason
+                    .is_none()
+            );
             let after = evaluate_mode("portrait", &item);
             assert_eq!(after.rating, before.rating);
             assert_eq!(after.requires_human_review, before.requires_human_review);

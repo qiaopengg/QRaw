@@ -10,6 +10,9 @@ mod clarity_replay;
 #[path = "portrait_clarity_input_scoring_tests.rs"]
 mod portrait_clarity_input_scoring;
 
+#[path = "portrait_subject_input_tests.rs"]
+mod portrait_subject_input;
+
 #[path = "portrait_rating_evidence_tests.rs"]
 mod portrait_rating_evidence;
 

@@ -3,6 +3,7 @@ mod api;
 #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
 mod calibration_model_assets;
 mod coordinator;
+mod coordinator_guard;
 mod coordinator_session;
 mod coordinator_support;
 pub(crate) mod domain;
@@ -34,6 +35,7 @@ mod runner;
 #[cfg(all(test, target_os = "macos"))]
 mod sampnet_gpu_test;
 mod scoring;
+mod snapshot_order;
 mod task_recovery;
 mod types;
 #[cfg(all(debug_assertions, target_os = "macos"))]
