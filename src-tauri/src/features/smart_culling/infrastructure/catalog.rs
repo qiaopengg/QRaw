@@ -157,9 +157,12 @@ fn scan_direct_asset_decisions(
         } else {
             AssetMemberKind::Other
         };
-        let capture_identity = matches!(kind, AssetMemberKind::Raw | AssetMemberKind::Jpeg)
-            .then(|| try_get_exif_creation_date(&path).map(|date| date.timestamp()))
-            .flatten();
+        // The host EXIF reader can quarantine malformed sidecars. Validate first
+        // so inspect_asset still sees the original protected/invalid metadata.
+        let capture_identity = (matches!(kind, AssetMemberKind::Raw | AssetMemberKind::Jpeg)
+            && read_sidecar_strict(&get_primary_sidecar_path(&path)).is_ok())
+        .then(|| try_get_exif_creation_date(&path).map(|date| date.timestamp()))
+        .flatten();
         candidates.push(AssetCandidate {
             path,
             kind,
@@ -451,6 +454,10 @@ mod tests {
             catalog.failures[0]
                 .reason
                 .starts_with("Invalid sidecar JSON")
+        );
+        assert_eq!(
+            fs::read(get_primary_sidecar_path(&image)).unwrap(),
+            b"not-json"
         );
     }
 

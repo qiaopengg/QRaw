@@ -72,12 +72,10 @@ export function useAndroidBackHandler() {
         });
         return;
       }
-      if (ui.negativeModalState.isOpen) {
-        ui.setUI((state: any) => ({ negativeModalState: { ...state.negativeModalState, isOpen: false } }));
-        return;
-      }
-      if (ui.denoiseModalState.isOpen) {
-        ui.setUI((state: any) => ({ denoiseModalState: { ...state.denoiseModalState, isOpen: false } }));
+      if (ui.cullingModalState.isOpen) {
+        ui.setUI({
+          cullingModalState: { isOpen: false, progress: null, suggestions: null, error: null, pathsToCull: [] },
+        });
         return;
       }
       if (ui.collageModalState.isOpen) {
@@ -85,9 +83,7 @@ export function useAndroidBackHandler() {
         return;
       }
 
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
-      );
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
     };
 
     return () => {

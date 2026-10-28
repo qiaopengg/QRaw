@@ -2,9 +2,11 @@ import { Loader2, LockKeyhole, LockOpen } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import Button from '../../components/ui/Button';
+import { useLibraryStore } from '../../store/useLibraryStore';
 import type { LibraryHeaderActionSlotProps } from '../contracts';
 import { useSmartCullingText } from './i18n';
 import { getSmartCullingImageMetadata } from './metadata';
+import { isSmartCullingSource } from './sourceEligibility';
 import { runSmartCullingCommand } from './useSmartCulling';
 
 export default function SmartCullingLockControl({
@@ -15,15 +17,18 @@ export default function SmartCullingLockControl({
 }: LibraryHeaderActionSlotProps) {
   const tx = useSmartCullingText();
   const [busy, setBusy] = useState(false);
+  const activeAlbumId = useLibraryStore((state) => state.activeAlbumId);
   const images = allImageList ?? imageList;
   const selection = useMemo(() => {
     const selected = new Set(selectedPaths);
     const assetKey = (image: (typeof images)[number]) => image.group_id || image.path;
     const selectedEntries = images.filter((image) => selected.has(image.path));
     const selectedAssetKeys = new Set(selectedEntries.map(assetKey));
-    const selectedImages = images.filter((image) => !image.is_virtual_copy && selectedAssetKeys.has(assetKey(image)));
+    const selectedImages = images.filter(
+      (image) => isSmartCullingSource(image, activeAlbumId) && selectedAssetKeys.has(assetKey(image)),
+    );
     const selectedAssets = [...selectedAssetKeys].map((key) =>
-      images.filter((image) => !image.is_virtual_copy && assetKey(image) === key),
+      images.filter((image) => isSmartCullingSource(image, activeAlbumId) && assetKey(image) === key),
     );
     const allLocked =
       selectedAssets.length > 0 &&
@@ -41,7 +46,7 @@ export default function SmartCullingLockControl({
       unresolvedVirtual: selectedEntries.some((image) => image.is_virtual_copy) && selectedImages.length === 0,
       state: allLocked ? ('locked' as const) : anyLocked ? ('mixed' as const) : ('unlocked' as const),
     };
-  }, [images, selectedPaths]);
+  }, [activeAlbumId, images, selectedPaths]);
 
   if (!selection.manageable) {
     if (!selection.unresolvedVirtual) return null;

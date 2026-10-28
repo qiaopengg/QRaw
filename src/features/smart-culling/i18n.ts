@@ -205,6 +205,7 @@ function reasonText(code: string, isChinese: boolean) {
 const zh = {
   ...portraitReviewZh,
   title: '智能选图',
+  localFolderRequired: '请打开本地文件夹以开始智能选图',
   setupTitle: '设置本次筛选',
   setupDescription: '仅分析当前文件夹中的照片，不进入子文件夹。确认前不写入星级或标签；图库读取照片时可能缓存 EXIF 元数据。',
   calibrationBuildTitle: '当前为校准与人工辅助版本',
@@ -499,6 +500,7 @@ const zh = {
 const en: Record<keyof typeof zh, string> = {
   ...portraitReviewEn,
   title: 'Smart Culling',
+  localFolderRequired: 'Open a local folder to start Smart Culling',
   setupTitle: 'Set up this cull',
   setupDescription:
     'Analyze photos directly in this folder without entering subfolders. Ratings and labels are not written before confirmation; Library may cache EXIF metadata when reading photos.',

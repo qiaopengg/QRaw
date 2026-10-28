@@ -1,5 +1,6 @@
 import { AlertTriangle, ArchiveX, CheckCircle2 } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
+import { useLibraryStore } from '../../store/useLibraryStore';
 import type { LibraryFeatureViewSlotProps } from '../contracts';
 import { AnalysisScreen, UnsupportedScreen } from './components/AnalysisScreens';
 import { Modal } from './components/LifecycleChrome';
@@ -8,6 +9,7 @@ import { SetupScreen } from './components/SetupScreen';
 import { WriteScreen } from './components/WriteScreen';
 import { useSmartCullingCommandErrorText } from './errorText';
 import { useSmartCullingText } from './i18n';
+import { canInspectSmartCullingFolder, isSmartCullingSource } from './sourceEligibility';
 import { runSmartCullingCommand, useSmartCullingStore } from './useSmartCulling';
 import { useSmartCullingEvents } from './useSmartCullingEvents';
 
@@ -23,6 +25,7 @@ export default function SmartCullingReviewPage({
   const tx = useSmartCullingText();
   const errorText = useSmartCullingCommandErrorText();
   const { snapshot, screen, abandonOpen, busy, error, setState } = useSmartCullingStore();
+  const activeAlbumId = useLibraryStore((state) => state.activeAlbumId);
   const sourceImages = allImageList ?? imageList;
   const ignoredVirtualCopies = sourceImages.filter((image) => image.is_virtual_copy).length;
   const images = useMemo(() => {
@@ -33,19 +36,19 @@ export default function SmartCullingReviewPage({
     );
     const displayByAsset = new Map<string, (typeof sourceImages)[number]>();
     sourceImages
-      .filter((image) => !image.is_virtual_copy && !skippedPaths.has(image.path))
+      .filter((image) => isSmartCullingSource(image, activeAlbumId) && !skippedPaths.has(image.path))
       .forEach((image) => {
         const key = image.group_id || image.path;
         const current = displayByAsset.get(key);
         if (!current || (current.is_raw && !image.is_raw)) displayByAsset.set(key, image);
       });
     return [...displayByAsset.values()];
-  }, [snapshot?.failures, sourceImages]);
+  }, [activeAlbumId, snapshot?.failures, sourceImages]);
   useEffect(() => {
-    if (!snapshot && currentFolderPath && !busy && !error) {
+    if (!snapshot && canInspectSmartCullingFolder(currentFolderPath, activeAlbumId) && !busy && !error) {
       void runSmartCullingCommand({ action: 'inspect', rootPath: currentFolderPath }).catch(() => undefined);
     }
-  }, [busy, currentFolderPath, error, snapshot]);
+  }, [activeAlbumId, busy, currentFolderPath, error, snapshot]);
   const abandon = async () => {
     try {
       await runSmartCullingCommand({ action: 'abandon' });
@@ -58,7 +61,16 @@ export default function SmartCullingReviewPage({
   if (!snapshot)
     return (
       <div className="sc-page sc-loading">
-        {tx('loading')}
+        {canInspectSmartCullingFolder(currentFolderPath, activeAlbumId) ? (
+          tx('loading')
+        ) : (
+          <>
+            <p>{tx('localFolderRequired')}</p>
+            <button className="sc-secondary" onClick={onBackToLibrary}>
+              {tx('back')}
+            </button>
+          </>
+        )}
         {error ? (
           <p className="sc-command-error" role="alert" title={error.detail}>
             {errorText(error)}

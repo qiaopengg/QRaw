@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
@@ -5,8 +6,11 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use super::*;
-use crate::exif_processing::load_sidecar;
+use crate::exif_processing::{get_primary_sidecar_path, load_sidecar, update_sidecar};
 use crate::features::smart_culling::domain::{ColorLabel, ConfirmedResult, ResultSource};
+use crate::features::smart_culling::infrastructure::locking::set_asset_lock_state;
+use crate::features::smart_culling::infrastructure::manual_reconciliation::reconcile_manual_ownership;
+use crate::image_processing::ImageFlag;
 
 fn write_metadata(path: &Path, metadata: &ImageMetadata) {
     let file = File::create(path).unwrap();
@@ -36,11 +40,18 @@ fn synchronizes_the_result_to_raw_and_jpeg_sidecars() {
     write_metadata(
         &raw_sidecar,
         &ImageMetadata {
+            flag: Some(ImageFlag::Pick),
             adjustments: json!({ "exposure": 0.5 }),
             ..ImageMetadata::default()
         },
     );
-    write_metadata(&jpeg_sidecar, &ImageMetadata::default());
+    write_metadata(
+        &jpeg_sidecar,
+        &ImageMetadata {
+            flag: Some(ImageFlag::Reject),
+            ..ImageMetadata::default()
+        },
+    );
     let raw_baseline = capture_sidecar_baseline(&raw_sidecar).unwrap();
     let jpeg_baseline = capture_sidecar_baseline(&jpeg_sidecar).unwrap();
 
@@ -55,9 +66,13 @@ fn synchronizes_the_result_to_raw_and_jpeg_sidecars() {
     }]);
 
     assert_eq!(report.succeeded, vec![raw_sidecar.clone()]);
-    for sidecar in [&raw_sidecar, &jpeg_sidecar] {
+    for (sidecar, flag) in [
+        (&raw_sidecar, ImageFlag::Pick),
+        (&jpeg_sidecar, ImageFlag::Reject),
+    ] {
         let metadata = load_sidecar(sidecar);
         assert_eq!(metadata.rating, 4);
+        assert_eq!(metadata.flag, Some(flag));
         assert_eq!(
             metadata.feature_data.unwrap()["smartCullingV2"]["locked"],
             false
@@ -67,6 +82,106 @@ fn synchronizes_the_result_to_raw_and_jpeg_sidecars() {
         load_sidecar(&raw_sidecar).adjustments,
         json!({ "exposure": 0.5 })
     );
+}
+
+#[test]
+fn preserves_upstream_flags_during_manual_sync_and_lock_changes() {
+    let directory = tempdir().unwrap();
+    let raw = directory.path().join("IMG_0003.dng");
+    let jpeg = directory.path().join("IMG_0003.jpg");
+    for (image, flag, rating) in [(&raw, ImageFlag::Pick, 4), (&jpeg, ImageFlag::Reject, 5)] {
+        File::create(image).unwrap();
+        write_metadata(
+            &get_primary_sidecar_path(image),
+            &ImageMetadata {
+                rating,
+                flag: Some(flag),
+                exif: Some(HashMap::from([(
+                    "DateTimeOriginal".to_string(),
+                    "2026-08-04 12:00:00".to_string(),
+                )])),
+                feature_data: Some(json!({
+                    "smartCullingV2": {
+                        "source": "ai",
+                        "rating": 4,
+                        "colorLabel": null,
+                        "locked": false
+                    }
+                })),
+                ..ImageMetadata::default()
+            },
+        );
+    }
+
+    let report = reconcile_manual_ownership(vec![jpeg.clone()]);
+    assert!(report.failed.is_empty(), "{report:?}");
+    assert_eq!(report.succeeded.len(), 1);
+    for (image, flag) in [(&raw, ImageFlag::Pick), (&jpeg, ImageFlag::Reject)] {
+        let metadata = load_sidecar(&get_primary_sidecar_path(image));
+        assert_eq!(metadata.rating, 5);
+        assert_eq!(metadata.flag, Some(flag));
+        assert_eq!(
+            metadata.feature_data.unwrap()["smartCullingV2"]["source"],
+            "manual"
+        );
+    }
+
+    for locked in [false, true] {
+        let report = set_asset_lock_state(vec![raw.clone(), jpeg.clone()], locked);
+        assert!(report.failed.is_empty(), "{report:?}");
+        assert_eq!(report.succeeded.len(), 1);
+        for (image, flag) in [(&raw, ImageFlag::Pick), (&jpeg, ImageFlag::Reject)] {
+            let metadata = load_sidecar(&get_primary_sidecar_path(image));
+            assert_eq!(metadata.rating, 5);
+            assert_eq!(metadata.flag, Some(flag));
+            assert_eq!(
+                metadata.feature_data.unwrap()["smartCullingV2"]["locked"],
+                locked
+            );
+        }
+    }
+}
+
+#[test]
+fn upstream_sidecar_updates_preserve_feature_data_after_clearing_the_last_flag() {
+    let directory = tempdir().unwrap();
+    let image = directory.path().join("IMG_0004.jpg");
+    File::create(&image).unwrap();
+    let sidecar = get_primary_sidecar_path(&image);
+    let feature_data = json!({
+        "smartCullingV2": {
+            "source": "ai",
+            "rating": 0,
+            "colorLabel": null,
+            "locked": false
+        },
+        "otherFeature": { "enabled": true }
+    });
+    write_metadata(
+        &sidecar,
+        &ImageMetadata {
+            flag: Some(ImageFlag::Pick),
+            feature_data: Some(feature_data.clone()),
+            ..ImageMetadata::default()
+        },
+    );
+
+    update_sidecar(&sidecar, &image, |metadata| {
+        metadata.flag = Some(ImageFlag::Reject);
+    })
+    .unwrap();
+    let metadata = load_sidecar(&sidecar);
+    assert_eq!(metadata.flag, Some(ImageFlag::Reject));
+    assert_eq!(metadata.feature_data, Some(feature_data.clone()));
+
+    update_sidecar(&sidecar, &image, |metadata| metadata.flag = None).unwrap();
+    assert!(
+        sidecar.exists(),
+        "extension data must prevent default-sidecar deletion"
+    );
+    let metadata = load_sidecar(&sidecar);
+    assert_eq!(metadata.flag, None);
+    assert_eq!(metadata.feature_data, Some(feature_data));
 }
 
 #[test]

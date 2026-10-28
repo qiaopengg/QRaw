@@ -1,4 +1,5 @@
 use super::*;
+use crate::image_loader::load_and_composite;
 use image::{Rgb, RgbImage};
 use serde_json::json;
 use std::fs;
@@ -95,4 +96,29 @@ fn snapshot_decode_matches_the_host_pixels_and_reports_invalid_bytes() {
         decode_portrait_snapshot(b"invalid", path.to_str().unwrap(), &json!({}), &settings)
             .is_err()
     );
+}
+
+#[test]
+fn snapshot_decode_retains_host_preparation_for_edited_pixels() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("negative.jpg");
+    let bytes = tagged_jpeg();
+    fs::write(&path, &bytes).unwrap();
+    let settings = AppSettings::default();
+    let edits = json!({"negativeConversionEnabled": true, "negativeExposure": 0.5});
+    let expected = load_and_composite(
+        &bytes,
+        path.to_str().unwrap(),
+        &edits,
+        false,
+        &settings,
+        None,
+    )
+    .unwrap();
+    let observed =
+        decode_portrait_snapshot(&bytes, path.to_str().unwrap(), &edits, &settings).unwrap();
+    let unedited =
+        decode_portrait_snapshot(&bytes, path.to_str().unwrap(), &json!({}), &settings).unwrap();
+    assert_eq!(observed, expected);
+    assert_ne!(observed, unedited);
 }

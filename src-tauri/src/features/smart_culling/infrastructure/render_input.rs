@@ -10,6 +10,7 @@ use super::{ClarityInput, ClarityInputUnavailable};
 use crate::AppState;
 use crate::adjustment_utils::{apply_all_transformations, hydrate_adjustments};
 use crate::app_settings::load_settings;
+use crate::as_shot::AsShot;
 use crate::cache_utils::calculate_full_job_hash;
 use crate::exif_processing::load_sidecar;
 use crate::file_management::{parse_virtual_path, read_file_mapped};
@@ -18,7 +19,7 @@ use crate::gpu_processing::{
     RenderRequest, get_or_init_gpu_context, process_and_get_dynamic_image,
 };
 use crate::image_loader::load_and_composite;
-use crate::image_processing::{get_all_adjustments_from_json, resolve_tonemapper_override};
+use crate::image_processing::{get_all_adjustments_from_json, resolve_render_options};
 use crate::lut_processing::get_or_load_lut;
 use crate::mask_generation::{
     MaskDefinition, generate_mask_bitmap, resolve_warped_image_for_masks,
@@ -80,6 +81,7 @@ pub(crate) fn render_analysis_input(
     let context = get_or_init_gpu_context(state, app_handle).map_err(RenderInputError::Gpu)?;
     let (source_path, sidecar_path) = parse_virtual_path(path);
     let source_path_string = source_path.to_string_lossy().to_string();
+    let is_raw = is_raw_file(&source_path_string);
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
 
     let mut adjustments = load_sidecar(&sidecar_path).adjustments;
@@ -101,13 +103,18 @@ pub(crate) fn render_analysis_input(
             )?
         };
         let clarity = if capture_clarity {
-            ClarityInput::from_bytes(bytes, is_raw_file(&source_path_string), &adjustments)
+            ClarityInput::from_bytes(bytes, is_raw, &adjustments)
         } else {
             ClarityInput::unavailable(ClarityInputUnavailable::NotRequested)
         };
-        Ok::<_, anyhow::Error>((base, clarity))
+        let as_shot = if is_raw {
+            crate::raw_processing::read_as_shot(bytes).unwrap_or_else(AsShot::reference)
+        } else {
+            AsShot::reference()
+        };
+        Ok::<_, anyhow::Error>((base, clarity, as_shot))
     };
-    let (base_image, mut clarity) = match read_file_mapped(&source_path) {
+    let (base_image, mut clarity, as_shot) = match read_file_mapped(&source_path) {
         Ok(mapped) => {
             if capture_clarity {
                 // Own the snapshot: an mmap alone can change between the two decoders.
@@ -149,9 +156,8 @@ pub(crate) fn render_analysis_input(
         })
         .collect::<Vec<_>>();
 
-    let is_raw = is_raw_file(&source_path_string);
-    let tonemapper = resolve_tonemapper_override(&settings, is_raw);
-    let all_adjustments = get_all_adjustments_from_json(&adjustments, is_raw, tonemapper);
+    let render = resolve_render_options(&settings, is_raw);
+    let all_adjustments = get_all_adjustments_from_json(&adjustments, is_raw, as_shot, render);
     let lut = match adjustments.get("lutPath").and_then(|value| value.as_str()) {
         Some(path) if !path.is_empty() => {
             Some(get_or_load_lut(state, path).map_err(RenderInputError::Lut)?)
@@ -168,6 +174,7 @@ pub(crate) fn render_analysis_input(
         RenderRequest {
             adjustments: all_adjustments,
             mask_bitmaps: &mask_bitmaps,
+            mask_cache_key: None,
             lut,
             roi: None,
         },

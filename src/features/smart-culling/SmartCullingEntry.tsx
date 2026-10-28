@@ -8,6 +8,7 @@ import type { LibraryHeaderActionSlotProps } from '../contracts';
 import { SMART_CULLING_VIEW } from './constants';
 import { useSmartCullingText } from './i18n';
 import { needsManualOwnershipReconciliation } from './metadata';
+import { canInspectSmartCullingFolder, isSmartCullingSource } from './sourceEligibility';
 import { SmartCullingReadyNotice } from './components/SmartCullingReadyNotice';
 import { runSmartCullingCommand, useSmartCullingStore } from './useSmartCulling';
 import { useSmartCullingEvents } from './useSmartCullingEvents';
@@ -23,10 +24,13 @@ export default function SmartCullingEntry({
   const { snapshot, setState: setSmartCullingState } = useSmartCullingStore();
   const setUI = useUIStore((state) => state.setUI);
   const imageRatings = useLibraryStore((state) => state.imageRatings);
+  const activeAlbumId = useLibraryStore((state) => state.activeAlbumId);
   const reconciled = useRef('');
   const running =
     snapshot && ['indexing', 'rendering', 'analyzing', 'organizing', 'cancelling'].includes(snapshot.state);
   const pending = snapshot?.state === 'readyForReview';
+  const canInspect = canInspectSmartCullingFolder(currentFolderPath, activeAlbumId);
+  const canOpen = canInspect || pending || running || snapshot?.state === 'completed';
 
   useEffect(() => {
     void runSmartCullingCommand({ action: 'status' }).catch(() => undefined);
@@ -35,7 +39,8 @@ export default function SmartCullingEntry({
     const stale = (allImageList ?? imageList)
       .filter(
         (image) =>
-          !image.is_virtual_copy && needsManualOwnershipReconciliation(image, imageRatings[image.path] ?? image.rating),
+          isSmartCullingSource(image, activeAlbumId) &&
+          needsManualOwnershipReconciliation(image, imageRatings[image.path] ?? image.rating),
       )
       .map((image) => image.path);
     const key = stale.join('\n');
@@ -74,7 +79,7 @@ export default function SmartCullingEntry({
     return () => {
       cancelled = true;
     };
-  }, [allImageList, imageList, imageRatings, onLibraryRefresh, setSmartCullingState, tx]);
+  }, [activeAlbumId, allImageList, imageList, imageRatings, onLibraryRefresh, setSmartCullingState, tx]);
 
   const open = async () => {
     if (pending) {
@@ -86,7 +91,7 @@ export default function SmartCullingEntry({
       setUI({ activeView: SMART_CULLING_VIEW });
       return;
     }
-    if (!currentFolderPath) return;
+    if (!canInspectSmartCullingFolder(currentFolderPath, activeAlbumId)) return;
     const inspection = runSmartCullingCommand({ action: 'inspect', rootPath: currentFolderPath });
     setUI({ activeView: SMART_CULLING_VIEW });
     await inspection.catch(() => undefined);
@@ -97,7 +102,8 @@ export default function SmartCullingEntry({
       <Button
         className="sc-entry-button"
         onClick={() => void open()}
-        data-tooltip={tx('title')}
+        disabled={!canOpen}
+        data-tooltip={tx(canOpen ? 'title' : 'localFolderRequired')}
         aria-label={tx('title')}
       >
         {running ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}

@@ -7,7 +7,7 @@ use image::DynamicImage;
 use serde_json::Value;
 
 use crate::app_settings::AppSettings;
-use crate::image_loader::load_and_composite;
+use crate::image_loader::{load_base_image_from_bytes, prepare_base_image_cow};
 
 pub(super) fn decode_portrait_snapshot(
     bytes: &[u8],
@@ -27,12 +27,11 @@ pub(super) fn decode_portrait_snapshot(
         .join("source")
         .with_extension(Path::new(source_path).extension().unwrap_or_default());
     fs::write(&snapshot, bytes).context("Could not write the portrait input snapshot")?;
-    let decoded = load_and_composite(
+    let decoded = load_base_image_from_bytes(
         bytes,
         snapshot
             .to_str()
             .context("Portrait snapshot path is not UTF-8")?,
-        adjustments,
         false,
         settings,
         None,
@@ -40,7 +39,10 @@ pub(super) fn decode_portrait_snapshot(
     directory
         .close()
         .context("Could not remove the portrait input snapshot")?;
-    decoded
+    let base = decoded?;
+    // Cached effects are keyed by the real source path. Only decoding needs
+    // isolation; preparing the already decoded pixels does not write EXIF.
+    Ok(prepare_base_image_cow(&base, source_path, adjustments)?.into_owned())
 }
 
 #[cfg(test)]

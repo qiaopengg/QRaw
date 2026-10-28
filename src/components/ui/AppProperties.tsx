@@ -1,6 +1,8 @@
 import { ExportPreset } from './ExportImportProperties';
 import { Adjustments, CopyPasteSettings } from '../../utils/adjustments';
 import { ToolType } from '../panel/right/Masks';
+import type { WhiteBalance, WhiteBalanceMode } from '../../utils/whiteBalance';
+import type { ImmichSettings } from '../immich/immichApi';
 
 export const GLOBAL_KEYS = [
   ' ',
@@ -34,35 +36,48 @@ export enum Invokes {
   ApplyAdjustments = 'apply_adjustments',
   ApplyAdjustmentsToPaths = 'apply_adjustments_to_paths',
   ApplyAutoAdjustmentsToPaths = 'apply_auto_adjustments_to_paths',
-  ApplyDenoising = 'apply_denoising',
+  ApplyAutoStraightenToPaths = 'apply_auto_straighten_to_paths',
   CalculateAutoAdjustments = 'calculate_auto_adjustments',
+  SampleWhiteBalance = 'sample_white_balance',
+  CalculateAutoStraighten = 'calculate_auto_straighten',
+  CancelAiTask = 'cancel_ai_task',
   CancelExport = 'cancel_export',
   CheckAIConnectorStatus = 'check_ai_connector_status',
   ClearAllSidecars = 'clear_all_sidecars',
   ClearAiTags = 'clear_ai_tags',
   ClearAllTags = 'clear_all_tags',
+  ClearAiDenoiseCache = 'clear_ai_denoise_cache',
   ClearThumbnailCache = 'clear_thumbnail_cache',
   CopyFiles = 'copy_files',
   CreateFolder = 'create_folder',
   CreateVirtualCopy = 'create_virtual_copy',
+  CullImages = 'cull_images',
   DeleteFolder = 'delete_folder',
+  DiscardAiJobs = 'discard_ai_jobs',
   DuplicateFile = 'duplicate_file',
   EstimateExportSizes = 'estimate_export_sizes',
   ExportImages = 'export_images',
   FrontendLog = 'frontend_log',
   GenerateAiForegroundMask = 'generate_ai_foreground_mask',
   GenerateAiSkyMask = 'generate_ai_sky_mask',
+  GenerateAiTextMask = 'generate_ai_text_mask',
+  GenerateAiFaceMask = 'generate_ai_face_mask',
   GenerateAiSubjectMask = 'generate_ai_subject_mask',
-  GenerateFullscreenPreview = 'generate_fullscreen_preview',
   GeneratePreviewForPath = 'generate_preview_for_path',
   GenerateMaskOverlay = 'generate_mask_overlay',
   GeneratePresetPreview = 'generate_preset_preview',
-  GenerateThumbnailsProgressive = 'generate_thumbnails_progressive',
   GenerateUncroppedPreview = 'generate_uncropped_preview',
+  GetStorageUsage = 'get_storage_usage',
+  ClearAiMapsCache = 'clear_ai_maps_cache',
+  ClearAiModels = 'clear_ai_models',
+  ClearImmichCache = 'clear_immich_cache',
+  ClearMetadataCache = 'clear_metadata_cache',
+  GetAiJobsStatus = 'get_ai_jobs_status',
   GetFolderTree = 'get_folder_tree',
   GetFolderChildren = 'get_folder_children',
   GetLogFilePath = 'get_log_file_path',
   GetOrCreateInternalLibraryRoot = 'get_or_create_internal_library_root',
+  GetPendingAiPaths = 'get_pending_ai_paths',
   GetPinnedFolderTrees = 'get_pinned_folder_trees',
   GetSupportedFileTypes = 'get_supported_file_types',
   HandleExportPresetsToFile = 'handle_export_presets_to_file',
@@ -70,7 +85,6 @@ export enum Invokes {
   HandleImportPresetsFromFiles = 'handle_import_presets_from_files',
   HandleImportLegacyPresetsFromFile = 'handle_import_legacy_presets_from_file',
   ImportFiles = 'import_files',
-  InvokeGenerativeReplace = 'invoke_generative_replace',
   InvokeGenerativeReplaseWithMaskDef = 'invoke_generative_replace_with_mask_def',
   IsTetheringSupported = 'is_tethering_supported',
   ListImagesInDir = 'list_images_in_dir',
@@ -84,24 +98,30 @@ export enum Invokes {
   RemoveTagForPaths = 'remove_tag_for_paths',
   RenameFiles = 'rename_files',
   RenameFolder = 'rename_folder',
+  PauseAiJobs = 'pause_ai_jobs',
+  QueueAiJobs = 'queue_ai_jobs',
   ResetAdjustmentsForPaths = 'reset_adjustments_for_paths',
+  ResumeAiJobs = 'resume_ai_jobs',
+  RetryFailedAiJobs = 'retry_failed_ai_jobs',
   SaveMetadataAndUpdateThumbnail = 'save_metadata_and_update_thumbnail',
   SaveCollage = 'save_collage',
-  SaveDenoisedImage = 'save_denoised_image',
   SavePanorama = 'save_panorama',
   SaveHdr = 'save_hdr',
   SavePresets = 'save_presets',
   SaveSettings = 'save_settings',
   SetColorLabelForPaths = 'set_color_label_for_paths',
   SetRatingForPaths = 'set_rating_for_paths',
+  SetFlagForPaths = 'set_flag_for_paths',
   ShowInFinder = 'show_in_finder',
   StartBackgroundIndexing = 'start_background_indexing',
   StitchPanorama = 'stitch_panorama',
   StitchFocusStack = 'stitch_focus_stack',
+  SubscribeAnalytics = 'subscribe_analytics',
   SaveFocusStack = 'save_focus_stack',
   MergeHdr = 'merge_hdr',
   TestAIConnectorConnection = 'test_ai_connector_connection',
   UpdateWgpuTransform = 'update_wgpu_transform',
+  ReleaseOriginalPreview = 'release_original_preview',
   UpdateExifFields = 'update_exif_fields',
   FetchCommunityPresets = 'fetch_community_presets',
   GenerateAllCommunityPreviews = 'generate_all_community_previews',
@@ -150,7 +170,7 @@ export enum SortDirection {
   Descending = 'desc',
 }
 
-export type FolderSortKey = 'name' | 'modified' | 'created' | 'imageCount';
+type FolderSortKey = 'name' | 'modified' | 'created' | 'imageCount';
 
 export interface FolderTreeSort {
   key: FolderSortKey;
@@ -171,6 +191,7 @@ export enum Theme {
 export enum ThumbnailAspectRatio {
   Cover = 'cover',
   Contain = 'contain',
+  Justified = 'justified',
 }
 
 export interface WorkspaceState {
@@ -183,19 +204,34 @@ export interface WorkspaceState {
   panelSwitcherPlacement: Record<PanelRegion, 'left' | 'right' | 'top' | 'bottom'>;
 }
 
+export interface CustomAspectRatio {
+  width: number;
+  height: number;
+}
+
 export type GroupPreference = 'jpeg' | 'raw';
 export type GroupingMode = 'off' | GroupPreference;
+export type CompareView = 'off' | 'vertical' | 'horizontal' | 'sideBySide';
+export type CompareMode = 'toggle' | Exclude<CompareView, 'off'>;
 
 export interface AppSettings {
+  aiCacheLimitGb?: number;
+  aiMapsCacheLimitGb?: number;
+  thumbnailCacheLimitGb?: number;
   aiConnectorAddress?: string;
+  aiGpuAcceleration?: boolean;
   aiProvider?: string;
   decorations?: any;
   editorPreviewResolution?: number;
+  smallThumbnailResolution?: number;
+  mediumThumbnailResolution?: number;
   enableZoomHifi?: boolean;
   useFullDpiRendering?: boolean;
   highResZoomMultiplier?: number;
   enableLivePreviews?: boolean;
   livePreviewQuality?: string;
+  exportWorkerThreads?: number;
+  exportMemoryLimit?: number;
   enableAiTagging?: boolean;
   aiTagCount?: number;
   customAiTags?: string[];
@@ -210,12 +246,13 @@ export interface AppSettings {
   thumbnailSize?: ThumbnailSize;
   thumbnailAspectRatio?: ThumbnailAspectRatio;
   uiVisibility?: UiVisibility;
-  adjustmentVisibility?: { [key: string]: boolean };
   rawHighlightCompression?: number;
   processingBackend?: string;
   linuxGpuOptimization?: boolean;
   exportPresets?: ExportPreset[];
   myLenses?: any;
+  customAspectRatios?: CustomAspectRatio[];
+  adjustmentLayout?: AdjustmentLayout;
   enableFolderImageCounts?: boolean;
   displayEditIcon?: boolean;
   linearRawMode?: string;
@@ -225,14 +262,22 @@ export interface AppSettings {
   waveformHeight?: number;
   activeWaveformChannel?: string;
   useWgpuRenderer?: boolean;
+  editorNeutralGreyBg?: boolean;
   canvasInputMode?: 'mouse' | 'trackpad';
+  compareMode?: CompareMode;
+  whiteBalanceMode?: WhiteBalanceMode;
   zoomSpeedMultiplier?: number;
+  zoomPhotoToPixelClick?: boolean;
   keybinds?: { [action: string]: string[] };
+  enableBaselineExposure?: boolean;
+  baselineExposure?: number;
+  compensateHighlightPreservation?: boolean;
   tonemapperOverrideEnabled?: boolean;
   defaultRawTonemapper?: string;
   defaultNonRawTonemapper?: string;
   copyPasteSettings?: CopyPasteSettings;
   enableFocusMode?: boolean;
+  enableToolFocusMode?: boolean;
   openTreeSections?: string[];
   folderIcons?: Record<string, string>;
   exifOverlay?: ExifOverlay;
@@ -247,6 +292,7 @@ export interface AppSettings {
   groupPreferredType?: GroupPreference; // legacy
   alwaysDecodeRawThumbnails?: boolean;
   workspace?: WorkspaceState;
+  immich?: ImmichSettings;
 }
 
 export interface BrushSettings {
@@ -268,12 +314,53 @@ export const EditedStatus = {
 
 export type EditedStatus = (typeof EditedStatus)[keyof typeof EditedStatus];
 
+export const ImageFlag = {
+  Pick: 'pick',
+  Reject: 'reject',
+} as const;
+
+export type ImageFlag = (typeof ImageFlag)[keyof typeof ImageFlag];
+
+export const FlagStatus = {
+  All: 'all',
+  Picked: 'picked',
+  ExcludeRejected: 'excludeRejected',
+  Rejected: 'rejected',
+} as const;
+
+export type FlagStatus = (typeof FlagStatus)[keyof typeof FlagStatus];
+
+export type RatingOperator = 'gte' | 'eq' | 'lte';
+
+export const RATING_OPERATORS = {
+  lte: {
+    symbol: '≤',
+    next: 'eq',
+    labelKey: 'library.header.viewOptions.ratingOperator.lte',
+    suffixKey: 'library.filters.rating.andDownSuffix',
+  },
+  eq: {
+    symbol: '=',
+    next: 'gte',
+    labelKey: 'library.header.viewOptions.ratingOperator.eq',
+    suffixKey: 'library.filters.rating.onlySuffix',
+  },
+  gte: {
+    symbol: '≥',
+    next: 'lte',
+    labelKey: 'library.header.viewOptions.ratingOperator.gte',
+    suffixKey: 'library.filters.rating.andUpSuffix',
+  },
+} as const;
+
 export interface FilterCriteria {
   colors: Array<string>;
   featureFilters?: Record<string, string[]>;
   rating: number;
+  ratingOperator?: RatingOperator;
   rawStatus: RawStatus;
   editedStatus?: EditedStatus;
+  flagStatus?: FlagStatus;
 }
 
 export interface Folder {
@@ -288,6 +375,7 @@ export interface ImageFile {
   modified: number;
   path: string;
   rating: number;
+  flag: ImageFlag | null;
   tags: Array<string> | null;
   featureData?: Record<string, unknown>;
   exif: { [key: string]: string } | null;
@@ -295,6 +383,7 @@ export interface ImageFile {
   is_cloud_placeholder: boolean;
   is_raw: boolean;
   group_id: string | null;
+  needs_ai: boolean;
 }
 
 export interface Option {
@@ -331,6 +420,7 @@ export interface Progress {
 }
 
 export interface SelectedImage {
+  asShotWhiteBalance?: WhiteBalance;
   exif: any;
   group_id?: string | null;
   height: number;
@@ -338,7 +428,6 @@ export interface SelectedImage {
   isReady: boolean;
   metadata?: any;
   original_base64?: string;
-  originalUrl: string | null;
   path: string;
   thumbnailUrl: string;
   width: number;
@@ -377,18 +466,61 @@ export interface UiVisibility {
   filmstrip: boolean;
   leftPanel: boolean;
   rightPanel: boolean;
+  quickFilter?: boolean;
+}
+
+export interface CollapsibleSectionsState {
+  basic: boolean;
+  color: boolean;
+  curves: boolean;
+  details: boolean;
+  effects: boolean;
+}
+
+export interface AdjustmentLayout {
+  collapsedTools?: string[];
+  hiddenSections?: string[];
+  hiddenTools?: string[];
+  openSections?: Partial<CollapsibleSectionsState>;
+  sectionOrder?: string[];
+  toolOrder?: Record<string, string[]>;
 }
 
 export interface WaveformData {
-  blue: string;
-  green: string;
   height: number;
-  luma: string;
-  red: string;
-  rgb: string;
-  parade: string;
-  vectorscope: string;
+  luma: ImageBitmap | null;
+  rgb: ImageBitmap | null;
+  parade: ImageBitmap | null;
+  vectorscope: ImageBitmap | null;
   width: number;
+}
+
+export interface CullingSettings {
+  similarityThreshold: number;
+  blurThreshold: number;
+  groupSimilar: boolean;
+  filterBlurry: boolean;
+}
+
+interface ImageAnalysisResult {
+  path: string;
+  qualityScore: number;
+  sharpnessMetric: number;
+  centerFocusMetric: number;
+  exposureMetric: number;
+  width: number;
+  height: number;
+}
+
+interface CullGroup {
+  representative: ImageAnalysisResult;
+  duplicates: ImageAnalysisResult[];
+}
+
+export interface CullingSuggestions {
+  similarGroups: CullGroup[];
+  blurryImages: ImageAnalysisResult[];
+  failedPaths: string[];
 }
 
 export interface KeybindHandler {
